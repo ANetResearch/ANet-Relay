@@ -1,0 +1,166 @@
+<?xml version="1.0"?>
+<robot name="iris">
+
+  <!-- Base Link -->
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="1.5"/>
+      <inertia ixx="0.029125" ixy="0" ixz="0" iyy="0.029125" iyz="0" izz="0.055225"/>
+    </inertial>
+    
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="file:///home/lcx/PX4-Autopilot/Tools/simulation/gazebo-classic/sitl_gazebo-classic/models/iris/meshes/iris.stl" scale="1 1 1"/>
+      </geometry>
+      <material name="dark_grey">
+        <color rgba="0.3 0.3 0.3 1.0"/>
+      </material>
+    </visual>
+    
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.47 0.47 0.11"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- IMU Link -->
+  <link name="imu_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.015"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+    
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.02 0.02 0.02"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0.0 0.0 1.0 0.5"/>
+      </material>
+    </visual>
+  </link>
+
+  <!-- Rotor 0 -->
+  <link name="rotor_0">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="0.000000975" ixy="0" ixz="0" iyy="0.000273104" iyz="0" izz="0.000274004"/>
+    </inertial>
+    
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="file:///home/lcx/PX4-Autopilot/Tools/simulation/gazebo-classic/sitl_gazebo-classic/models/iris/meshes/iris_prop_ccw.dae" scale="1 1 1"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0.0 0.0 1.0 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <!-- Rotor 1 -->
+  <link name="rotor_1">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="0.000000975" ixy="0" ixz="0" iyy="0.000273104" iyz="0" izz="0.000274004"/>
+    </inertial>
+    
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="file:///home/lcx/PX4-Autopilot/Tools/simulation/gazebo-classic/sitl_gazebo-classic/models/iris/meshes/iris_prop_ccw.dae" scale="1 1 1"/>
+      </geometry>
+      <material name="dark_grey">
+        <color rgba="0.3 0.3 0.3 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <!-- Rotor 2 -->
+  <link name="rotor_2">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="0.000000975" ixy="0" ixz="0" iyy="0.000273104" iyz="0" izz="0.000274004"/>
+    </inertial>
+    
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="file:///home/lcx/PX4-Autopilot/Tools/simulation/gazebo-classic/sitl_gazebo-classic/models/iris/meshes/iris_prop_cw.dae" scale="1 1 1"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0.0 0.0 1.0 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <!-- Rotor 3 -->
+  <link name="rotor_3">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="0.000000975" ixy="0" ixz="0" iyy="0.000273104" iyz="0" izz="0.000274004"/>
+    </inertial>
+    
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="file:///home/lcx/PX4-Autopilot/Tools/simulation/gazebo-classic/sitl_gazebo-classic/models/iris/meshes/iris_prop_cw.dae" scale="1 1 1"/>
+      </geometry>
+      <material name="dark_grey">
+        <color rgba="0.3 0.3 0.3 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <!-- Joints -->
+
+  <!-- IMU Joint -->
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <origin xyz="0 0 0.02" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Rotor 0 Joint -->
+  <joint name="rotor_0_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="rotor_0"/>
+    <origin xyz="0.13 -0.22 0.023" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <!-- Rotor 1 Joint -->
+  <joint name="rotor_1_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="rotor_1"/>
+    <origin xyz="-0.13 0.2 0.023" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <!-- Rotor 2 Joint -->
+  <joint name="rotor_2_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="rotor_2"/>
+    <origin xyz="0.13 0.22 0.023" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <!-- Rotor 3 Joint -->
+  <joint name="rotor_3_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="rotor_3"/>
+    <origin xyz="-0.13 -0.2 0.023" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+</robot>

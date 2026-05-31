@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c ' *)",
+      "Bash(xxd -l 32 \"/home/lcx/drone_ws/src/drone_ui/scripts/New Drone.png\")"
+    ]
+  }
+}

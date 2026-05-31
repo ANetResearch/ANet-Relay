@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m py_compile /home/lcx/drone_ws/src/drone_ui/scripts/px4_backend.py)",
+      "Bash(python3 -m py_compile /home/lcx/drone_ws/src/drone_ui/scripts/ui/main_window.py)",
+      "Bash(python3 -m py_compile /home/lcx/drone_ws/src/drone_ui/scripts/ui/panels.py)",
+      "Bash(find /home/lcx/drone_ws/install/yydrone_localization -type f 2>/dev/null | sort)",
+      "Read(//home/lcx/drone_ws/install/yydrone_localization/**)",
+      "Bash(find /home/lcx/drone_ws/install/fast_lio -type f 2>/dev/null | sort)",
+      "Read(//home/lcx/drone_ws/install/fast_lio/**)",
+      "Bash(find /home/lcx/drone_ws/install -type f -name \"*.yaml\" 2>/dev/null | grep -iE \"\\(mid360|fastlio|livox\\)\" | sort)",
+      "Read(//home/lcx/drone_ws/install/**)"
+    ]
+  }
+}

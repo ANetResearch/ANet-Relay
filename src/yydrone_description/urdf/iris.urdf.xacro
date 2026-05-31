@@ -1,0 +1,194 @@
+<?xml version="1.0"?>
+<robot name="iris" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <!-- 基本参数 -->
+  <xacro:property name="M_PI" value="3.1415926535897931" />
+  <xacro:property name="base_mass" value="1.5" />
+  
+  <!-- 基本链接 -->
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${base_mass}"/>
+      <inertia ixx="0.029125" ixy="0" ixz="0" iyy="0.029125" iyz="0" izz="0.055225"/>
+    </inertial>
+    
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://yydrone_description/meshes/iris.stl" scale="1 1 1"/>
+      </geometry>
+      <material name="dark_grey">
+        <color rgba="0.3 0.3 0.3 1"/>
+      </material>
+    </visual>
+    
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.47 0.47 0.11"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- 下视相机 -->
+  <link name="downward_camera_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.01"/>
+      <inertia ixx="0.000001" ixy="0" ixz="0" iyy="0.000001" iyz="0" izz="0.000001"/>
+    </inertial>
+    
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.01" radius="0.01"/>
+      </geometry>
+      <material name="red">
+        <color rgba="1 0 0 1"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="downward_camera_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="downward_camera_link"/>
+    <origin xyz="0 0 -0.04" rpy="0 ${M_PI} 0"/>
+  </joint>
+
+  <!-- RealSense相机 - 简化表示 -->
+  <link name="realsense_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.1"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+    
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.05 0.03"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.1 0.1 0.1 1"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="realsense_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="realsense_link"/>
+    <origin xyz="0.05 0 0.05" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Mid360雷达 -->
+  <link name="livox_frame">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+    
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://yydrone_description/meshes/mid360.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="silver">
+        <color rgba="0.8 0.8 0.8 1"/>
+        <specular rgba="0.5 0.5 0.5 1"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="lidar_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="livox_frame"/>
+    <origin xyz="0 0 0.05" rpy="0 0 0"/>
+  </joint>
+
+  <!-- IMU链接 -->
+  <link name="imu_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.015"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+  </link>
+
+  <joint name="imu_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <origin xyz="0 0 0.02" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="0" upper="0" effort="0" velocity="0"/>
+  </joint>
+
+  <!-- GPS链接 -->
+  <link name="gps_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.02"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+    
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.02 0.02 0.005"/>
+      </geometry>
+      <material name="green">
+        <color rgba="0 0.8 0 1"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="gps_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="gps_link"/>
+    <origin xyz="0.05 0 0.04" rpy="0 0 0"/>
+  </joint>
+
+  <!-- 转子 -->
+  <xacro:macro name="rotor" params="name xyz rpy turning_direction color">
+    <link name="${name}">
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="9.75e-07" ixy="0" ixz="0" iyy="0.000273104" iyz="0" izz="0.000274004"/>
+      </inertial>
+      
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://yydrone_description/meshes/iris_prop_${turning_direction}.dae" scale="1 1 1"/>
+        </geometry>
+        <material name="${color}">
+          <color rgba="${'0 0 1 1' if color == 'blue' else '0.3 0.3 0.3 1'}"/>
+        </material>
+      </visual>
+      
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <cylinder length="0.005" radius="0.128"/>
+        </geometry>
+      </collision>
+    </link>
+    
+    <joint name="${name}_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="${name}"/>
+      <origin xyz="${xyz}" rpy="${rpy}"/>
+      <axis xyz="0 0 1"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- 安装四个转子 -->
+  <xacro:rotor name="rotor_0" xyz="0.13 -0.22 0.023" rpy="0 0 0" turning_direction="ccw" color="blue"/>
+  <xacro:rotor name="rotor_1" xyz="-0.13 0.2 0.023" rpy="0 0 0" turning_direction="ccw" color="grey"/>
+  <xacro:rotor name="rotor_2" xyz="0.13 0.22 0.023" rpy="0 0 0" turning_direction="cw" color="blue"/>
+  <xacro:rotor name="rotor_3" xyz="-0.13 -0.2 0.023" rpy="0 0 0" turning_direction="cw" color="grey"/>
+
+
+</robot>
