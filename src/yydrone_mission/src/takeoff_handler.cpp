@@ -17,11 +17,13 @@ TakeoffHandler::TakeoffHandler(rclcpp::Node * node, Mode mode)
     odom_received_(false)
 {
   // 主动模式需要的 publisher
-  if (mode_ == Mode::ACTIVE) {
+  if (mode_ == Mode::ACTIVE && node_) {
     position_pub_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>(
       "/mavros/setpoint_position/local", 10);
   }
-  state_start_time_ = node_->now();
+  if (node_) {
+    state_start_time_ = node_->now();
+  }
 }
 
 void TakeoffHandler::updateOdom(const nav_msgs::msg::Odometry & odom)
@@ -51,7 +53,7 @@ void TakeoffHandler::start()
 
 TakeoffHandler::State TakeoffHandler::update()
 {
-  if (state_ != State::TAKING_OFF) return state_;
+  if (state_ != State::TAKING_OFF || !node_) return state_;
 
   if (mode_ == Mode::PASSIVE) {
     // 被动：等 FSM 从 TAKEOFF 变成 HOVER_WAIT

@@ -58,7 +58,7 @@ bool MissionTakeoffAndForward::initialize(rclcpp::Node * node)
     std::bind(&MissionTakeoffAndForward::fsmCb, this, std::placeholders::_1));
 
   // ── 发布器（ego-planner 目标点） ─────────────────────────────
-  std::string goal_topic = "/drone_" + std::to_string(drone_id) + "_plan_vis/goal_point";
+  std::string goal_topic = "/move_base_simple/goal";
   goal_pub_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>(goal_topic, 10);
 
   RCLCPP_INFO(node_->get_logger(),

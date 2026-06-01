@@ -42,6 +42,8 @@ private:
   // ArUco parameters
   cv::Ptr<cv::aruco::Dictionary> dictionary_;
   cv::Ptr<cv::aruco::DetectorParameters> detector_params_;
+  bool use_all_dicts_;
+  std::vector<cv::aruco::PREDEFINED_DICTIONARY_NAME> all_dict_ids_;
 
   // Camera parameters
   cv::Mat camera_matrix_;

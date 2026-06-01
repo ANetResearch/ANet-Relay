@@ -37,35 +37,51 @@ ArucoDetector::ArucoDetector(const rclcpp::NodeOptions & options)
   dist_coeffs_   = cv::Mat::zeros(1, 5, CV_64F);
 
   // ── Set up ArUco dictionary ─────────────────────────────────────
-  // Support both string names ("DICT_6X6_250") and numeric IDs
-  cv::aruco::PREDEFINED_DICTIONARY_NAME dict_id;
-  try {
-    dict_id = cv::aruco::PREDEFINED_DICTIONARY_NAME(std::stoi(dict_name));
-  } catch (...) {
-    // Resolve name → OpenCV enum
-    if (dict_name == "DICT_4X4_50")      dict_id = cv::aruco::DICT_4X4_50;
-    else if (dict_name == "DICT_4X4_100")     dict_id = cv::aruco::DICT_4X4_100;
-    else if (dict_name == "DICT_4X4_250")     dict_id = cv::aruco::DICT_4X4_250;
-    else if (dict_name == "DICT_4X4_1000")    dict_id = cv::aruco::DICT_4X4_1000;
-    else if (dict_name == "DICT_5X5_50")      dict_id = cv::aruco::DICT_5X5_50;
-    else if (dict_name == "DICT_5X5_100")     dict_id = cv::aruco::DICT_5X5_100;
-    else if (dict_name == "DICT_5X5_250")     dict_id = cv::aruco::DICT_5X5_250;
-    else if (dict_name == "DICT_5X5_1000")    dict_id = cv::aruco::DICT_5X5_1000;
-    else if (dict_name == "DICT_6X6_50")      dict_id = cv::aruco::DICT_6X6_50;
-    else if (dict_name == "DICT_6X6_100")     dict_id = cv::aruco::DICT_6X6_100;
-    else if (dict_name == "DICT_6X6_250")     dict_id = cv::aruco::DICT_6X6_250;
-    else if (dict_name == "DICT_6X6_1000")    dict_id = cv::aruco::DICT_6X6_1000;
-    else if (dict_name == "DICT_7X7_50")      dict_id = cv::aruco::DICT_7X7_50;
-    else if (dict_name == "DICT_7X7_100")     dict_id = cv::aruco::DICT_7X7_100;
-    else if (dict_name == "DICT_7X7_250")     dict_id = cv::aruco::DICT_7X7_250;
-    else if (dict_name == "DICT_7X7_1000")    dict_id = cv::aruco::DICT_7X7_1000;
-    else if (dict_name == "DICT_ARUCO_ORIGINAL") dict_id = cv::aruco::DICT_ARUCO_ORIGINAL;
-    else {
-      RCLCPP_WARN(this->get_logger(), "Unknown dictionary '%s', fallback to DICT_6X6_250", dict_name.c_str());
-      dict_id = cv::aruco::DICT_6X6_250;
+  // "ALL" = iterate all predefined dictionaries (slower but universal)
+  use_all_dicts_ = (dict_name == "ALL");
+
+  if (use_all_dicts_) {
+    // 只遍历每个尺寸的最大字典（覆盖所有该尺寸的可能码）
+    // 4种尺寸 × 每个最大容量 = 4次检测，比全遍历17次快4倍
+    all_dict_ids_ = {
+      cv::aruco::DICT_4X4_1000,   // 覆盖所有4x4
+      cv::aruco::DICT_5X5_1000,   // 覆盖所有5x5
+      cv::aruco::DICT_6X6_1000,   // 覆盖所有6x6
+      cv::aruco::DICT_7X7_1000,   // 覆盖所有7x7
+      cv::aruco::DICT_ARUCO_ORIGINAL,  // 原始ArUco
+    };
+    // Use first dict as default (detection will loop over all)
+    dictionary_ = cv::aruco::getPredefinedDictionary(all_dict_ids_[0]);
+    RCLCPP_INFO(this->get_logger(), "AR marker detection: ALL dictionaries (%zu types)", all_dict_ids_.size());
+  } else {
+    cv::aruco::PREDEFINED_DICTIONARY_NAME dict_id;
+    try {
+      dict_id = cv::aruco::PREDEFINED_DICTIONARY_NAME(std::stoi(dict_name));
+    } catch (...) {
+      if (dict_name == "DICT_4X4_50")      dict_id = cv::aruco::DICT_4X4_50;
+      else if (dict_name == "DICT_4X4_100")     dict_id = cv::aruco::DICT_4X4_100;
+      else if (dict_name == "DICT_4X4_250")     dict_id = cv::aruco::DICT_4X4_250;
+      else if (dict_name == "DICT_4X4_1000")    dict_id = cv::aruco::DICT_4X4_1000;
+      else if (dict_name == "DICT_5X5_50")      dict_id = cv::aruco::DICT_5X5_50;
+      else if (dict_name == "DICT_5X5_100")     dict_id = cv::aruco::DICT_5X5_100;
+      else if (dict_name == "DICT_5X5_250")     dict_id = cv::aruco::DICT_5X5_250;
+      else if (dict_name == "DICT_5X5_1000")    dict_id = cv::aruco::DICT_5X5_1000;
+      else if (dict_name == "DICT_6X6_50")      dict_id = cv::aruco::DICT_6X6_50;
+      else if (dict_name == "DICT_6X6_100")     dict_id = cv::aruco::DICT_6X6_100;
+      else if (dict_name == "DICT_6X6_250")     dict_id = cv::aruco::DICT_6X6_250;
+      else if (dict_name == "DICT_6X6_1000")    dict_id = cv::aruco::DICT_6X6_1000;
+      else if (dict_name == "DICT_7X7_50")      dict_id = cv::aruco::DICT_7X7_50;
+      else if (dict_name == "DICT_7X7_100")     dict_id = cv::aruco::DICT_7X7_100;
+      else if (dict_name == "DICT_7X7_250")     dict_id = cv::aruco::DICT_7X7_250;
+      else if (dict_name == "DICT_7X7_1000")    dict_id = cv::aruco::DICT_7X7_1000;
+      else if (dict_name == "DICT_ARUCO_ORIGINAL") dict_id = cv::aruco::DICT_ARUCO_ORIGINAL;
+      else {
+        RCLCPP_WARN(this->get_logger(), "Unknown dictionary '%s', fallback to DICT_6X6_250", dict_name.c_str());
+        dict_id = cv::aruco::DICT_6X6_250;
+      }
     }
+    dictionary_ = cv::aruco::getPredefinedDictionary(dict_id);
   }
-  dictionary_ = cv::aruco::getPredefinedDictionary(dict_id);
 
   // ── Detector parameters ─────────────────────────────────────────
   detector_params_ = cv::aruco::DetectorParameters::create();
@@ -175,7 +191,27 @@ void ArucoDetector::imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr 
   // ── Detect markers ──────────────────────────────────────────────
   std::vector<int> ids;
   std::vector<std::vector<cv::Point2f>> corners;
-  cv::aruco::detectMarkers(image, dictionary_, corners, ids, detector_params_);
+
+  if (use_all_dicts_) {
+    // Iterate ALL dictionaries, merge results
+    for (auto dict_id : all_dict_ids_) {
+      auto dict = cv::aruco::getPredefinedDictionary(dict_id);
+      std::vector<int> tmp_ids;
+      std::vector<std::vector<cv::Point2f>> tmp_corners;
+      cv::aruco::detectMarkers(image, dict, tmp_corners, tmp_ids, detector_params_);
+      if (!tmp_ids.empty()) {
+        // Filter out duplicates (IDs already found in previous dicts)
+        for (size_t i = 0; i < tmp_ids.size(); i++) {
+          if (std::find(ids.begin(), ids.end(), tmp_ids[i]) == ids.end()) {
+            ids.push_back(tmp_ids[i]);
+            corners.push_back(tmp_corners[i]);
+          }
+        }
+      }
+    }
+  } else {
+    cv::aruco::detectMarkers(image, dictionary_, corners, ids, detector_params_);
+  }
 
   if (ids.empty()) {
     if (publish_debug_image_) {

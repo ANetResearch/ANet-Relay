@@ -24,6 +24,7 @@ add_library(yydrone_mission_component SHARED
   src/mode_switcher.cpp
   src/takeoff_handler.cpp
   src/mission_takeoff_and_forward.cpp
+  src/mission_fly_and_detect.cpp
   src/mission_dispatcher.cpp
 )
 

@@ -1,5 +1,6 @@
 #include "yydrone_mission/mission_dispatcher.hpp"
 #include "yydrone_mission/mission_takeoff_and_forward.hpp"
+#include "yydrone_mission/mission_fly_and_detect.hpp"
 
 using namespace std::chrono_literals;
 
@@ -52,6 +53,9 @@ void MissionDispatcher::registerMissions()
 {
   // 任务1：起飞 1m → 前飞 2m
   missions_.push_back(std::make_shared<MissionTakeoffAndForward>());
+
+  // 任务2：起飞 1m → 前飞 2m → 悬停检测 AR 码
+  missions_.push_back(std::make_shared<MissionFlyAndDetect>());
 
   // ── 在此添加新任务 ──────────────────────────────────────────
   // 示例：

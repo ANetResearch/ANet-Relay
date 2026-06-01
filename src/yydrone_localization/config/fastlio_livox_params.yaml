@@ -2,7 +2,7 @@
     ros__parameters:
         feature_extract_enable: false
         point_filter_num: 3
-        max_iteration: 3
+        max_iteration: 6  #3->6
         filter_size_surf: 0.5
         filter_size_map: 0.5
         cube_side_length: 1000.0
@@ -24,10 +24,10 @@
             scan_rate: 10
 
         mapping:
-            acc_cov: 0.1
-            gyr_cov: 0.1
-            b_acc_cov: 0.0001
-            b_gyr_cov: 0.0001
+            acc_cov: 0.5  #0.1->0.5解决yaw drift问题，告诉滤波器加速度的测量值不太可信
+            gyr_cov: 0.5  #0.1->0.5解决yaw drift问题，快速转动时告诉滤波器陀螺仪的测量值不太可信
+            b_acc_cov: 0.001
+            b_gyr_cov: 0.001
             fov_degree:    360.0
             det_range:     100.0
             extrinsic_est_en:  true      # true: enable the online estimation of IMU-LiDAR extrinsic
@@ -40,7 +40,7 @@
             effect_map_en: false         # true: publish Effects
             map_en: true                 # true: publish Map cloud
             scan_publish_en:  true       # false: close all the point cloud output
-            dense_publish_en: false      # false: low down the points number in a global-frame point clouds scan.
+            dense_publish_en: true      # false: low down the points number in a global-frame point clouds scan.
             scan_bodyframe_pub_en: true  # true: output the point cloud scans in IMU-body-frame
 
         pcd_save:

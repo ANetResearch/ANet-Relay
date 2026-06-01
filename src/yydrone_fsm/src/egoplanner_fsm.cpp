@@ -11,7 +11,7 @@ namespace egoplanner_fsm
 SimpleFSM::SimpleFSM() 
 : Node("egoplanner_fsm_node"),
   current_state_(DroneState::INIT),
-  target_height_(0.7),
+  target_height_(1.0),
   takeoff_speed_(0.5),
   max_horizontal_speed_(1.0),
   hover_position_(Vector3d::Zero()),
@@ -327,13 +327,14 @@ void SimpleFSM::handleTakeoffState()
   double current_z = current_odom_.pose.pose.position.z;
   
   // 计算目标高度（起飞起始高度 + 目标相对高度）
-  double target_z = takeoff_start_position_.z() + target_height_;
+  double target_z = target_height_; //takeoff_start_position_.z() + target_height_
   
   // 设置目标高度给控制环使用
   hover_position_.z() = target_z;
   
-  // 检查是否达到目标高度（允许0.05米的误差）
-  if (current_z >= target_z - 0.05) {
+  // 检查是否达到目标高度（允许0.15米的误差）
+  RCLCPP_INFO(this->get_logger(), "当前高度: %.2f m, 目标高度: %.2f m", current_z, target_z);
+  if (current_z >= target_z - 0.15) {
     current_state_ = DroneState::HOVER_WAIT;
     state_start_time_ = this->now();
     RCLCPP_INFO(this->get_logger(), "状态转换: TAKEOFF -> HOVER_WAIT");
@@ -498,8 +499,8 @@ void SimpleFSM::publishCommandPosition()
   pose_msg.pose.position.y = last_cmd_.position.y;
   pose_msg.pose.position.z = last_cmd_.position.z;
   
-  // 使用quadrotor_msgs中的偏航角
-  double yaw = last_cmd_.yaw;
+  // 使用quadrotor_msgs中的偏航角,可修改为0
+  double yaw = 0.0; // getYawFromCommand(last_cmd_);
   pose_msg.pose.orientation.w = cos(yaw / 2.0);
   pose_msg.pose.orientation.x = 0.0;
   pose_msg.pose.orientation.y = 0.0;
