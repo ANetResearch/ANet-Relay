@@ -19,7 +19,11 @@ def generate_launch_description():
             {'takeoff_speed': 0.5},
             {'max_horizontal_speed': 1.0},
             {'control_frequency': 50.0},
-            {'cmd_timeout': 0.5}
+            {'cmd_timeout': 0.5},
+            # 前馈缩放系数 (0~1)
+            # 0 = 纯位置控制，1 = 全量前馈
+            {'velocity_scale': 0.5},        # 速度前馈缩放
+            {'acceleration_scale': 0.3},    # 加速度前馈缩放
         ],        
         remappings=[
             ('/mavros/state', '/mavros/state'),

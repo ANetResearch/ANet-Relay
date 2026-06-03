@@ -166,7 +166,7 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
 
   // 使用独立的里程计和点云订阅
   indep_cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
-      "/cloud_registered", 10, std::bind(&GridMap::cloudCallback, this, std::placeholders::_1)); //grid_map/cloud
+      "/cloud_registered_filter", 10, std::bind(&GridMap::cloudCallback, this, std::placeholders::_1)); //grid_map/cloud
 
   indep_odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
       "/Odometry", 10, std::bind(&GridMap::odomCallback, this, std::placeholders::_1));//grid_map/odom

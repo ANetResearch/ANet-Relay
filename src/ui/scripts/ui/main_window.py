@@ -10,7 +10,7 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QColor, QFont, QLinearGradient
 from PyQt5.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QMainWindow, QSizePolicy,
-    QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget, QStackedWidget,
 )
 
 from qfluentwidgets import BodyLabel
@@ -22,8 +22,9 @@ from ui.widgets import (
 )
 from ui.panels import (
     ActionPanel, AlertPanel, FlightModePanel, HeroHeader,
-    MotorPanel, NavigationSidebar, ReservePanel,
+    MotorPanel, NavigationSidebar, ReservePanel, WarehousePanel,
 )
+from ui.warehouse_manager import WarehouseManager
 
 
 class MainWindow(QMainWindow):
@@ -167,7 +168,23 @@ class MainWindow(QMainWindow):
 
         content.addLayout(left_col, 8)
         content.addLayout(right_col, 6)
-        main_v.addLayout(content, 1)
+
+        # ── 页面切换 (QStackedWidget) ──────────────────────────
+        self._pages = QStackedWidget()
+        # Page 0: 主仪表盘（上面的content layout）
+        dash_wrap = QWidget()
+        dash_wrap.setLayout(content)
+        self._pages.addWidget(dash_wrap)
+
+        # Page 1: 仓库管理
+        self._warehouse_mgr = WarehouseManager(self)
+        self._warehouse_panel = WarehousePanel(self._warehouse_mgr, self)
+        self._pages.addWidget(self._warehouse_panel)
+
+        main_v.addWidget(self._pages, 1)
+
+        # Sidebar 页面切换
+        self.sidebar.page_changed.connect(self._switch_page)
 
         # Footer
         footer = QFrame(self)
@@ -376,7 +393,14 @@ class MainWindow(QMainWindow):
             f"系统状态：一切正常  |  最后更新：{time_str}"
         )
 
+    def _switch_page(self, key: str):
+        if key == "warehouse":
+            self._pages.setCurrentIndex(1)
+        else:
+            self._pages.setCurrentIndex(0)
+
     def closeEvent(self, event):
+        self._warehouse_mgr.stop_ros()
         if hasattr(self.backend, "shutdown"):
             self.backend.shutdown()
         event.accept()

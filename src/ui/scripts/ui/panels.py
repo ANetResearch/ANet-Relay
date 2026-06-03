@@ -6,11 +6,11 @@ from datetime import datetime
 from typing import List, Optional
 
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QFont, QLinearGradient
+from PyQt5.QtGui import QColor, QFont, QLinearGradient, QPixmap
 from PyQt5.QtWidgets import (
     QFrame, QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout, QLabel,
     QListWidget, QListWidgetItem, QProgressBar, QPushButton, QSizePolicy,
-    QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget, QDialog
 )
 
 from qfluentwidgets import (
@@ -85,6 +85,7 @@ class NavigationSidebar(QWidget):
         ("⌂",  "概览",    "overview"),
         ("✈",  "飞行控制", "flight"),
         ("◎",  "航点规划", "waypoint"),
+        ("📦", "仓库管理", "warehouse"),
         ("↗",  "数据分析", "data"),
         ("⚙",  "系统设置", "settings"),
         ("☰",  "日志管理", "logs"),
@@ -733,3 +734,354 @@ class ReservePanel(PanelCard):
     def _on_theme_changed(self, _mode: str):
         super()._on_theme_changed(_mode)
         self._apply_reserve_style()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# WarehousePanel — 商品入库 & 货物识别
+# ═══════════════════════════════════════════════════════════════════
+
+from ui.warehouse_manager import NameInputDialog, DatabaseViewer
+
+
+class WarehousePanel(QFrame):
+    def __init__(self, manager, parent=None):
+        super().__init__(parent)
+        self._mgr = manager
+        self._camera_on = False
+        self._mode = "idle"
+        self._db_viewer = None
+        self._last_marker_id = "--"
+        self._last_goods_name = "--"
+        self._tm = ThemeManager.instance()
+        self._tm.changed.connect(self._apply_theme)
+        self.setObjectName("warehousePanel")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 18, 20, 18)
+        root.setSpacing(12)
+
+        header = QHBoxLayout()
+        header.setSpacing(12)
+
+        title_box = QVBoxLayout()
+        title_box.setSpacing(2)
+        self._title = QLabel("仓库识别工作台")
+        self._subtitle = CaptionLabel("AR 码入库与库存匹配")
+        title_box.addWidget(self._title)
+        title_box.addWidget(self._subtitle)
+        header.addLayout(title_box)
+        header.addStretch(1)
+
+        self._db_btn = QPushButton("数据库")
+        self._db_btn.clicked.connect(self._show_database)
+        header.addWidget(self._db_btn)
+
+        self._cam_btn = PrimaryPushButton("打开识别画面")
+        self._cam_btn.clicked.connect(self._toggle_camera)
+        header.addWidget(self._cam_btn)
+        root.addLayout(header)
+
+        self._mode_bar = QFrame(self)
+        self._mode_bar.setObjectName("warehouseModeBar")
+        mode_row = QHBoxLayout(self._mode_bar)
+        mode_row.setContentsMargins(6, 6, 6, 6)
+        mode_row.setSpacing(6)
+
+        self._storage_btn = QPushButton("商品入库")
+        self._storage_btn.setCheckable(True)
+        self._storage_btn.clicked.connect(self._start_storage)
+        mode_row.addWidget(self._storage_btn)
+
+        self._lookup_btn = QPushButton("货物识别")
+        self._lookup_btn.setCheckable(True)
+        self._lookup_btn.clicked.connect(self._start_lookup)
+        mode_row.addWidget(self._lookup_btn)
+        mode_row.addStretch(1)
+
+        self._mode_lbl = CaptionLabel("未选择模式")
+        self._mode_lbl.setObjectName("warehouseModeText")
+        mode_row.addWidget(self._mode_lbl)
+        root.addWidget(self._mode_bar)
+
+        content = QHBoxLayout()
+        content.setSpacing(12)
+
+        self._video_card = QFrame(self)
+        self._video_card.setObjectName("warehouseVideoCard")
+        video_layout = QVBoxLayout(self._video_card)
+        video_layout.setContentsMargins(14, 12, 14, 14)
+        video_layout.setSpacing(10)
+
+        video_head = QHBoxLayout()
+        video_head.setSpacing(8)
+        self._video_title = StrongBodyLabel("实时识别画面")
+        self._camera_state = QLabel("离线")
+        self._camera_state.setObjectName("cameraStateBadge")
+        video_head.addWidget(self._video_title)
+        video_head.addStretch(1)
+        video_head.addWidget(self._camera_state)
+        video_layout.addLayout(video_head)
+
+        self._img_label = QLabel("识别画面未开启")
+        self._img_label.setAlignment(Qt.AlignCenter)
+        self._img_label.setMinimumHeight(420)
+        self._img_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        video_layout.addWidget(self._img_label, 1)
+        content.addWidget(self._video_card, 5)
+
+        self._result_card = QFrame(self)
+        self._result_card.setObjectName("warehouseResultCard")
+        result_layout = QVBoxLayout(self._result_card)
+        result_layout.setContentsMargins(16, 14, 16, 16)
+        result_layout.setSpacing(12)
+
+        result_header = QHBoxLayout()
+        result_header.setSpacing(8)
+        self._result_title = StrongBodyLabel("识别结果")
+        self._result_state = QLabel("待机")
+        self._result_state.setObjectName("resultStateBadge")
+        result_header.addWidget(self._result_title)
+        result_header.addStretch(1)
+        result_header.addWidget(self._result_state)
+        result_layout.addLayout(result_header)
+
+        self._field_mode = self._make_info_value(result_layout, "当前模式", "未选择")
+        self._field_marker = self._make_info_value(result_layout, "AR 码 ID", "--")
+        self._field_goods = self._make_info_value(result_layout, "货物类别", "--")
+        self._field_time = self._make_info_value(result_layout, "更新时间", "--")
+
+        result_layout.addSpacing(4)
+        self._action_title = CaptionLabel("操作")
+        self._action_title.setObjectName("warehouseSectionTitle")
+        result_layout.addWidget(self._action_title)
+
+        self._continue_btn = QPushButton("继续扫描")
+        self._continue_btn.clicked.connect(self._continue_scan)
+        self._continue_btn.setEnabled(False)
+        result_layout.addWidget(self._continue_btn)
+
+        self._open_db_btn = QPushButton("查看数据库记录")
+        self._open_db_btn.clicked.connect(self._show_database)
+        result_layout.addWidget(self._open_db_btn)
+        result_layout.addStretch(1)
+        content.addWidget(self._result_card, 2)
+
+        root.addLayout(content, 1)
+
+        self._status_bar = QFrame(self)
+        self._status_bar.setObjectName("warehouseStatusBar")
+        status_layout = QHBoxLayout(self._status_bar)
+        status_layout.setContentsMargins(12, 8, 12, 8)
+        status_layout.setSpacing(8)
+        self._status = CaptionLabel("就绪 - 请选择商品入库或货物识别")
+        status_layout.addWidget(self._status, 1)
+        root.addWidget(self._status_bar)
+
+        manager.frame_ready.connect(self._on_frame)
+        manager.marker_found.connect(self._on_marker)
+        manager.status_msg.connect(self._set_status)
+
+        self._apply_theme("")
+
+    def _make_info_value(self, parent_layout: QVBoxLayout, label: str, value: str) -> QLabel:
+        row = QFrame(self)
+        row.setObjectName("warehouseInfoRow")
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(10)
+        key = CaptionLabel(label)
+        key.setObjectName("warehouseInfoKey")
+        val = QLabel(value)
+        val.setObjectName("warehouseInfoValue")
+        val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        lay.addWidget(key)
+        lay.addWidget(val, 1)
+        parent_layout.addWidget(row)
+        return val
+
+    def _apply_theme(self, _mode: str):
+        c = self._tm.colors()
+        dark = self._tm.is_dark
+        self.setStyleSheet(f"""
+            #warehousePanel {{
+                background-color: {c["panel_bg"]};
+                border: 1px solid {c["panel_border"]};
+                border-radius: 18px;
+            }}
+            #warehouseModeBar, #warehouseStatusBar {{
+                background-color: {c["card_bg"]};
+                border: 1px solid {c["panel_border"]};
+                border-radius: 8px;
+            }}
+            #warehouseVideoCard, #warehouseResultCard {{
+                background-color: {c["card_bg"]};
+                border: 1px solid {c["panel_border"]};
+                border-radius: 8px;
+            }}
+            #warehouseModeText, #warehouseSectionTitle,
+            #warehouseInfoKey {{
+                color: {c["text_secondary"]};
+                font-size: 12px;
+                background: transparent;
+            }}
+            #warehouseInfoValue {{
+                color: {c["text_primary"]};
+                font-size: 14px;
+                font-weight: 600;
+                background: transparent;
+            }}
+            #cameraStateBadge, #resultStateBadge {{
+                padding: 4px 10px;
+                border-radius: 8px;
+                color: {c["text_primary"]};
+                background-color: {c["panel_bg"]};
+                border: 1px solid {c["panel_border"]};
+                font-size: 12px;
+                font-weight: 600;
+            }}
+        """)
+        t = c["text_primary"]
+        self._title.setStyleSheet(f"font-size: 22px; font-weight: 700; color: {t}; background: transparent;")
+        self._subtitle.setStyleSheet(f"color: {c['text_secondary']}; background: transparent;")
+
+        btn_style = (
+            f"QPushButton {{ padding: 9px 16px; border-radius: 8px; font-size: 13px;"
+            f" font-weight: 600; background-color: {c['card_bg']}; color: {t};"
+            f" border: 1px solid {c['panel_border']}; }}"
+            f"QPushButton:hover {{ background-color: {c['panel_bg']}; }}"
+            f"QPushButton:checked {{ background-color: rgba(77, 140, 255, 0.16);"
+            f" border: 1px solid #4D8CFF; color: #2D70E8; }}"
+            f"QPushButton:disabled {{ color: {c['text_secondary']}; }}"
+        )
+        for b in [self._storage_btn, self._lookup_btn, self._db_btn,
+                  self._open_db_btn, self._continue_btn]:
+            b.setStyleSheet(btn_style)
+
+        img_bg = "#141829" if dark else "#1a1a2e"
+        img_border = "#303650" if dark else "#d0d8e8"
+        self._img_label.setStyleSheet(
+            f"background-color: {img_bg}; border: 1px solid {img_border};"
+            f" border-radius: 8px; color: {c['text_secondary']}; font-size: 14px;"
+        )
+
+    def _toggle_camera(self):
+        if self._camera_on:
+            self._mgr.stop_ros()
+            self._camera_on = False
+            self._cam_btn.setText("打开识别画面")
+            self._set_video_placeholder("识别画面已关闭")
+            self._mode = "idle"
+            self._camera_state.setText("离线")
+            self._set_active_mode("")
+            self._reset_result_panel()
+        else:
+            self._ensure_camera_started()
+
+    def _start_storage(self):
+        self._ensure_camera_started()
+        self._mode = "storage"
+        self._mgr.set_mode_storage()
+        self._set_active_mode("storage")
+        self._field_mode.setText("商品入库")
+        self._field_marker.setText("--")
+        self._field_goods.setText("--")
+        self._result_state.setText("扫描中")
+        self._continue_btn.setEnabled(False)
+        self._mode_lbl.setText("商品入库")
+
+    def _start_lookup(self):
+        self._ensure_camera_started()
+        self._mode = "lookup"
+        self._mgr.set_mode_lookup()
+        self._set_active_mode("lookup")
+        self._field_mode.setText("货物识别")
+        self._field_marker.setText("--")
+        self._field_goods.setText("--")
+        self._result_state.setText("扫描中")
+        self._continue_btn.setEnabled(False)
+        self._mode_lbl.setText("货物识别")
+
+    def _ensure_camera_started(self):
+        if self._camera_on:
+            return
+        self._mgr.start_ros()
+        self._camera_on = True
+        self._cam_btn.setText("关闭识别画面")
+        self._camera_state.setText("在线")
+        self._set_video_placeholder("正在连接摄像头识别话题...")
+
+    def _set_active_mode(self, mode: str):
+        self._storage_btn.setChecked(mode == "storage")
+        self._lookup_btn.setChecked(mode == "lookup")
+
+    def _reset_result_panel(self):
+        self._mode_lbl.setText("未选择模式")
+        self._field_mode.setText("未选择")
+        self._field_marker.setText("--")
+        self._field_goods.setText("--")
+        self._field_time.setText("--")
+        self._result_state.setText("待机")
+        self._continue_btn.setEnabled(False)
+
+    def _set_video_placeholder(self, text: str):
+        self._img_label.clear()
+        self._img_label.setText(text)
+
+    def _set_status(self, text: str):
+        self._status.setText(text)
+
+    def _update_timestamp(self):
+        self._field_time.setText(datetime.now().strftime("%H:%M:%S"))
+
+    def _on_frame(self, pixmap: QPixmap):
+        self._img_label.setPixmap(
+            pixmap.scaled(self._img_label.width(), self._img_label.height(),
+                          Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+    def _on_marker(self, marker_id: int):
+        self._last_marker_id = str(marker_id)
+        self._field_marker.setText(self._last_marker_id)
+        self._update_timestamp()
+        if self._mode == "storage":
+            self._storage_btn.setEnabled(False)
+            self._result_state.setText("待录入")
+            dlg = NameInputDialog(marker_id, self)
+            result = dlg.exec_()
+            if result == QDialog.Accepted and dlg.name():
+                self._mgr.store(marker_id, dlg.name())
+                self._last_goods_name = dlg.name()
+                self._field_goods.setText(self._last_goods_name)
+                self._result_state.setText("已入库")
+                self._set_status(f"已保存 id={marker_id}，可继续扫描下一个 AR 码")
+            else:
+                self._last_goods_name = "--"
+                self._field_goods.setText("已忽略")
+                self._result_state.setText("已忽略")
+                self._set_status(f"已忽略 id={marker_id}；如需重新录入，请再次点击“商品入库”")
+            self._storage_btn.setEnabled(True)
+            self._continue_btn.setEnabled(True)
+            self._mgr.resume_detections()
+        elif self._mode == "lookup":
+            entry = self._mgr.lookup(marker_id)
+            if entry:
+                self._last_goods_name = entry.name
+                self._field_goods.setText(entry.name)
+                self._result_state.setText("已匹配")
+            else:
+                self._last_goods_name = "--"
+                self._field_goods.setText("未登记")
+                self._result_state.setText("无记录")
+            self._continue_btn.setEnabled(False)
+
+    def _continue_scan(self):
+        if self._mode == "storage":
+            self._start_storage()
+        elif self._mode == "lookup":
+            self._start_lookup()
+
+    def _show_database(self):
+        if self._db_viewer is None:
+            self._db_viewer = DatabaseViewer(self._mgr.db, self._mgr, self)
+        self._db_viewer.show()
+        self._db_viewer.raise_()
+        self._db_viewer.activateWindow()

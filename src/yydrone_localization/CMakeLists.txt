@@ -41,6 +41,12 @@ install(TARGETS fastlio_locate
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
+# 安装Python脚本
+install(PROGRAMS
+  scripts/ground_filter.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 # 安装launch文件和config文件
 install(DIRECTORY launch config
   DESTINATION share/${PROJECT_NAME}

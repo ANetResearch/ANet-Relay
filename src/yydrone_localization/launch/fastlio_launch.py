@@ -57,15 +57,31 @@ def generate_launch_description():
         name='fastlio_locate',
         output = 'screen'
     )
+    # 地面点云滤波节点 (PassThrough Z-axis)
+    # 滤除世界坐标系下 z < ground_height 的地面点
+    # 输入: /cloud_registered (FAST-LIO 输出)
+    # 输出: /cloud_registered_filter
+    ground_filter_node = Node(
+        package='yydrone_localization',
+        executable='ground_filter.py',
+        name='ground_filter',
+        output='screen',
+        parameters=[{
+            'ground_height': 0.01,         # 地面高度阈值（米），低于此高度的点被滤除
+            'filter_limit_max': 30.0,     # z 轴上限（米）
+            'use_negative': False,        # True=保留阈值外的点
+        }],
+    )
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
     )
-    
+
     return LaunchDescription([
         livox_driver,
         fastlio_node,
         fastlio_locate_node,
+        ground_filter_node,
         static_tf_odom_to_map,
         rviz_node,
     ])

@@ -14,8 +14,8 @@ def generate_launch_description():
     obj_num = LaunchConfiguration('obj_num', default=10)
     drone_id = LaunchConfiguration('drone_id', default=0)
     
-    map_size_x = LaunchConfiguration('map_size_x', default = 50.0)
-    map_size_y = LaunchConfiguration('map_size_y', default = 25.0)
+    map_size_x = LaunchConfiguration('map_size_x', default = 15.0)
+    map_size_y = LaunchConfiguration('map_size_y', default = 20.0)
     map_size_z = LaunchConfiguration('map_size_z', default = 3.0)  #地图高度，不能超此高度
     odom_topic = LaunchConfiguration('odom_topic', default = 'Odometry') #visual_slam/odom
     
@@ -113,16 +113,13 @@ def generate_launch_description():
             'odometry_topic': odom_topic,
             'obj_num_set': obj_num,
             
-            'camera_pose_topic': 'pcl_render_node/camera_pose',
-            'depth_topic': 'pcl_render_node/depth',
-            'cloud_topic': 'pcl_render_node/cloud',
             
             'cx': str(321.04638671875),
             'cy': str(243.44969177246094),
             'fx': str(387.229248046875),
             'fy': str(387.229248046875),
-            'max_vel': str(2.0),
-            'max_acc': str(6.0),
+            'max_vel': str(0.3),
+            'max_acc': str(0.3),
             'planning_horizon': str(7.5),
             'use_distinctive_trajs': 'True',
             'flight_type': str(1),
