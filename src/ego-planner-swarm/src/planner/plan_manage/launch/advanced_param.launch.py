@@ -248,14 +248,14 @@ def generate_launch_description():
             #最大加速度
             {'manager/max_acc': max_acc},
             #最大急动度  ※
-            {'manager/max_jerk': 2.0},
+            {'manager/max_jerk': 1.0},
             # B样条控制点之间的期望距离（米）
             # 作用：决定轨迹的"分辨率"和"平滑度"
             # 影响：
             # 小值（0.2-0.3）：控制点密集 → 轨迹灵活但计算量大
             # 中值（0.4-0.5）：平衡灵活性和效率
             # 大值（0.6-0.8）：控制点稀疏 → 轨迹简单但可能不够平滑
-            {'manager/control_points_distance': 0.2}, #0.4
+            {'manager/control_points_distance': 0.4}, #0.4
             # 动力学约束违反的允许误差（米/秒或米/秒²）
             # 作用：在优化中允许的约束违反程度
             {'manager/feasibility_tolerance': 0.05},
@@ -292,7 +292,7 @@ def generate_launch_description():
             {'bspline/limit_vel': max_vel},
             {'bspline/limit_acc': max_acc},
             # ※
-            {'bspline/limit_ratio': 1.3},
+            {'bspline/limit_ratio': 1.0},
 
             # Object prediction parameters
             {'prediction/obj_num': obj_num_set},
