@@ -25,6 +25,7 @@ from ui.panels import (
     MotorPanel, NavigationSidebar, ReservePanel, WarehousePanel,
 )
 from ui.warehouse_manager import WarehouseManager
+from ui.heatmap_analyzer import HeatmapAnalyzer
 
 
 class MainWindow(QMainWindow):
@@ -39,7 +40,7 @@ class MainWindow(QMainWindow):
         self._pending_telemetry: Optional[object] = None
         self._refresh_scheduled = False
 
-        self.setWindowTitle("WS00 慧谷地面站")
+        self.setWindowTitle("YixPlanner")
         self.setMinimumSize(1440, 880)
 
         self.backend.telemetry_updated.connect(self._on_telemetry)
@@ -180,6 +181,10 @@ class MainWindow(QMainWindow):
         self._warehouse_mgr = WarehouseManager(self)
         self._warehouse_panel = WarehousePanel(self._warehouse_mgr, self)
         self._pages.addWidget(self._warehouse_panel)
+
+        # Page 2: 数据分析 — 热力图
+        self._heatmap_panel = HeatmapAnalyzer(self)
+        self._pages.addWidget(self._heatmap_panel)
 
         main_v.addWidget(self._pages, 1)
 
@@ -396,6 +401,8 @@ class MainWindow(QMainWindow):
     def _switch_page(self, key: str):
         if key == "warehouse":
             self._pages.setCurrentIndex(1)
+        elif key == "data":
+            self._pages.setCurrentIndex(2)
         else:
             self._pages.setCurrentIndex(0)
 

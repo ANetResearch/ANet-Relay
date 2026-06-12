@@ -102,7 +102,7 @@ class NavigationSidebar(QWidget):
         root.setContentsMargins(8, 14, 8, 14)
         root.setSpacing(4)
 
-        logo = QLabel("WS", self)
+        logo = QLabel("YX", self)
         logo.setFixedSize(46, 46)
         logo.setAlignment(Qt.AlignCenter)
         logo.setStyleSheet("""
@@ -848,22 +848,101 @@ class WarehousePanel(QFrame):
         self._field_mode = self._make_info_value(result_layout, "当前模式", "未选择")
         self._field_marker = self._make_info_value(result_layout, "AR 码 ID", "--")
         self._field_goods = self._make_info_value(result_layout, "货物类别", "--")
-        self._field_time = self._make_info_value(result_layout, "更新时间", "--")
+        self._field_region = self._make_info_value(result_layout, "存放区域", "--")
+
+        # ═══════════════════════════════════════════════════════════
+        # [demo代码，可删] 温度+位置检测结果
+        # ═══════════════════════════════════════════════════════════
+        result_layout.addSpacing(12)
+
+        # 状态卡片
+        self._demo_status_card = QFrame(self)
+        self._demo_status_card.setObjectName("demoStatusCard")
+        dsc = QVBoxLayout(self._demo_status_card)
+        dsc.setContentsMargins(14, 12, 14, 12)
+        dsc.setSpacing(8)
+
+        self._demo_icon = QLabel("📦")
+        self._demo_icon.setObjectName("demoIcon")
+        icf = QFont(); icf.setPointSize(24)
+        self._demo_icon.setFont(icf)
+        self._demo_icon.setAlignment(Qt.AlignCenter)
+        dsc.addWidget(self._demo_icon)
+
+        self._demo_title = QLabel("等待货物识别...")
+        self._demo_title.setObjectName("demoTitle")
+        tf = QFont(); tf.setPointSize(12); tf.setBold(True)
+        self._demo_title.setFont(tf)
+        self._demo_title.setAlignment(Qt.AlignCenter)
+        self._demo_title.setWordWrap(True)
+        dsc.addWidget(self._demo_title)
+
+        # 进度条
+        self._demo_progress = QProgressBar(self)
+        self._demo_progress.setObjectName("demoProgress")
+        self._demo_progress.setMinimum(0)
+        self._demo_progress.setMaximum(100)
+        self._demo_progress.setValue(0)
+        self._demo_progress.setTextVisible(True)
+        self._demo_progress.setFormat("")
+        self._demo_progress.setFixedHeight(6)
+        self._demo_progress.hide()
+        dsc.addWidget(self._demo_progress)
+
+        self._demo_countdown_lbl = QLabel("")
+        self._demo_countdown_lbl.setObjectName("demoCountdown")
+        self._demo_countdown_lbl.setAlignment(Qt.AlignCenter)
+        dsc.addWidget(self._demo_countdown_lbl)
+
+        result_layout.addWidget(self._demo_status_card)
+
+        # 结果明细（两列）
+        result_grid = QGridLayout()
+        result_grid.setSpacing(8)
+
+        self._demo_pos_icon = QLabel("—")
+        self._demo_pos_icon.setAlignment(Qt.AlignCenter)
+        self._demo_pos_label = QLabel("位置检测")
+        self._demo_pos_label.setObjectName("demoResultLabel")
+
+        self._demo_temp_icon = QLabel("—")
+        self._demo_temp_icon.setAlignment(Qt.AlignCenter)
+        self._demo_temp_label = QLabel("温度检测")
+        self._demo_temp_label.setObjectName("demoResultLabel")
+
+        sf = QFont(); sf.setPointSize(28)
+        self._demo_pos_icon.setFont(sf)
+        self._demo_temp_icon.setFont(sf)
+
+        result_grid.addWidget(self._demo_pos_icon, 0, 0)
+        result_grid.addWidget(self._demo_temp_icon, 1, 0)
+        result_grid.addWidget(self._demo_pos_label, 0, 1)
+        result_grid.addWidget(self._demo_temp_label, 1, 1)
+
+        result_layout.addLayout(result_grid)
+
+        # 红灯闪烁
+        self._demo_flash_timer = QTimer(self)
+        self._demo_flash_timer.setInterval(500)
+        self._demo_flash_timer.timeout.connect(self._on_demo_flash)
+        self._demo_flash_on = False
+        self._demo_result_card = self._result_card
 
         result_layout.addSpacing(4)
-        self._action_title = CaptionLabel("操作")
-        self._action_title.setObjectName("warehouseSectionTitle")
-        result_layout.addWidget(self._action_title)
-
-        self._continue_btn = QPushButton("继续扫描")
-        self._continue_btn.clicked.connect(self._continue_scan)
-        self._continue_btn.setEnabled(False)
-        result_layout.addWidget(self._continue_btn)
+        # ═══════════════════════════════════════════════════════════
 
         self._open_db_btn = QPushButton("查看数据库记录")
         self._open_db_btn.clicked.connect(self._show_database)
         result_layout.addWidget(self._open_db_btn)
+
         result_layout.addStretch(1)
+
+        # [demo代码，可删] 导出巡检报告
+        self._export_btn = QPushButton("📋 导出此次巡检任务")
+        self._export_btn.setObjectName("exportBtn")
+        self._export_btn.setMinimumHeight(40)
+        self._export_btn.clicked.connect(self._export_inspection)
+        root.addWidget(self._export_btn)
         content.addWidget(self._result_card, 2)
 
         root.addLayout(content, 1)
@@ -880,6 +959,11 @@ class WarehousePanel(QFrame):
         manager.frame_ready.connect(self._on_frame)
         manager.marker_found.connect(self._on_marker)
         manager.status_msg.connect(self._set_status)
+
+        # [demo代码，可删] 温度+位置检测信号连接
+        manager.inspection_countdown.connect(self._on_demo_countdown)
+        manager.inspection_result.connect(self._on_demo_result)
+        manager.inspection_reset.connect(self._on_demo_reset)
 
         self._apply_theme("")
 
@@ -954,8 +1038,17 @@ class WarehousePanel(QFrame):
             f"QPushButton:disabled {{ color: {c['text_secondary']}; }}"
         )
         for b in [self._storage_btn, self._lookup_btn, self._db_btn,
-                  self._open_db_btn, self._continue_btn]:
+                  self._open_db_btn]:
             b.setStyleSheet(btn_style)
+
+        # 导出按钮特殊样式
+        self._export_btn.setStyleSheet(
+            f"QPushButton {{ color: #FFFFFF; background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+            f" stop:0 #4D8CFF, stop:1 #1FB96A); border: none; border-radius: 10px;"
+            f" padding: 12px; font-size: 14px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+            f" stop:0 #3B7FF5, stop:1 #18A86B); }}"
+        )
 
         img_bg = "#141829" if dark else "#1a1a2e"
         img_border = "#303650" if dark else "#d0d8e8"
@@ -986,7 +1079,6 @@ class WarehousePanel(QFrame):
         self._field_marker.setText("--")
         self._field_goods.setText("--")
         self._result_state.setText("扫描中")
-        self._continue_btn.setEnabled(False)
         self._mode_lbl.setText("商品入库")
 
     def _start_lookup(self):
@@ -998,7 +1090,6 @@ class WarehousePanel(QFrame):
         self._field_marker.setText("--")
         self._field_goods.setText("--")
         self._result_state.setText("扫描中")
-        self._continue_btn.setEnabled(False)
         self._mode_lbl.setText("货物识别")
 
     def _ensure_camera_started(self):
@@ -1019,9 +1110,8 @@ class WarehousePanel(QFrame):
         self._field_mode.setText("未选择")
         self._field_marker.setText("--")
         self._field_goods.setText("--")
-        self._field_time.setText("--")
+        self._field_region.setText("--")
         self._result_state.setText("待机")
-        self._continue_btn.setEnabled(False)
 
     def _set_video_placeholder(self, text: str):
         self._img_label.clear()
@@ -1029,9 +1119,6 @@ class WarehousePanel(QFrame):
 
     def _set_status(self, text: str):
         self._status.setText(text)
-
-    def _update_timestamp(self):
-        self._field_time.setText(datetime.now().strftime("%H:%M:%S"))
 
     def _on_frame(self, pixmap: QPixmap):
         self._img_label.setPixmap(
@@ -1041,16 +1128,16 @@ class WarehousePanel(QFrame):
     def _on_marker(self, marker_id: int):
         self._last_marker_id = str(marker_id)
         self._field_marker.setText(self._last_marker_id)
-        self._update_timestamp()
         if self._mode == "storage":
             self._storage_btn.setEnabled(False)
             self._result_state.setText("待录入")
             dlg = NameInputDialog(marker_id, self)
             result = dlg.exec_()
             if result == QDialog.Accepted and dlg.name():
-                self._mgr.store(marker_id, dlg.name())
+                self._mgr.store(marker_id, dlg.name(), dlg.region())
                 self._last_goods_name = dlg.name()
                 self._field_goods.setText(self._last_goods_name)
+                self._field_region.setText(dlg.region())
                 self._result_state.setText("已入库")
                 self._set_status(f"已保存 id={marker_id}，可继续扫描下一个 AR 码")
             else:
@@ -1059,29 +1146,174 @@ class WarehousePanel(QFrame):
                 self._result_state.setText("已忽略")
                 self._set_status(f"已忽略 id={marker_id}；如需重新录入，请再次点击“商品入库”")
             self._storage_btn.setEnabled(True)
-            self._continue_btn.setEnabled(True)
             self._mgr.resume_detections()
         elif self._mode == "lookup":
             entry = self._mgr.lookup(marker_id)
             if entry:
                 self._last_goods_name = entry.name
                 self._field_goods.setText(entry.name)
+                self._field_region.setText(entry.region)
                 self._result_state.setText("已匹配")
             else:
                 self._last_goods_name = "--"
                 self._field_goods.setText("未登记")
                 self._result_state.setText("无记录")
-            self._continue_btn.setEnabled(False)
-
-    def _continue_scan(self):
-        if self._mode == "storage":
-            self._start_storage()
-        elif self._mode == "lookup":
-            self._start_lookup()
-
+    
     def _show_database(self):
         if self._db_viewer is None:
             self._db_viewer = DatabaseViewer(self._mgr.db, self._mgr, self)
         self._db_viewer.show()
         self._db_viewer.raise_()
         self._db_viewer.activateWindow()
+
+    # [demo代码，可删] 导出巡检报告
+    def _export_inspection(self):
+        log = self._mgr.get_inspection_log()
+        if not log:
+            self._mgr.status_msg.emit("✗ 暂无巡检记录，请先进行货物识别")
+            return
+
+        from PyQt5.QtWidgets import QFileDialog
+        import os
+        default_path = os.path.expanduser("~/inspection_report.xlsx")
+        dlg = QFileDialog(self, "导出巡检报告", default_path, "Excel 文件 (*.xlsx)")
+        dlg.setAcceptMode(QFileDialog.AcceptSave)
+        dlg.setOption(QFileDialog.DontUseNativeDialog, True)
+        dlg.setStyleSheet("QFileDialog { background: white; } QWidget { background: white; color: black; } QLabel { color: black; } QPushButton { color: black; background: #e0e0e0; border: 1px solid #aaa; padding: 4px 12px; } QLineEdit { color: black; background: white; border: 1px solid #aaa; }")
+        if dlg.exec_() != QFileDialog.Accepted:
+            return
+        paths = dlg.selectedFiles()
+        if not paths:
+            return
+        path = paths[0]
+        if path:
+            try:
+                ok = self._mgr.export_inspection_log(path)
+            except Exception as e:
+                self._mgr.status_msg.emit(f"✗ 导出异常: {e}")
+
+    # ═══════════════════════════════════════════════════════════════
+    # [demo代码，可删] 温度+位置检测 Demo UI 更新方法
+    # ═══════════════════════════════════════════════════════════════
+    def _on_demo_countdown(self, marker_id: int, remaining: float):
+        self._demo_flash_timer.stop()
+        self._demo_flash_on = False
+        self._set_demo_card_normal_style()
+        progress = int((10 - remaining) / 10 * 100)
+        self._demo_icon.setText("📦")
+        self._demo_title.setText(f"正在验视 AR码 #{marker_id}  ·  {remaining:.1f}s")
+        self._demo_progress.show()
+        self._demo_progress.setValue(progress)
+        self._demo_progress.setFormat("")
+        self._demo_pos_icon.setText("○")
+        self._demo_temp_icon.setText("○")
+        self._demo_pos_label.setText("位置检测中...")
+        self._demo_temp_label.setText("温度检测中...")
+
+        self._demo_status_card.setStyleSheet(
+            "QFrame#demoStatusCard { background: rgba(77,140,255,0.10); "
+            "border: 1px solid rgba(77,140,255,0.35); border-radius: 10px; }")
+        self._demo_title.setStyleSheet(
+            "color: #A0BBF0; font-weight: bold; font-size: 14px; background: transparent;")
+        self._demo_progress.setStyleSheet(
+            "QProgressBar { background: rgba(255,255,255,0.04); border-radius: 4px; "
+            "border: none; min-height: 8px; } "
+            "QProgressBar::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, "
+            "stop:0 #4D8CFF, stop:0.5 #5DADFF, stop:1 #3B7FF5); border-radius: 4px; }")
+        for lbl in [self._demo_pos_icon, self._demo_temp_icon]:
+            lbl.setStyleSheet("color: #4D8CFF; font-size: 24px; font-weight: bold; background: transparent;")
+        for lbl in [self._demo_pos_label, self._demo_temp_label]:
+            lbl.setStyleSheet("color: #7A8EA8; font-size: 11px; background: transparent;")
+
+    def _on_demo_result(self, marker_id: int, is_ok: bool):
+        self._demo_progress.hide()
+        self._demo_countdown_lbl.setText("")
+        if is_ok:
+            self._demo_icon.setText("✅")
+            self._demo_title.setText("货物验视通过")
+            self._demo_title.setStyleSheet(
+                "color: #2BD98B; font-weight: bold; font-size: 14px; background: transparent;")
+            self._demo_pos_icon.setText("✓")
+            self._demo_temp_icon.setText("✓")
+            self._demo_pos_label.setText("位置合规")
+            self._demo_temp_label.setText("温度正常 · 26.3°C")
+            for lbl in [self._demo_pos_icon, self._demo_temp_icon]:
+                lbl.setStyleSheet("color: #27ae60; font-size: 28px; font-weight: bold; background: transparent;")
+            self._demo_flash_timer.stop()
+            self._set_demo_card_ok_style()
+        else:
+            self._demo_icon.setText("🚨")
+            self._demo_title.setText(f"AR码 #{marker_id} 货物异常！")
+            self._demo_title.setStyleSheet(
+                "color: #FF6060; font-weight: bold; font-size: 14px; background: transparent;")
+            self._demo_pos_icon.setText("✗")
+            self._demo_temp_icon.setText("✗")
+            self._demo_pos_label.setText("位置偏移")
+            self._demo_temp_label.setText("温度异常 · 54.8°C")
+            for lbl in [self._demo_pos_icon, self._demo_temp_icon]:
+                lbl.setStyleSheet("color: #e74c3c; font-size: 28px; font-weight: bold; background: transparent;")
+            self._demo_flash_on = False
+            self._demo_flash_timer.start()
+        for lbl in [self._demo_pos_label, self._demo_temp_label]:
+            lbl.setStyleSheet("color: #8899B4; font-size: 11px; background: transparent;")
+
+    def _on_demo_flash(self):
+        self._demo_flash_on = not self._demo_flash_on
+        if self._demo_flash_on:
+            s = ("QFrame#warehouseResultCard { background: rgba(192,57,43,0.15); "
+                 "border: 2px solid #c0392b; border-radius: 14px; }")
+            self._demo_result_card.setStyleSheet(s)
+            self._demo_status_card.setStyleSheet(
+                "QFrame#demoStatusCard { background: rgba(255,30,30,0.18); "
+                "border: 2px solid #ff4444; border-radius: 10px; }")
+            self._demo_title.setStyleSheet(
+                "color: #FF4444; font-weight: bold; font-size: 13px; background: transparent;")
+        else:
+            self._set_demo_card_fail_style()
+
+    def _on_demo_reset(self):
+        self._demo_flash_timer.stop()
+        self._demo_flash_on = False
+        self._demo_progress.hide()
+        self._demo_icon.setText("📦")
+        self._demo_title.setText("等待货物识别...")
+        self._demo_title.setStyleSheet(
+            "color: #8899B4; font-size: 14px; background: transparent;")
+        self._demo_pos_icon.setText("—")
+        self._demo_temp_icon.setText("—")
+        self._demo_pos_label.setText("待检测")
+        self._demo_temp_label.setText("待检测")
+        for lbl in [self._demo_pos_icon, self._demo_temp_icon]:
+            lbl.setStyleSheet("color: #5B6E89; font-size: 24px; font-weight: bold; background: transparent;")
+        for lbl in [self._demo_pos_label, self._demo_temp_label]:
+            lbl.setStyleSheet("color: #7A8EA8; font-size: 11px; background: transparent;")
+        self._set_demo_card_normal_style()
+
+    def _set_demo_card_ok_style(self):
+        s = ("QFrame#warehouseResultCard { background: rgba(39,174,96,0.06); "
+             "border: 2px solid #27ae60; border-radius: 14px; }")
+        self._demo_result_card.setStyleSheet(s)
+        self._demo_status_card.setStyleSheet(
+            "QFrame#demoStatusCard { background: rgba(39,174,96,0.10); "
+            "border: 1px solid rgba(39,174,96,0.5); border-radius: 10px; }")
+
+    def _set_demo_card_fail_style(self):
+        s = ("QFrame#warehouseResultCard { background: rgba(231,76,60,0.06); "
+             "border: 2px solid #e74c3c; border-radius: 14px; }")
+        self._demo_result_card.setStyleSheet(s)
+        self._demo_status_card.setStyleSheet(
+            "QFrame#demoStatusCard { background: rgba(231,76,60,0.10); "
+            "border: 1px solid rgba(231,76,60,0.45); border-radius: 10px; }")
+        self._demo_title.setStyleSheet(
+            "color: #FF6060; font-weight: bold; font-size: 13px; background: transparent;")
+
+    def _set_demo_card_normal_style(self):
+        c = self._tm.colors()
+        s = (f"QFrame#warehouseResultCard {{ background:{c['card_bg']}; "
+             f"border:1px solid {c['card_border']}; border-radius:14px; }}")
+        self._demo_result_card.setStyleSheet(s)
+        self._demo_status_card.setStyleSheet(
+            f"QFrame#demoStatusCard {{ background:{c['card_bg']}; "
+            f"border:1px solid {c['card_border']}; border-radius:10px; }}")
+        self._demo_title.setStyleSheet(
+            "color: #8899B4; font-size: 13px; background: transparent;")

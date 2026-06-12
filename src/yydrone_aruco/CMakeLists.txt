@@ -45,6 +45,15 @@ rclcpp_components_register_node(yydrone_aruco_component
 
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY launch/ DESTINATION share/${PROJECT_NAME}/launch)
+
+# Python 节点
+install(PROGRAMS
+  scripts/hsv_region_checker.py
+  scripts/depth_region_projector.py
+  scripts/aruco_point_bridge.py
+  scripts/box_corner_detector.py
+  DESTINATION lib/${PROJECT_NAME}
+)
 install(TARGETS yydrone_aruco_component
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
