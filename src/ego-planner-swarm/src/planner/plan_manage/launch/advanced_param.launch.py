@@ -274,13 +274,13 @@ def generate_launch_description():
             # 平滑性权重         ※
             {'optimization/lambda_smooth': 2.0},
             # 避障权重0.5   ※1.3-0.8-1.0
-            {'optimization/lambda_collision': 1.0},  
+            {'optimization/lambda_collision': 1.0},
             # 可行性权重，确保速度，加速度在限制范围内 ※
             {'optimization/lambda_feasibility': 0.5},
             # 贴合度权重，控制轨迹和全局轨迹的重合度
             {'optimization/lambda_fitness': 1.0},
             # 安全距离阈值 0.5 **************！！！！！！！！！
-            {'optimization/dist0': 1.0},
+            {'optimization/dist0': 0.6}, #1.0->0.6
             # 多机安全距离
             {'optimization/swarm_clearance': 0.5},
             # 无人机允许的最大速度

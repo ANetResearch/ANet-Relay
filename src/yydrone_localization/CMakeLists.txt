@@ -12,6 +12,7 @@ find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 
 # 查找Eigen3（如果需要）
 find_package(Eigen3 REQUIRED)
@@ -44,6 +45,7 @@ install(TARGETS fastlio_locate
 # 安装Python脚本
 install(PROGRAMS
   scripts/ground_filter.py
+  scripts/relocalize.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -57,7 +59,7 @@ ament_target_dependencies(fastlio_locate
   geometry_msgs
   nav_msgs
   tf2_ros
-  
+  tf2_geometry_msgs
 )
 # 导出依赖
 ament_export_dependencies(

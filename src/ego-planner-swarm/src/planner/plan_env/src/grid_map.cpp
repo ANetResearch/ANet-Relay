@@ -156,7 +156,7 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   else if (mp_.pose_type_ == ODOMETRY)
   {
     odom_sub_ = std::make_shared<message_filters::Subscriber<nav_msgs::msg::Odometry>>(
-        node_, "/Odometry", rclcpp::QoS(100).get_rmw_qos_profile());  //grid_map/odom
+        node_, "/Odometry", rclcpp::QoS(100).get_rmw_qos_profile());  //grid_map/odom，/Odometry,/odom_high_freq
 
     sync_image_odom_ = std::make_shared<message_filters::Synchronizer<SyncPolicyImageOdom>>(
         SyncPolicyImageOdom(100), *depth_sub_, *odom_sub_);

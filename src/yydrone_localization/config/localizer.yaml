@@ -1,0 +1,26 @@
+# 全局重定位配置 — 配合 FAST-LIO2 + MID360
+# 通过 ICP 将当前 LiDAR 点云与全局 PCD 地图对齐，发布 map→lidar TF
+
+# ── 话题订阅 ────────────────────────────────────
+# FAST-LIO2 在 fastlio2 命名空间下发布的 topic
+cloud_topic: /cloud_registered
+odom_topic: /Odom_high_freq
+
+# ── 坐标系 ──────────────────────────────────────
+map_frame: map           # 全局坐标系 (与 PCD 地图一致)
+local_frame: odom        # LIO 里程计坐标系 (与旧版 fast_lio 一致)
+
+# ── 更新频率 ────────────────────────────────────
+update_hz: 1.0          # ICP 定位更新频率 (Hz), 1Hz 足够了
+
+# ── ICP 粗配准 (第1阶段) ───────────────────────
+rough_scan_resolution: 0.25
+rough_map_resolution: 0.25
+rough_max_iteration: 5
+rough_score_thresh: 0.2
+
+# ── ICP 精配准 (第2阶段) ───────────────────────
+refine_scan_resolution: 0.1
+refine_map_resolution: 0.1
+refine_max_iteration: 10
+refine_score_thresh: 0.1
