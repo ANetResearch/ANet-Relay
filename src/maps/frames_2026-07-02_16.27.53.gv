@@ -1,0 +1,8 @@
+digraph G {
+"map" -> "lidar"[label=" Broadcaster: default_authority\nAverage rate: 10.209\nBuffer length: 4.8\nMost recent transform: 1782980872.240511\nOldest transform: 1782980867.440692\n"];
+"lidar" -> "body"[label=" Broadcaster: default_authority\nAverage rate: 10.212\nBuffer length: 4.7\nMost recent transform: 1782980872.240511\nOldest transform: 1782980867.540358\n"];
+edge [style=invis];
+ subgraph cluster_legend { style=bold; color=black; label ="view_frames Result";
+"Recorded at time: 1782980873.7217536"[ shape=plaintext ] ;
+}->"map";
+}

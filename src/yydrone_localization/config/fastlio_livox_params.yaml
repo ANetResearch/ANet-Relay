@@ -24,8 +24,8 @@
             scan_rate: 10
 
         mapping:
-            acc_cov: 0.5  #0.1->0.5解决yaw drift问题，告诉滤波器加速度的测量值不太可信
-            gyr_cov: 0.5  #0.1->0.5解决yaw drift问题，快速转动时告诉滤波器陀螺仪的测量值不太可信
+            acc_cov: 5.0  #0.1->0.5解决yaw drift问题，告诉滤波器加速度的测量值不太可信
+            gyr_cov: 0.1  #0.1->0.5解决yaw drift问题，快速转动时告诉滤波器陀螺仪的测量值不太可信
             b_acc_cov: 0.001
             b_gyr_cov: 0.001
             fov_degree:    360.0

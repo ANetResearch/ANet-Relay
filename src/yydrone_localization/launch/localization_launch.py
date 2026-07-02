@@ -11,7 +11,10 @@ FAST-LIO2 里程计 + 可选全局定位
 
   mode:=localization  全局定位模式
     Livox → FAST-LIO2 → localizer(ICP) → fastlio_locate(TF) → PX4
-    需要先建好 PCD 地图，启动后调用 relocalize 服务对齐
+    需要先建好 PCD 地图。启动后有两种方式给初始位姿:
+      a) CLI: ros2 run yydrone_localization relocalize.py <pcd> x y z yaw
+      b) RViz: ros2 run yydrone_localization relocalize.py <pcd> --rviz
+             然后在 RViz 用 "2D Pose Estimate" 点当前位置
     适用场景: 已建图的已知环境
 
 用法:

@@ -8,7 +8,7 @@ odom_topic: /Odom_high_freq
 
 # ── 坐标系 ──────────────────────────────────────
 map_frame: map           # 全局坐标系 (与 PCD 地图一致)
-local_frame: odom        # LIO 里程计坐标系 (与旧版 fast_lio 一致)
+local_frame: odom         # LIO 里程计坐标系 (与 FAST-LIO2 world_frame 一致)
 
 # ── 更新频率 ────────────────────────────────────
 update_hz: 1.0          # ICP 定位更新频率 (Hz), 1Hz 足够了
