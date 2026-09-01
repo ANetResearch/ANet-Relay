@@ -1,9 +1,3 @@
-# 忽略所有第三方子仓库的目录（保留它们自己的 .git）
-src/OrbbecSDK_ROS2/
-src/aruco_ros/
-src/ego-planner-swarm/
-src/fast_lio/
-
 # 忽略编译产物
 build/
 install/

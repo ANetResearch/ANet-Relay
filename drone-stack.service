@@ -1,0 +1,20 @@
+[Unit]
+Description=Drone Autopilot Stack (MAVROS + Livox MID360 + Fast-LIO)
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/home/lcx
+
+[Service]
+Type=simple
+User=lcx
+Group=lcx
+Environment="HOME=/home/lcx"
+ExecStart=/bin/bash /home/lcx/drone_ws/start_drone.sh
+ExecStop=/bin/kill -s SIGTERM $MAINPID
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

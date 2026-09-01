@@ -25,7 +25,7 @@ def generate_launch_description():
                 'dictionary': 'DICT_6X6_250',
 
                 # ── Marker physical size (meters) ─────────────────
-                'marker_size': 0.15,
+                'marker_size': 0.10,
 
                 # ── Publish all markers, or only target_marker_id? ─
                 'publish_all_markers': True,
