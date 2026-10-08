@@ -1,0 +1,17 @@
+# 简单FSM参数配置
+
+# 控制参数
+target_height: 1.0           # 目标高度 (米)
+takeoff_speed: 0.5           # 起飞速度 (米/秒)
+max_horizontal_speed: 1.0    # 最大水平速度 (米/秒)
+control_frequency: 50.0      # 控制频率 (Hz)
+cmd_timeout: 0.5             # 命令超时时间 (秒)
+
+# 安全参数
+max_altitude: 5.0            # 最大飞行高度 (米)
+min_altitude: 0.1            # 最小飞行高度 (米)
+safety_radius: 10.0          # 安全半径 (米)
+
+# 调试参数
+enable_debug: true           # 启用调试输出
+log_frequency: 2.0           # 日志输出频率 (Hz)
