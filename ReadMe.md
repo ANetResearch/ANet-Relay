@@ -1,57 +1,45 @@
 <div align="center">
-  <h1>室内无人机自主飞行系统</h1>
-  <p><strong>定位 · 建图 · 规划 · 飞控</strong></p>
-  <p>
-    <img src="https://img.shields.io/badge/ROS_2-Humble-22314E?logo=ros&logoColor=white" alt="ROS 2 Humble">
-    <img src="https://img.shields.io/badge/Autopilot-PX4-111111?logo=px4&logoColor=white" alt="PX4">
-    <img src="https://img.shields.io/badge/LiDAR-Livox_MID360-007C91" alt="Livox MID360">
-    <img src="https://img.shields.io/badge/Odometry-FAST--LIO2-246B57" alt="FAST-LIO2">
-    <img src="https://img.shields.io/badge/Planning-EGO--Planner-C47A28" alt="EGO-Planner">
-  </p>
-  <p><em>面向室内飞行实验的 ROS 2 软件集合</em></p>
+  <h1>汤圆 U7 · 室内无人机自主飞行系统</h1>
+  <p><strong>定位　建图　规划　飞控</strong></p>
 </div>
 
----
+本仓库集成 FAST-LIO2 激光惯性里程计、Livox MID360S 驱动、EGO-Planner 轨迹规划、MAVROS 定位桥接、自主飞行状态机和无人机模型描述。
 
-本仓库集成 FAST-LIO2 激光惯性里程计、Livox MID360 驱动、EGO-Planner 轨迹规划、MAVROS 定位桥接、自主飞行状态机、无人机模型描述和键盘/任务控制脚本。
+## 飞行平台
 
-> **状态说明**：这是实验性质的 ROS 2 源码集合，不是开箱即用的 PX4/Gazebo 仿真镜像。运行前需要按实际硬件、网络、PX4 参数、坐标系和 ROS 2 环境完成配置。状态机和部分控制脚本会请求 OFFBOARD、解锁并起飞，首次验证请使用仿真或拆桨测试。
+<p align="center">
+  <img src="assets/tangyuan-u7.jpg" alt="汤圆 U7 室内无人机平台" width="100%">
+</p>
+<p align="center"><strong>汤圆 U7</strong></p>
+
+> **状态说明**：这是实验性质的 ROS 2 源码集合，不是开箱即用的 PX4/Gazebo 仿真镜像。运行前需要按实际硬件、网络、PX4 参数、坐标系和 ROS 2 环境完成配置。自主飞行状态机会请求 OFFBOARD、解锁并起飞，首次验证请使用仿真或拆桨测试。
 
 ## 功能一览
 
 | 模块 | 功能 | 主要入口 |
 |---|---|---|
-| `yydrone_localization` + `livox_ros_driver2` + `fast_lio` | MID360 驱动、FAST-LIO2 里程计、MAVROS 视觉位姿桥接、地面点云滤波 | `ros2 launch yydrone_localization fastlio_launch.py` |
+| `yydrone_localization` + `livox_ros_driver2` + `fast_lio` | MID360S 驱动、FAST-LIO2 里程计、MAVROS 视觉位姿桥接、地面点云滤波 | `ros2 launch yydrone_localization fastlio_launch.py` |
 | `ego-planner-swarm` + `yydrone_navigation` | EGO-Planner 规划参数、轨迹服务器；可选 mock 地图 | `ros2 launch yydrone_navigation ego_planner_launch.py` |
 | `yydrone_fsm` | PX4 OFFBOARD 状态机、自动起飞、接收规划命令并输出飞控设定值 | `ros2 launch yydrone_fsm fsm_launch.py` |
-| `yydrone_control` | 起飞/悬停/航点任务、EGO 命令转 MAVROS、键盘控制脚本 | 见[控制脚本](#控制脚本) |
 | `yydrone_description` | Iris URDF/Xacro、模型资源和 RViz 机器人状态展示 | `ros2 launch yydrone_description yydronemodel_launch.py` |
 | `ego-planner-swarm` 仿真包 | EGO 仓库自带的软件仿真器和单机/集群示例 | 见[仿真运行](#仿真运行) |
 
 ## 系统架构
 
 <p align="center">
-  <img src="assets/system-dataflow.svg" alt="室内无人机系统数据流：MID360、FAST-LIO2、EGO-Planner、FSM、MAVROS 与 PX4" width="100%">
+  <img src="assets/system-dataflow.svg" alt="汤圆 U7 室内无人机系统数据流：MID360S、FAST-LIO2、EGO-Planner、FSM、MAVROS 与 PX4" width="100%">
 </p>
 
 数据流图为可缩放矢量图，覆盖传感器输入、里程计与点云处理、轨迹规划、飞控状态反馈和 PX4 setpoint 输出。
 
 规划器需要有效的里程计和环境点云/地图输入。`ego_planner_launch.py` 默认**不**启动 mock 地图；若仅做算法演示，可通过 `use_mockamap:=true` 启用内置 mock 地图节点。该启动文件本身不会启动 PX4、MAVROS、Gazebo 或 EGO 软件仿真器。规划器的 odometry 参数需要与实际话题匹配，默认值并不会自动连接 MAVROS 里程计。
 
-## 平台与建图示例
+## 建图效果
 
-<table>
-  <tr>
-    <td width="50%" align="center">
-      <img src="fast_lio/doc/uav_system.png" alt="FAST-LIO 文档中的机载激光雷达无人机平台示例" width="100%">
-      <br><sub>FAST-LIO 随附的机载 LiDAR 平台参考图</sub>
-    </td>
-    <td width="50%" align="center">
-      <img src="fast_lio/doc/results/uav2_test_map.png" alt="FAST-LIO 随附的室内点云地图及轨迹示例" width="100%">
-      <br><sub>FAST-LIO 随附的点云建图与轨迹示例，非本仓库运行截图</sub>
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <img src="fast_lio/doc/results/uav2_test_map.png" alt="FAST-LIO 随附的室内点云建图示例" width="100%">
+</p>
+<p align="center"><sub>FAST-LIO 随附的点云建图与轨迹示例，非本仓库运行截图</sub></p>
 
 ## 目录结构
 
@@ -59,14 +47,12 @@
 yix_drone_ws-new_u7_src/
 ├── yydrone_localization/       # FAST-LIO 到 MAVROS 的定位桥接、滤波和启动文件
 ├── yydrone_fsm/                # 自主飞行状态机及参数
-├── yydrone_control/            # 手动控制和任务 Python 脚本
 ├── yydrone_description/        # Iris 模型、URDF/Xacro、RViz、world/model 资源
 ├── yydrone_navigation/         # EGO-Planner 集成启动文件
 ├── fast_lio/                   # FAST-LIO2
-├── assets/system-dataflow.svg  # 系统数据流矢量图
+├── assets/                     # 汤圆 U7 平台照片与系统数据流图
 ├── livox_ros_driver2-master/   # Livox ROS 2 驱动源码
 ├── ego-planner-swarm/          # EGO-Planner、消息定义和软件仿真相关包
-├── ros2_keyboard_control.py    # 仓库根目录键盘控制脚本
 └── ReadMe.md
 ```
 
@@ -128,8 +114,8 @@ source ~/drone_ws/install/setup.bash
 
 运行前至少检查以下内容：
 
-1. `yydrone_localization/config/fastlio_livox_params.yaml` 和 `fast_lio/config/mid360.yaml` 含有 `/home/lcx/...` 的示例 PCD 路径。将其改为本机有效路径，或在不加载已有地图时按 FAST-LIO 配置说明处理。
-2. 核对 MID360 的设备 IP、主机网卡、Livox SDK2 连接配置、雷达与 IMU 外参、时间同步和数据话题。FAST-LIO 默认订阅 `/livox/lidar` 与 `/livox/imu`。
+1. `yydrone_localization/config/fastlio_livox_params.yaml` 和 `fast_lio/config/mid360.yaml` 含有 `/home/lcx/...` 的示例 PCD 路径。将其改为本机有效路径，或在不加载已有地图时按 FAST-LIO 配置说明处理。配置文件名沿用上游模板，硬件按本项目的 MID360S 使用。
+2. 核对 MID360S 的设备 IP、主机网卡、Livox SDK2 连接配置、雷达与 IMU 外参、时间同步和数据话题。FAST-LIO 默认订阅 `/livox/lidar` 与 `/livox/imu`。
 3. `fastlio_launch.py` 发布 `map -> odom` 和 `livox_frame -> base_link` 的静态 TF，当前外参为零值示例。真机必须按传感器安装位置校准，并确认 TF 方向与 FAST-LIO/PX4 坐标定义一致。
 4. 检查 PX4 EKF2 的外部视觉/里程计融合配置、MAVROS 连接串口或 UDP 地址、飞控 failsafe、遥控器接管和急停方式。
 5. 检查规划器的里程计话题、地图输入、飞行边界和速度/加速度限制。当前规划启动参数中的 odometry 默认值是 `Odometry`，真机使用前应确认和实际发布话题一致。
@@ -180,8 +166,8 @@ ros2 launch yydrone_localization fastlio_launch.py
 
 | 话题 | 消息类型/用途 |
 |---|---|
-| `/livox/lidar` | MID360 点云输入 |
-| `/livox/imu` | MID360 IMU 输入 |
+| `/livox/lidar` | MID360S 点云输入 |
+| `/livox/imu` | MID360S IMU 输入 |
 | `/Odom_high_freq` | FAST-LIO 高频里程计 |
 | `/cloud_registered` | FAST-LIO 配准点云 |
 | `/cloud_registered_filter` | 地面滤波节点输出 |
@@ -210,24 +196,6 @@ ros2 launch yydrone_description yydronemodel_launch.py
 ros2 launch yydrone_navigation ego_planner_launch.py use_mockamap:=true
 ```
 
-## 控制脚本
-
-`yydrone_control` 中包含可单独运行的 Python ROS 2 节点：
-
-```bash
-cd ~/drone_ws/src/yix_drone_ws-new_u7_src
-python3 yydrone_control/scripts/takeoff.py
-python3 yydrone_control/scripts/offboard.py
-python3 yydrone_control/scripts/move_front.py
-python3 yydrone_control/scripts/integratemission.py
-python3 yydrone_control/scripts/ego2mavros.py
-python3 ros2_keyboard_control.py
-```
-
-`takeoff.py` 会执行起飞及预设航线流程；`offboard.py` 用于 OFFBOARD 悬停/控制；`move_front.py` 与 `integratemission.py` 执行各自脚本中定义的动作；`ego2mavros.py` 将 EGO `PositionCommand` 转成 MAVROS 设定值；根目录 `ros2_keyboard_control.py` 提供速度/位置键盘控制。运行前请检查每个脚本中的目标高度、航点、速度、模式切换和解锁逻辑。
-
-键盘脚本使用 Linux 终端输入接口，应在真实终端中运行。不要同时启动多个会向同一组 MAVROS setpoint 话题发送命令的控制节点，否则设定值会互相覆盖。
-
 ## 关键接口与参数
 
 | 项目 | 默认值/说明 |
@@ -249,10 +217,7 @@ FSM 参数见 `yydrone_fsm/config/fsm_params.yaml` 和 `yydrone_fsm/launch/fsm_l
 - **真机上电前确认急停/遥控器接管有效。** 先在仿真或拆桨条件下验证控制链路，再进行低高度、低速度试飞。
 - 检查 `/mavros/state` 是否已连接；检查 MAVROS 服务 `/mavros/cmd/arming` 与 `/mavros/set_mode` 是否可用。
 - 若 OFFBOARD 被拒绝，检查设定值是否提前连续发布、频率是否满足 PX4 要求、模式名称是否正确，以及 PX4 failsafe/健康检查是否通过。
-- 若 FAST-LIO 没有输出，检查 MID360 网络配置、`/livox/lidar` 和 `/livox/imu` 话题、时间戳、点云格式、外参及雷达固定情况。
+- 若 FAST-LIO 没有输出，检查 MID360S 网络配置、`/livox/lidar` 和 `/livox/imu` 话题、时间戳、点云格式、外参及雷达固定情况。
 - 若规划器没有轨迹，检查里程计和点云/地图输入、`odom_topic` 参数、坐标系、地图边界以及 `/drone_0_planning/pos_cmd` 是否发布。
 - 发生异常时优先使用遥控器切换到安全模式或急停；不要依赖关闭 ROS 节点作为唯一的停机手段。
 
-## 致谢
-
-本仓库集成并修改了 FAST-LIO、Livox ROS Driver 2、EGO-Planner-Swarm 等开源项目。使用和再分发前，请分别遵守各子项目随附的许可证和引用要求。
