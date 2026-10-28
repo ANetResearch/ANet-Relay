@@ -1,6 +1,19 @@
-# 室内无人机自主飞行工作空间
+<div align="center">
+  <h1>室内无人机自主飞行系统</h1>
+  <p><strong>定位 · 建图 · 规划 · 飞控</strong></p>
+  <p>
+    <img src="https://img.shields.io/badge/ROS_2-Humble-22314E?logo=ros&logoColor=white" alt="ROS 2 Humble">
+    <img src="https://img.shields.io/badge/Autopilot-PX4-111111?logo=px4&logoColor=white" alt="PX4">
+    <img src="https://img.shields.io/badge/LiDAR-Livox_MID360-007C91" alt="Livox MID360">
+    <img src="https://img.shields.io/badge/Odometry-FAST--LIO2-246B57" alt="FAST-LIO2">
+    <img src="https://img.shields.io/badge/Planning-EGO--Planner-C47A28" alt="EGO-Planner">
+  </p>
+  <p><em>面向室内飞行实验的 ROS 2 软件集合</em></p>
+</div>
 
-面向 **ROS 2 Humble + PX4 + MAVROS + Livox MID360** 的室内无人机实验代码。仓库集成了 FAST-LIO2 激光惯性里程计、EGO-Planner 轨迹规划、MAVROS 定位桥接、自主飞行状态机、无人机模型描述和键盘/任务控制脚本。
+---
+
+本仓库集成 FAST-LIO2 激光惯性里程计、Livox MID360 驱动、EGO-Planner 轨迹规划、MAVROS 定位桥接、自主飞行状态机、无人机模型描述和键盘/任务控制脚本。
 
 > **状态说明**：这是实验性质的 ROS 2 源码集合，不是开箱即用的 PX4/Gazebo 仿真镜像。运行前需要按实际硬件、网络、PX4 参数、坐标系和 ROS 2 环境完成配置。状态机和部分控制脚本会请求 OFFBOARD、解锁并起飞，首次验证请使用仿真或拆桨测试。
 
@@ -15,22 +28,30 @@
 | `yydrone_description` | Iris URDF/Xacro、模型资源和 RViz 机器人状态展示 | `ros2 launch yydrone_description yydronemodel_launch.py` |
 | `ego-planner-swarm` 仿真包 | EGO 仓库自带的软件仿真器和单机/集群示例 | 见[仿真运行](#仿真运行) |
 
-## 数据流
+## 系统架构
 
-```mermaid
-flowchart LR
-    L[Livox MID360] --> D[livox_ros_driver2]
-    D -->|/livox/lidar + /livox/imu| F[FAST-LIO2]
-    F -->|/Odom_high_freq| B[fastlio_locate]
-    B -->|/mavros/vision_pose/pose| M[MAVROS / PX4 EKF]
-    F -->|/cloud_registered| G[ground_filter]
-    G -->|/cloud_registered_filter| P[EGO-Planner]
-    M -.->|需配置为规划器 odometry_topic| P
-    P -->|/drone_0_planning/pos_cmd| S[yydrone_fsm]
-    S -->|/mavros/setpoint_raw/local| M
-```
+<p align="center">
+  <img src="assets/system-dataflow.svg" alt="室内无人机系统数据流：MID360、FAST-LIO2、EGO-Planner、FSM、MAVROS 与 PX4" width="100%">
+</p>
 
-规划器需要有效的里程计和环境点云/地图输入。`ego_planner_launch.py` 默认**不**启动 mock 地图；若仅做算法演示，可通过 `use_mockamap:=true` 启用内置 mock 地图节点。该启动文件本身不会启动 PX4、MAVROS、Gazebo 或 EGO 软件仿真器。
+数据流图为可缩放矢量图，覆盖传感器输入、里程计与点云处理、轨迹规划、飞控状态反馈和 PX4 setpoint 输出。
+
+规划器需要有效的里程计和环境点云/地图输入。`ego_planner_launch.py` 默认**不**启动 mock 地图；若仅做算法演示，可通过 `use_mockamap:=true` 启用内置 mock 地图节点。该启动文件本身不会启动 PX4、MAVROS、Gazebo 或 EGO 软件仿真器。规划器的 odometry 参数需要与实际话题匹配，默认值并不会自动连接 MAVROS 里程计。
+
+## 平台与建图示例
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="fast_lio/doc/uav_system.png" alt="FAST-LIO 文档中的机载激光雷达无人机平台示例" width="100%">
+      <br><sub>FAST-LIO 随附的机载 LiDAR 平台参考图</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="fast_lio/doc/results/uav2_test_map.png" alt="FAST-LIO 随附的室内点云地图及轨迹示例" width="100%">
+      <br><sub>FAST-LIO 随附的点云建图与轨迹示例，非本仓库运行截图</sub>
+    </td>
+  </tr>
+</table>
 
 ## 目录结构
 
@@ -42,6 +63,7 @@ yix_drone_ws-new_u7_src/
 ├── yydrone_description/        # Iris 模型、URDF/Xacro、RViz、world/model 资源
 ├── yydrone_navigation/         # EGO-Planner 集成启动文件
 ├── fast_lio/                   # FAST-LIO2
+├── assets/system-dataflow.svg  # 系统数据流矢量图
 ├── livox_ros_driver2-master/   # Livox ROS 2 驱动源码
 ├── ego-planner-swarm/          # EGO-Planner、消息定义和软件仿真相关包
 ├── ros2_keyboard_control.py    # 仓库根目录键盘控制脚本
