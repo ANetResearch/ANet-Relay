@@ -9,15 +9,15 @@
       <path d="M1 1L7 4L1 7" fill="none" stroke="#e82127" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
     </marker>
     <style>
-      text { font-family: "SF Pro Rounded", "Arial Rounded MT Bold", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+      text { font-family: "Inter", "HarmonyOS Sans SC", "MiSans", "Microsoft YaHei UI", "Noto Sans CJK SC", sans-serif; }
       .brand { fill:#171a1b; font-size:62px; font-weight:800; letter-spacing:1px; }
-      .subtitle { fill:#6a7274; font-size:25px; font-weight:600; letter-spacing:0.4px; }
-      .section { fill:#171a1b; font-size:25px; font-weight:800; }
+      .subtitle { fill:#6a7274; font-size:28px; font-weight:650; letter-spacing:0.4px; }
+      .section { fill:#171a1b; font-size:29px; font-weight:800; }
       .number { fill:#e82127; font-size:22px; font-weight:800; }
       .name { fill:#171a1b; font-size:30px; font-weight:800; }
-      .desc { fill:#5d6668; font-size:20px; font-weight:600; }
-      .topic { fill:#353d3f; font-family:Consolas, "Cascadia Code", monospace; font-size:18px; font-weight:600; }
-      .foot { fill:#687173; font-size:18px; font-weight:600; }
+      .desc { fill:#505a5c; font-size:23px; font-weight:650; }
+      .topic { fill:#353d3f; font-family:Consolas, "Cascadia Code", monospace; font-size:20px; font-weight:600; }
+      .foot { fill:#5c6668; font-size:22px; font-weight:650; }
       .line { fill:none; stroke:#8b9293; stroke-width:2.4; stroke-linecap:round; marker-end:url(#arrow-gray); }
       .mainline { fill:none; stroke:#e82127; stroke-width:2.6; stroke-linecap:round; marker-end:url(#arrow-red); }
       .feedback { fill:none; stroke:#a3aaab; stroke-width:2; stroke-dasharray:8 8; stroke-linecap:round; marker-end:url(#arrow-gray); }

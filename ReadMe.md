@@ -1,6 +1,6 @@
 <div align="center">
   <h1>汤圆 U7 · 室内无人机自主飞行系统</h1>
-  <p><strong>定位　建图　规划　飞控</strong></p>
+  <p><kbd>定位</kbd>&emsp;<kbd>建图</kbd>&emsp;<kbd>规划</kbd>&emsp;<kbd>飞控</kbd></p>
 </div>
 
 本仓库集成 FAST-LIO2 激光惯性里程计、Livox MID360S 驱动、EGO-Planner 轨迹规划、MAVROS 定位桥接、自主飞行状态机和无人机模型描述。
@@ -19,7 +19,7 @@
 | 模块 | 功能 | 主要入口 |
 |---|---|---|
 | `yydrone_localization` + `livox_ros_driver2` + `fast_lio` | MID360S 驱动、FAST-LIO2 里程计、MAVROS 视觉位姿桥接、地面点云滤波 | `ros2 launch yydrone_localization fastlio_launch.py` |
-| `ego-planner-swarm` + `yydrone_navigation` | EGO-Planner 规划参数、轨迹服务器；可选 mock 地图 | `ros2 launch yydrone_navigation ego_planner_launch.py` |
+| `ego-planner-swarm` + `yydrone_navigation` | EGO-Planner 规划参数与轨迹服务器 | `ros2 launch yydrone_navigation ego_planner_launch.py` |
 | `yydrone_fsm` | PX4 OFFBOARD 状态机、自动起飞、接收规划命令并输出飞控设定值 | `ros2 launch yydrone_fsm fsm_launch.py` |
 | `yydrone_description` | Iris URDF/Xacro、模型资源和 RViz 机器人状态展示 | `ros2 launch yydrone_description yydronemodel_launch.py` |
 | `ego-planner-swarm` 仿真包 | EGO 仓库自带的软件仿真器和单机/集群示例 | 见[仿真运行](#仿真运行) |
@@ -32,7 +32,7 @@
 
 数据流图为可缩放矢量图，覆盖传感器输入、里程计与点云处理、轨迹规划、飞控状态反馈和 PX4 setpoint 输出。
 
-规划器需要有效的里程计和环境点云/地图输入。`ego_planner_launch.py` 默认**不**启动 mock 地图；若仅做算法演示，可通过 `use_mockamap:=true` 启用内置 mock 地图节点。该启动文件本身不会启动 PX4、MAVROS、Gazebo 或 EGO 软件仿真器。规划器的 odometry 参数需要与实际话题匹配，默认值并不会自动连接 MAVROS 里程计。
+规划器需要有效的里程计和环境点云/地图输入。该启动文件本身不会启动 PX4、MAVROS、Gazebo 或 EGO 软件仿真器。规划器的 odometry 参数需要与实际话题匹配，默认值并不会自动连接 MAVROS 里程计。
 
 ## 建图效果
 
@@ -134,7 +134,7 @@ ros2 launch yydrone_localization fastlio_launch.py
 ```
 
 ```bash
-# 终端 2：EGO 规划器（真机默认不启动 mock 地图）
+# 终端 2：EGO 规划器
 ros2 launch yydrone_navigation ego_planner_launch.py
 ```
 
@@ -190,12 +190,6 @@ ros2 launch yydrone_description yydronemodel_launch.py
 
 该启动文件只启动 URDF 模型的 `robot_state_publisher`、`joint_state_publisher` 和 RViz，不启动 Gazebo、PX4 SITL 或 MAVROS。EGO 自带的软件仿真器与 PX4 SITL/Gazebo 是不同的仿真环境，不要把这些启动命令视为完整的 PX4 SITL 仿真方案。
 
-启用 EGO 集成启动文件的随机 mock 地图示例：
-
-```bash
-ros2 launch yydrone_navigation ego_planner_launch.py use_mockamap:=true
-```
-
 ## 关键接口与参数
 
 | 项目 | 默认值/说明 |
@@ -208,7 +202,6 @@ ros2 launch yydrone_navigation ego_planner_launch.py use_mockamap:=true
 | FSM 飞控输出 | `/mavros/setpoint_raw/local` |
 | FSM 默认起飞高度 | `1.0 m` |
 | FSM 默认控制频率 | `50 Hz` |
-| 规划器 mock 地图 | 默认关闭；`use_mockamap:=true` 开启 |
 
 FSM 参数见 `yydrone_fsm/config/fsm_params.yaml` 和 `yydrone_fsm/launch/fsm_launch.py`。注意 launch 文件会直接传入一组参数，修改 YAML 时请确认 launch 是否实际加载该文件；当前 `fsm_launch.py` 直接设置的参数优先生效。
 
