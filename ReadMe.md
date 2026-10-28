@@ -1,6 +1,6 @@
 <div align="center">
   <h1>汤圆 U7 · 室内无人机自主飞行系统</h1>
-  <p><kbd>定位</kbd>&emsp;<kbd>建图</kbd>&emsp;<kbd>规划</kbd>&emsp;<kbd>飞控</kbd></p>
+  <p><strong>定位</strong>&emsp;<strong>建图</strong>&emsp;<strong>规划</strong>&emsp;<strong>飞控</strong></p>
 </div>
 
 本仓库集成 FAST-LIO2 激光惯性里程计、Livox MID360S 驱动、EGO-Planner 轨迹规划、MAVROS 定位桥接、自主飞行状态机和无人机模型描述。
