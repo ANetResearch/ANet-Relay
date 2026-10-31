@@ -1,6 +1,13 @@
 <div align="center">
   <h1>汤圆 U7 · 室内无人机自主飞行系统</h1>
   <p><strong>定位</strong>&emsp;<strong>建图</strong>&emsp;<strong>规划</strong>&emsp;<strong>飞控</strong></p>
+  <p>
+    <a href="https://arxiv.org/abs/2609.18191"><img src="https://img.shields.io/badge/arXiv-2609.18191-b31b1b.svg" alt="arXiv"></a>
+    <a href="#"><img src="https://img.shields.io/badge/paper-coming%20soon-6c757d.svg" alt="Paper coming soon"></a>
+    <a href="#license"><img src="https://img.shields.io/badge/license-not%20specified-6c757d.svg" alt="License not specified"></a>
+    <a href="https://docs.ros.org/en/humble/"><img src="https://img.shields.io/badge/ROS%202-Humble-22314e.svg" alt="ROS 2 Humble"></a>
+    <a href="https://developer.nvidia.com/embedded/jetson-orin"><img src="https://img.shields.io/badge/platform-Jetson%20Orin%20NX-76b900.svg" alt="Jetson Orin NX"></a>
+  </p>
 </div>
 
 本仓库集成 FAST-LIO2 激光惯性里程计、Livox MID360S 驱动、EGO-Planner 轨迹规划、MAVROS 定位桥接、自主飞行状态机和无人机模型描述。
