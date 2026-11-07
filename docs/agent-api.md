@@ -230,6 +230,25 @@ Interface actions: `get_state`, `set_language {lang: en | zh}`, `set_workspace`,
 
 Without a connected window the call fails with 503 `ui_unavailable`; no answer within 5 s gives 504 `ui_timeout`; an action the window refuses gives 409 `ui_action_failed`. Fleet, network, settings and alert operations use the existing paths in section 5 and the OpenAPI reference (`/discover`, `/vehicles`, `/sims`, `/stop-all`, `/network/retry`, `/bridges/{ip}`, `/alerts/{id}/ack`, `/courses/{id}`, `/settings`) at the "app operation" level of section 4.
 
+### Bench procedures
+
+A bench procedure runs calibration and stability checks on one aircraft step by step and saves a report (S1 link and firmware, S2 battery at rest, S3 parameter baseline, S4 sensor calibration, S5 stick directions, S6 motor order and direction, S7 ground vibration, S8 propellers fitted, S9 hover test, S10 step response, S11 hover learning, S12 report). Procedures: `full_bench` (S1–S12), `preflight_quick` (S1, S2, S7, S9 for 10 s, S12), `motor_check` (S1, S6, S12), `vibration_check` (S1, S7, S9 for 20 s, S12) and `hover_tune` (S1, S8–S12). A procedure starts on a disarmed aircraft on the ground and needs control of it (claim, or the operator's possession).
+
+| Method and path | Auth | Purpose |
+|---|---|---|
+| `GET /procedures` | – | Catalogue: `{procedures: [{id, title_en, title_zh, steps: [{id, title_en, title_zh, kind}], est_s}]}`; `kind` is `auto`, `operator`, `operator_device`, `device` or `flight` |
+| `POST /vehicles/{id}/procedure` | controller | `{procedure, options: {hover_s 5–60, skip: [step ids], auto_answer}}`; `auto_answer` (simulators only) answers S6 from the servo outputs; S12 cannot be skipped → the run view |
+| `GET /vehicles/{id}/procedure` | – | The current run, else the most recent saved one: `state` (`running`, `waiting`, `passed`, `warned`, `failed`, `aborted`), `step`, `index`, `total`, `paused`, `reason`, and per step `state`, `verdict`, `metrics` (value, unit, level, window `mean` / `peak`, `warn` / `bad` limits), `findings`, `suggestions`, `prompt`, `live` (recent points of the running step, 5 Hz) |
+| `POST /vehicles/{id}/procedure/answer` | controller or operator | `{step, answer, confirm?}`: answer the waiting prompt; `answer` is one of `prompt.answers[].id` |
+| `POST /vehicles/{id}/procedure/abort` | controller or operator | Abort: motor tests stop and an airborne aircraft lands |
+| `GET /test-runs?vehicle=&limit=` | – | Saved reports, newest first, with verdict counts; `vehicle` matches the aircraft id or its address |
+| `GET /test-runs/{run_id}` | – | One saved report with every step and the parameter baseline and changes |
+| `GET /test-runs/{run_id}/export?fmt=md\|json` | – | The report as Markdown (bilingual tables, UTC times) or JSON, as a download |
+
+A waiting step carries `prompt`: `{id, text_en, text_zh, detail_en, detail_zh, answers, confirm_word, operator_only, data}`. On a real aircraft `confirm_word` keeps the device rules: `MOTOR` before S6 and S7 spin motors (props off, at most 30 %, at most 5 s, disarmed; one word covers every motor of the step), `CALIBRATE` for each S4 calibration, `ARM` before S9 takes off, and the parameter name before S11 writes it (read back and checked). Prompts with `operator_only: true` (S5, S6, S8 and the S7 propeller check on a real aircraft) refuse sessions with 403 `operator_required`: a person must attest them at the Relay window. On a simulator an agent may answer every prompt.
+
+The run is driven by the fleet loop, not by the caller: poll `GET .../procedure` (or watch the events) and answer when `state` is `waiting`. A run aborts on an emergency stop (the stop wins: no procedure landing follows), a lost link, a crash, a lost claim, or arming and disarming outside the flight steps. A session's run pauses while a person possesses the aircraft and resumes, from the start of the current step, once control returns and the aircraft is disarmed. Flight steps take off to 0.6 m, keep inside the safety volume and land by themselves; S10 flies short roll, pitch and yaw stick steps in altitude hold. Suggested parameter changes (S10 rate gains, S11 hover throttle) are never written automatically: S11 asks for each one.
+
 ### Flight health
 
 Every vehicle carries `health`: rolling diagnostics over the last 5 s, shown in the inspector under Overview → Flight health. `state` is `ok`, `warn`, `bad` or `idle` (not armed); `items` lists `{key, level, value, unit, detail}` for `oscillation` (roll and pitch rate RMS, deg/s), `lean` (tilt held with centred sticks), `yaw_drift`, `alt_hold` (vertical speed spread in altitude hold), `hover_throttle`, `motors` (spread of mean motor outputs, saturation), `vibration` (peak, accelerometer clipping), `battery_sag` (per cell), `link` and `stick_stream` (stick updates from the Relay window while a person flies). Flight items are judged only after 1.5 s in the air; `level` is `na` until then. [`flight-tuning.zh-CN.md`](flight-tuning.zh-CN.md) explains each item and what to change.
@@ -275,6 +294,7 @@ Each event is `{seq, t, kind, vehicle, session, text_en, text_zh, data}`. The ki
 | `refly_started` / `refly_finished` / `refly_failed` | Re-fly |
 | `device_command` / `motor_test` / `motor_test_stopped` / `actuator_set` / `rc_override` / `message_interval` / `home_set` / `rebooting` / `calibration_started` / `terminated` | Device-level operations |
 | `app_command` | An interface action run by a session or the operator (`data.action`, `data.by`) |
+| `procedure_started` / `procedure_step` / `procedure_waiting` / `procedure_finished` / `procedure_aborted` | Bench procedures, with `data.run_id`, `data.step`, `data.verdict` or `data.reason` |
 
 The full list is in `web/src/api/schema.json` (`EventKind`). Errors share one body and keep their `code` stable across versions:
 
@@ -287,8 +307,8 @@ The full list is in `web/src/api/schema.json` (`EventKind`). Errors share one bo
 | 400 | `invalid_request`, `confirm_required`, `outside_safety_volume`, `unknown_mode`, `command_not_allowed` |
 | 401 | `auth_required`, `session_expired` (open a new session) |
 | 403 | `operator_required`, `session_required`, `untrusted_host`, `app_control_disabled` |
-| 404 | `vehicle_not_found`, `course_not_found`, `unknown_skill`, `param_not_found`, `record_not_found` |
-| 409 | `not_claimed`, `claimed_by_other`, `possessed_by_human`, `claim_suspended`, `preflight_blocked`, `arm_rejected`, `mode_rejected`, `not_armed`, `crashed`, `capability_missing`, `no_position_estimate`, `not_airborne`, `no_plan`, `must_be_disarmed`, `message_not_seen`, `refly_unavailable`, `ui_action_failed` |
+| 404 | `vehicle_not_found`, `course_not_found`, `unknown_skill`, `param_not_found`, `record_not_found`, `procedure_unknown`, `procedure_not_found`, `test_run_not_found` |
+| 409 | `not_claimed`, `claimed_by_other`, `possessed_by_human`, `claim_suspended`, `preflight_blocked`, `arm_rejected`, `mode_rejected`, `not_armed`, `crashed`, `capability_missing`, `no_position_estimate`, `not_airborne`, `no_plan`, `must_be_disarmed`, `message_not_seen`, `refly_unavailable`, `ui_action_failed`, `procedure_running`, `no_procedure`, `procedure_step_mismatch`, `procedure_not_waiting` |
 | 429 | `rate_limited` |
 | 503 | `link_not_ready`, `backend_busy`, `ui_unavailable` |
 | 504 | `ui_timeout` |
@@ -300,7 +320,7 @@ Relay ships three stdio Model Context Protocol servers (JSON-RPC 2.0, standard l
 | Server | File | Tools | Scope |
 |---|---|---|---|
 | `anet-relay` | `mcp/anet_relay_mcp.py` | 20 `relay_*` | Flight: fleet, claims, arm, mode, skills, plans, timed sticks, re-fly, courses, stop |
-| `anet-relay-device` | `mcp/anet_relay_device_mcp.py` | 29 `device_*` | Device level: overview, MAVLink messages, parameter reads and writes, raw commands, single-motor tests, actuators, RC override, message rates, reboot, calibration, home, attitude and velocity control, flight termination |
+| `anet-relay-device` | `mcp/anet_relay_device_mcp.py` | 36 `device_*` | Device level: overview, MAVLink messages, parameter reads and writes, raw commands, single-motor tests, actuators, RC override, message rates, reboot, calibration, home, attitude and velocity control, flight termination, bench procedures and their reports |
 | `anet-relay-app` | `mcp/anet_relay_app_mcp.py` | 41 `app_*` | Application control: app and window state, controllers, language, workspace, selection, inspector, dialogs, screenshots, network scan, connecting and removing aircraft, simulators, settings, alerts, records and export, re-fly sources, possession, the Copilot window, stop-all |
 
 Each server opens an agent session named by `--name` (defaults `mcp`, `mcp-device` and `mcp-app`) at start, renews its lease and closes it when the client disconnects. After a Relay restart it opens a new session on the next call; claims must then be made again. Claims belong to a session: fly an aircraft with the claim tool of the same server (`relay_claim` or `device_claim`). Arguments are checked before anything reaches Relay; missing or unknown ones come back as `invalid arguments`. Failures come back as tool results with `isError: true` and the error code, so a model can react (for example, wait on `possessed_by_human`).
@@ -372,6 +392,7 @@ If Relay is not on port 8765, add `"--base", "http://127.0.0.1:<port>"`. The des
 | `device(id)` · `message(id, name)` · `param(id, name)` · `params_read(id, names)` · `set_param(id, name, value)` · `commands()` | Device reads and parameter writes |
 | `command(id, command, params, frame, use_int, confirm, timeout_s)` · `motor_test(id, motor, throttle_pct, seconds, confirm)` · `motors_stop(id)` · `actuator(id, index, value, pwm, seconds, confirm)` · `rc(id, channels, axes)` | Raw commands, motors, actuators, RC override |
 | `message_interval(id, message, hz)` · `request_message(id, message)` · `reboot(id, confirm)` · `calibrate(id, sensor, confirm)` · `set_home(id, here, lat, lon, alt)` · `terminate(id, confirm)` | Message rates, reboot, calibration, home, flight termination |
+| `procedures()` · `procedure_start(id, procedure, hover_s, skip, auto_answer)` · `procedure(id)` · `procedure_answer(id, step, answer, confirm)` · `procedure_abort(id)` · `wait_procedure(id, timeout, waiting=True)` · `test_runs(id)` · `test_run(run_id)` · `test_run_export(run_id, fmt)` | Bench procedures and reports |
 | `app()` · `ui_state()` · `gamepads()` · `app_actions()` · `ui(action, **args)` | App and window state, interface actions |
 | `scan_network(networks)` · `connect_vehicle(host, port)` · `remove_vehicle(id)` · `add_sims(count, autopilot)` · `remove_sims(ids)` · `settings()` · `update_settings(**patch)` · `ack_alert(id)` · `stop_all()` | App operations: made as the session when one is open, otherwise with the operator token |
 
