@@ -23,7 +23,7 @@ import { MotorTest } from './MotorTest'
 import { PreflightList } from './PreflightList'
 import { Sticks } from './Sticks'
 import { useAwaiting, useHold, useInputPaused, usePadDisconnected } from './store'
-import { useCT } from './strings'
+import { useCT, h5Key } from './strings'
 import './control.css'
 
 export interface ControlTabProps {
@@ -113,6 +113,7 @@ function PossessBlock({ v }: { v: Vehicle }) {
           {paused ? <Notice>{t('stage.inputPaused')}</Notice> : null}
           {!paused && awaiting === 'focus' ? <Notice>{ct('ctl.moveToResume')}</Notice> : null}
           {!paused && awaiting === 'link' ? <Notice>{t('stage.linkRestored')}</Notice> : null}
+          {!paused && awaiting === 'throttle' ? <Notice>{ct(h5Key(v.mode_class))}</Notice> : null}
           {lost ? <Notice tone="warn">{t('stage.linkLost', { aircraft: v.label })}</Notice> : null}
           {padLost && v.possession?.pad ? <Notice tone="warn">{t('stage.padDisconnected', { n: v.possession.pad, aircraft: v.label })}</Notice> : null}
         </>

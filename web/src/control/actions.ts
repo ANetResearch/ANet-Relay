@@ -7,9 +7,11 @@ import { notify, notifyError } from '@/shell/notify'
 import { getVehicle } from '@/store/selectors'
 import { useRelay } from '@/store/relay'
 import { useUi } from '@/store/ui'
+import { setControlFeel } from '@/settings/prefs'
 import { autoBindTarget, possessedBy, type SourceKey } from './bindings'
 import type { EngineActions, EngineNotice } from './engine'
-import { ct } from './strings'
+import type { ControlFeel } from './shaping'
+import { ct, type ControlKey } from './strings'
 
 /** Window events for the stage (WP6): touchpad view cycle and the selection-ring pulse of a newly bound pad. */
 export const VIEW_CYCLE_EVENT = 'relay:view-cycle'
@@ -63,6 +65,28 @@ function notice(n: EngineNotice): void {
   else notify(ct('ctl.alreadyFlown', { aircraft: label(n.vehicle), input: sourceLabel(n.by) }), { level: 'warn' })
 }
 
+// ------------------------------------------------------------------------------- WP-C: fire hook and feel
+
+/** Transport of the hold-to-fire input (05 §7.4); the arena package installs it. */
+export type FireHandler = (vehicle: string, on: boolean) => void
+let fireHandler: FireHandler = () => undefined
+
+/**
+ * Installs the fire transport: the input engine calls it with `on` at the press, every 100 ms while held and `off`
+ * at the release, for possessed simulated aircraft only. Returns a function that restores the no-op default.
+ */
+export function setFireHandler(handler: FireHandler): () => void {
+  fireHandler = handler
+  return () => {
+    if (fireHandler === handler) fireHandler = () => undefined
+  }
+}
+
+function setFeel(feel: ControlFeel): void {
+  setControlFeel(feel)
+  notify(ct('feel.changed', { feel: ct(`feel.${feel}` as ControlKey) }), { timeoutMs: 1500 })
+}
+
 export const engineActions: EngineActions = {
   possess: possessWith,
   release: releaseVehicle,
@@ -74,6 +98,9 @@ export const engineActions: EngineActions = {
   moveSelection,
   viewCycle: () => window.dispatchEvent(new CustomEvent(VIEW_CYCLE_EVENT)),
   notice,
+  simAssist: (vehicle, on) => report(api.simAssist(vehicle, on)),
+  fire: (vehicle, on) => fireHandler(vehicle, on),
+  setFeel,
 }
 
 async function waitForVehicle(id: string, timeoutMs = 4000): Promise<boolean> {

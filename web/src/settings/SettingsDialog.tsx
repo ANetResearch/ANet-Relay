@@ -12,15 +12,15 @@ import { Button } from '@/ui/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/components/ui/dialog'
 import { Input } from '@/ui/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/ui/components/ui/native-select'
-import { Slider } from '@/ui/components/ui/slider'
 import { Switch } from '@/ui/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/ui/components/ui/toggle-group'
 import { Icon } from '@/ui/icons'
 import { Value } from '@/ui/relay'
 import { t8, useT8, type AnyKey } from '@/fleet/copy'
 import { CopyButton, openExternal } from '@/agents/CopyButton'
-import { applyBackendUi, DEADZONE_RANGE, EXPO_RANGE, setPrefs, usePrefs, type StartView, type Units } from './prefs'
+import { applyBackendUi, setPrefs, usePrefs, type StartView, type Units } from './prefs'
 import { CopilotSettings } from '@/copilot/CopilotSettings'
+import { ControllerSettings, SimSettings } from '@/control/ControllerSettings'
 import './settings.css'
 
 export interface SettingsDialogProps {
@@ -44,6 +44,9 @@ interface BackendSettings {
   restart_fields?: string[]
   data_dir?: string | null
   ui?: Record<string, unknown>
+  // WP-C simulator flight model (05 §5.2)
+  sim_hover_assist?: boolean
+  sim_turbulence?: number
 }
 
 const SECTIONS: { id: SettingsSection; key: AnyKey; icon: Parameters<typeof Icon>[0]['icon'] }[] = [
@@ -251,59 +254,14 @@ function Safety({ s, save }: { s: BackendSettings; save(p: Partial<BackendSettin
       <Row label={t('set.stickTimeout')} hint={t('set.stickTimeoutHint')}>
         <ReadOnly value={`${s.stick_timeout_s.toFixed(1)} s`} />
       </Row>
+      <SimSettings s={s} save={save} Row={Row} />
     </>
   )
 }
 
-const MAPPING: [AnyKey, AnyKey][] = [
-  ['map.leftV', 'map.leftV.do'],
-  ['map.leftH', 'map.leftH.do'],
-  ['map.right', 'map.right.do'],
-  ['map.options', 'map.options.do'],
-  ['map.l1r1', 'map.l1r1.do'],
-  ['map.l2r2', 'map.l2r2.do'],
-  ['map.triangle', 'map.triangle.do'],
-  ['map.square', 'map.square.do'],
-  ['map.circle', 'map.circle.do'],
-  ['map.dpad', 'map.dpad.do'],
-  ['map.touchpad', 'map.touchpad.do'],
-]
-
+// WP-C (05 §6): control feel, stick mode, inversion, detent, learned mappings and the mapping tables.
 function Controllers() {
-  const t = useT8()
-  const dz = usePrefs((p) => p.padDeadzone)
-  const expo = usePrefs((p) => p.padExpo)
-  return (
-    <>
-      <Row label={t('pad.panel.deadzone')}>
-        <div className="w-40 shrink-0"><Slider value={[dz]} min={DEADZONE_RANGE[0]} max={DEADZONE_RANGE[1]} step={0.01} onValueChange={(v) => setPrefs({ padDeadzone: Array.isArray(v) ? v[0] : (v as number) })} aria-label={t('pad.panel.deadzone')} /></div>
-        <span className="num w-10 text-right text-[12px] text-[var(--g200)]">{dz.toFixed(2)}</span>
-      </Row>
-      <Row label={t('pad.panel.expo')}>
-        <div className="w-40 shrink-0"><Slider value={[expo]} min={EXPO_RANGE[0]} max={EXPO_RANGE[1]} step={0.05} onValueChange={(v) => setPrefs({ padExpo: Array.isArray(v) ? v[0] : (v as number) })} aria-label={t('pad.panel.expo')} /></div>
-        <span className="num w-10 text-right text-[12px] text-[var(--g200)]">{expo.toFixed(2)}</span>
-      </Row>
-      <div className="flex flex-col gap-1.5 pt-3">
-        <span className="cap">{t('set.mapping')}</span>
-        <table className="w-full text-[12px]" data-lf-table="">
-          <thead>
-            <tr className="border-b border-[var(--foreground)] text-left">
-              <th className="cap py-1 font-[560]">{t('set.mapping.input')}</th>
-              <th className="cap py-1 font-[560]">{t('set.mapping.action')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {MAPPING.map(([k, d]) => (
-              <tr key={k} className="border-b border-dotted border-[var(--border)]">
-                <td className="py-1.5 pr-3 text-[var(--g200)]">{t(k)}</td>
-                <td className="py-1.5 text-[var(--g400)]">{t(d)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </>
-  )
+  return <ControllerSettings Row={Row} />
 }
 
 function Network({ s, save }: { s: BackendSettings; save(p: Partial<BackendSettings>): Promise<boolean> }) {

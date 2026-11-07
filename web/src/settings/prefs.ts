@@ -1,8 +1,11 @@
 // Window preferences (02 §16 General / Controllers): persisted in the backend settings under `ui` and cached in
 // localStorage so the first frame already uses them. Read by the stage (start view, chase on course) and the
-// controller input (dead zone, expo); see CONTRACTS.md §5.
+// controller input (dead zone, expo, and since v0.3 the control feel, stick mode, axis inversion, throttle detent
+// and the learned controller profiles of 05 §6.1, §6.3); see CONTRACTS.md §5.
 import { create } from 'zustand'
 import { api } from '@/api'
+import { sanitizeProfiles, type PadProfile } from '@/control/devices'
+import { FEELS, NO_INVERT, type AxisInvert, type ControlFeel, type StickMode } from '@/control/shaping'
 
 export type Units = 'm' | 'ft'
 export type StartView = 'overview' | 'chase' | 'top'
@@ -13,9 +16,27 @@ export interface Prefs {
   chaseOnCourse: boolean
   padDeadzone: number
   padExpo: number
+  // WP-C control feel (05 §6.1, §6.3)
+  controlFeel: ControlFeel
+  stickMode: StickMode
+  invert: AxisInvert
+  throttleDetent: boolean
+  /** learned transmitter / generic controller mappings by device id (at most 8) */
+  padProfiles: Record<string, PadProfile>
 }
 
-export const DEFAULT_PREFS: Prefs = { units: 'm', startView: 'overview', chaseOnCourse: true, padDeadzone: 0.08, padExpo: 0.3 }
+export const DEFAULT_PREFS: Prefs = {
+  units: 'm',
+  startView: 'overview',
+  chaseOnCourse: true,
+  padDeadzone: 0.08,
+  padExpo: 0.3,
+  controlFeel: 'standard',
+  stickMode: 2,
+  invert: NO_INVERT,
+  throttleDetent: true,
+  padProfiles: {},
+}
 export const DEADZONE_RANGE = [0.04, 0.15] as const
 export const EXPO_RANGE = [0, 0.6] as const
 
@@ -32,7 +53,22 @@ export function sanitizePrefs(raw: unknown): Prefs {
     chaseOnCourse: typeof r.chaseOnCourse === 'boolean' ? r.chaseOnCourse : DEFAULT_PREFS.chaseOnCourse,
     padDeadzone: clamp(num(r.padDeadzone, DEFAULT_PREFS.padDeadzone), DEADZONE_RANGE),
     padExpo: clamp(num(r.padExpo, DEFAULT_PREFS.padExpo), EXPO_RANGE),
+    controlFeel: r.controlFeel === 'gentle' || r.controlFeel === 'sport' ? r.controlFeel : 'standard',
+    stickMode: r.stickMode === 1 ? 1 : 2,
+    invert: sanitizeInvert(r.invert),
+    throttleDetent: typeof r.throttleDetent === 'boolean' ? r.throttleDetent : DEFAULT_PREFS.throttleDetent,
+    padProfiles: sanitizeProfiles(r.padProfiles),
   }
+}
+
+function sanitizeInvert(raw: unknown): AxisInvert {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  return { roll: r.roll === true, pitch: r.pitch === true, yaw: r.yaw === true, throttle: r.throttle === true }
+}
+
+/** A feel preset also sets the expo it defines; the expo slider fine-tunes from there (05 §6.1). */
+export function setControlFeel(feel: ControlFeel): void {
+  setPrefs({ controlFeel: feel, padExpo: FEELS[feel].expo })
 }
 
 function loadLocal(): Prefs {

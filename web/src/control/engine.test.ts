@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { Vehicle } from '@/api'
+import type { PadProfile } from './devices'
 import { InputEngine, type EngineDeps, type EngineNotice } from './engine'
 import type { GamepadLike, StickFrame } from './mapping'
+import type { ControlPrefs } from './shaping'
 
 type Possession = Vehicle['possession']
 
@@ -39,6 +41,8 @@ function harness(vehicles: Vehicle[]) {
     cancelled: [] as string[],
     calls: [] as string[],
     notices: [] as EngineNotice[],
+    prefs: {} as Partial<ControlPrefs>,
+    profiles: {} as Record<string, PadProfile>,
   }
   const possess = (id: string, input: Possession) => {
     for (const v of h.vehicles) {
@@ -59,7 +63,9 @@ function harness(vehicles: Vehicle[]) {
     focused: () => h.focused,
     send: (vehicle, f) => h.sent.push({ vehicle, f }),
     cancel: (vehicle) => h.cancelled.push(vehicle),
-    prefs: () => ({ deadzone: 0.08, expo: 0 }),
+    profiles: () => h.profiles,
+    // sport feel and no detent keep the v0.2 stick values these tests were written for
+    prefs: () => ({ deadzone: 0.08, expo: 0, feel: 'sport', throttleDetent: false, ...h.prefs }),
     act: {
       possess: async (id, pad) => {
         h.calls.push(`possess ${id} ${pad ?? 'kb'}`)
@@ -77,6 +83,9 @@ function harness(vehicles: Vehicle[]) {
       moveSelection: (d) => void h.calls.push(`select ${d}`),
       viewCycle: () => void h.calls.push('view'),
       notice: (n) => void h.notices.push(n),
+      simAssist: async (id, on) => void h.calls.push(`assist ${id} ${on}`),
+      fire: (id, on) => void h.calls.push(`fire ${id} ${on} @${h.t}`),
+      setFeel: (f) => void h.calls.push(`feel ${f}`),
     },
   }
   const engine = new InputEngine(deps)
@@ -98,11 +107,12 @@ const last = (h: { sent: { vehicle: string; f: StickFrame }[] }, id: string) => 
 describe('keyboard source', () => {
   it('sends frames for the keyboard-possessed aircraft only', () => {
     const { h, engine, step, possess } = harness([vehicle('sim-1'), vehicle('sim-2')])
+    h.prefs = { feel: 'standard' } // W reaches 0.8 of full stick in the Standard feel (05 §6.1)
     possess('sim-1', { input: 'keyboard', pad: null, since: 0 })
     engine.keyDown('w')
     step(20, 10)
     expect(h.sent.every((s) => s.vehicle === 'sim-1')).toBe(true)
-    expect(last(h, 'sim-1')!.pitch).toBeCloseTo(0.5, 6)
+    expect(last(h, 'sim-1')!.pitch).toBeCloseTo(0.8, 6)
     expect(last(h, 'sim-1')!.throttle).toBe(0.5)
   })
   it('seeds a low throttle on the ground in a self-levelling mode so the aircraft can arm', () => {
@@ -344,5 +354,268 @@ describe('buttons', () => {
     expect(h.calls).toEqual(['possess sim-1 1', 'mode sim-1 STABILIZE', 'course sim-1', 'view'])
     press(15)
     expect(h.calls).not.toContain('select 1')
+  })
+})
+
+// ---------------------------------------------------------------------------------------------- WP-C (05 §6)
+
+const sim = (id: string, over: Partial<Vehicle> = {}) => vehicle(id, { sim: { hover_assist: true, turbulence: 0.3 }, ...over })
+const tx = (index: number, axes: number[], buttons: number[] = []) => gp(index, axes, buttons, 'EdgeTX RadioMaster TX16S Joystick')
+const nonStd = (p: GamepadLike): GamepadLike => ({ ...p, mapping: '' })
+const fires = (h: { calls: string[] }) => h.calls.filter((c) => c.startsWith('fire'))
+
+describe('control feel (05 §6.1)', () => {
+  it('scales the pad by the preset and keeps the throttle linear', () => {
+    const { h, step } = harness([sim('sim-1', { mode: 'STABILIZE', mode_class: 'manual' })])
+    h.prefs = { feel: 'gentle', expo: 0.45 }
+    h.pads = [gp(0, [1, -0.5, 1, 0])]
+    step(20, 2)
+    const f = last(h, 'sim-1')!
+    expect(f.roll).toBeCloseTo(0.5, 4)
+    expect(f.yaw).toBeCloseTo(0.5, 4)
+    // ly -0.5 raw is stick up 0.5: dead zone 0.08 then no expo: linear through the 0.5 hover point
+    expect(f.throttle).toBeCloseTo(0.75, 4)
+  })
+  it('Mode 1 moves the throttle to the right stick', () => {
+    const { h, step } = harness([sim('sim-1', { mode: 'STABILIZE', mode_class: 'manual' })])
+    h.prefs = { stickMode: 1 }
+    h.pads = [gp(0, [0, -1, 0, 0])]
+    step(20, 2)
+    expect(last(h, 'sim-1')).toMatchObject({ pitch: 1, throttle: 0.5 })
+    h.pads = [gp(0, [0, 0, 0, -1])]
+    step()
+    expect(last(h, 'sim-1')).toMatchObject({ pitch: 0, throttle: 1 })
+  })
+  it('D-pad up / down steps the preset', () => {
+    const { h, step } = harness([sim('sim-1')])
+    h.prefs = { feel: 'standard' }
+    h.pads = [gp(0)]
+    step(20, 2)
+    h.pads = [gp(0, [0, 0, 0, 0], [12])]
+    step()
+    h.pads = [gp(0)]
+    step()
+    h.pads = [gp(0, [0, 0, 0, 0], [13])]
+    step()
+    expect(h.calls.filter((c) => c.startsWith('feel'))).toEqual(['feel sport', 'feel gentle'])
+  })
+  it('keyboard reach follows the preset; Z returns the throttle to the hover point', () => {
+    const { h, engine, step, possess } = harness([sim('sim-1', { mode: 'STABILIZE', mode_class: 'manual', armed: true, landed: 'air' })])
+    h.prefs = { feel: 'gentle' }
+    possess('sim-1', { input: 'keyboard', pad: null, since: 0 })
+    engine.keyDown('d')
+    engine.keyDown('r')
+    step(20, 25)
+    engine.keyUp('r')
+    expect(last(h, 'sim-1')!.roll).toBeCloseTo(0.6, 6)
+    expect(last(h, 'sim-1')!.throttle).toBeGreaterThan(0.6)
+    engine.throttleToHover()
+    step()
+    expect(last(h, 'sim-1')!.throttle).toBe(0.5)
+  })
+})
+
+describe('hold modes on the keyboard (05 §6.1)', () => {
+  it('R / F are momentary: held climbs, released returns to hold', () => {
+    const { h, engine, step, possess } = harness([sim('sim-1', { armed: true, landed: 'air' })])
+    h.prefs = { feel: 'sport' }
+    possess('sim-1', { input: 'keyboard', pad: null, since: 0 })
+    step(20, 2)
+    engine.keyDown('r')
+    step(20, 20)
+    expect(last(h, 'sim-1')!.throttle).toBe(1)
+    engine.keyUp('r')
+    step(20, 20)
+    expect(last(h, 'sim-1')!.throttle).toBe(0.5)
+    engine.keyDown('f')
+    step(20, 20)
+    engine.keyUp('f')
+    expect(last(h, 'sim-1')!.throttle).toBe(0)
+    step(20, 20)
+    expect(last(h, 'sim-1')!.throttle).toBe(0.5)
+  })
+})
+
+describe('throttle continuity (05 §6.2)', () => {
+  it('ramps over 300 ms when the mode class changes the throttle meaning', () => {
+    const v = sim('sim-1', { mode: 'STABILIZE', mode_class: 'manual', armed: true, landed: 'air', calibration: { signs: { roll: 1, pitch: 1, yaw: 1 }, hover: 0.3 } })
+    const { h, step } = harness([v])
+    h.pads = [gp(0, [0, -0.6, 0, 0])]
+    step(20, 2)
+    const before = last(h, 'sim-1')!.throttle
+    v.mode = 'ALT_HOLD'
+    v.mode_class = 'althold'
+    step()
+    const first = last(h, 'sim-1')!.throttle
+    expect(Math.abs(first - before)).toBeLessThan(0.05)
+    step(20, 20)
+    const settled = last(h, 'sim-1')!.throttle
+    expect(Math.abs(settled - before)).toBeGreaterThan(0.05)
+  })
+  it('a sim with hover assist off centres the throttle on 0.5', () => {
+    const v = sim('sim-1', { mode: 'STABILIZE', mode_class: 'manual', sim: { hover_assist: false, turbulence: 0.3 }, calibration: { signs: { roll: 1, pitch: 1, yaw: 1 }, hover: 0.3 } })
+    const { h, step } = harness([v])
+    h.pads = [gp(0)]
+    step(20, 2)
+    expect(last(h, 'sim-1')!.throttle).toBe(0.5)
+  })
+})
+
+describe('hover assist input (05 §6.3)', () => {
+  const press = (h: ReturnType<typeof harness>['h'], step: ReturnType<typeof harness>['step'], b: number) => {
+    h.pads = [gp(0, [0, 0, 0, 0], [b])]
+    step()
+    h.pads = [gp(0)]
+    step()
+  }
+  it('Triangle switches a sim off when it holds, on when it does not; a real aircraft toggles modes', () => {
+    const v = sim('sim-1')
+    const { h, step } = harness([v])
+    h.pads = [gp(0)]
+    step(20, 2)
+    press(h, step, 3)
+    expect(h.calls).toContain('assist sim-1 false')
+    v.sim = { hover_assist: false, turbulence: 0.3 }
+    v.mode = 'STABILIZE'
+    v.mode_class = 'manual'
+    press(h, step, 3)
+    expect(h.calls).toContain('assist sim-1 true')
+    v.sim = { hover_assist: true, turbulence: 0.3 }
+    press(h, step, 3)
+    expect(h.calls.at(-1)).toBe('mode sim-1 ALT_HOLD')
+
+    const real = harness([vehicle('q1')])
+    real.possess('q1', { input: 'gamepad', pad: 1, since: 0 })
+    real.h.pads = [gp(0)]
+    real.step(20, 2)
+    press(real.h, real.step, 3)
+    expect(real.h.calls).toEqual(['mode q1 STABILIZE'])
+  })
+  it('H does the same for the window source', () => {
+    const { h, engine, step, possess } = harness([sim('sim-1')])
+    possess('sim-1', { input: 'keyboard', pad: null, since: 0 })
+    step()
+    engine.toggleAssist()
+    expect(h.calls).toEqual(['assist sim-1 false'])
+  })
+})
+
+describe('hold-to-fire hook (05 §7.4)', () => {
+  it('R1 calls fire on press, every 100 ms while held and off at release', () => {
+    const { h, step } = harness([sim('sim-1', { armed: true, landed: 'air' })])
+    h.pads = [gp(0)]
+    step(20, 2)
+    h.pads = [gp(0, [0, 0, 0, 0], [5])]
+    step(20, 10)
+    h.pads = [gp(0)]
+    step()
+    const calls = fires(h)
+    expect(calls[0]).toMatch(/^fire sim-1 true/)
+    expect(calls.filter((c) => c.includes('true')).length).toBeGreaterThanOrEqual(2)
+    expect(calls.at(-1)).toMatch(/^fire sim-1 false/)
+    const ons = calls.filter((c) => c.includes('true')).map((c) => Number(c.split('@')[1]))
+    for (let i = 1; i < ons.length; i++) expect(ons[i] - ons[i - 1]).toBe(100)
+  })
+  it('X fires for the window source and blur releases it', () => {
+    const { h, engine, step, possess } = harness([sim('sim-1', { armed: true, landed: 'air' })])
+    possess('sim-1', { input: 'keyboard', pad: null, since: 0 })
+    engine.keyDown('x')
+    step(20, 3)
+    expect(fires(h)[0]).toMatch(/true/)
+    h.focused = false
+    step()
+    expect(fires(h).at(-1)).toMatch(/false/)
+  })
+  it('never fires for a real aircraft or while sticks wait', () => {
+    const real = harness([vehicle('q1', { armed: true, landed: 'air' })])
+    real.possess('q1', { input: 'gamepad', pad: 1, since: 0 })
+    real.h.pads = [gp(0, [0, 0, 0, 0], [5])]
+    real.step(20, 10)
+    expect(fires(real.h)).toEqual([])
+  })
+})
+
+describe('transmitters (05 §6.3)', () => {
+  it('reads AETR with an absolute throttle and enforces H5 in self-levelling modes', () => {
+    const { h, step, possess } = harness([sim('sim-1', { mode: 'STABILIZE', mode_class: 'manual' })])
+    possess('sim-1', { input: 'gamepad', pad: 1, since: 0 })
+    h.pads = [nonStd(tx(0, [0, 0, 0.2, 0]))] // throttle at 60 %
+    const out = step(20, 3)
+    expect(out.pads[0].kind).toBe('transmitter')
+    expect(out.awaiting['sim-1']).toBe('throttle')
+    expect(h.sent).toEqual([])
+    h.pads = [nonStd(tx(0, [0.5, 0, -1, 0]))] // throttle lowest
+    const ok = step()
+    expect(ok.awaiting['sim-1']).toBeUndefined()
+    expect(last(h, 'sim-1')).toMatchObject({ throttle: 0 })
+    expect(last(h, 'sim-1')!.roll).toBeGreaterThan(0)
+  })
+  it('H5 in hold modes wants the throttle centred within 10 %', () => {
+    const { h, step, possess } = harness([sim('sim-1')])
+    possess('sim-1', { input: 'gamepad', pad: 1, since: 0 })
+    h.pads = [nonStd(tx(0, [0, 0, -1, 0]))]
+    expect(step(20, 2).awaiting['sim-1']).toBe('throttle')
+    h.pads = [nonStd(tx(0, [0, 0, 0.15, 0]))] // 57.5 %
+    expect(step().awaiting['sim-1']).toBeUndefined()
+  })
+  it('switch bindings: stop at once, hover assist by position, arm held 1 s, fire', () => {
+    const { h, step, possess } = harness([sim('sim-1', { mode: 'STABILIZE', mode_class: 'manual', sim: { hover_assist: false, turbulence: 0.3 } })])
+    h.profiles = {
+      'EdgeTX RadioMaster TX16S Joystick': {
+        id: 'EdgeTX RadioMaster TX16S Joystick',
+        kind: 'transmitter',
+        axes: { roll: { index: 0, invert: false, min: -1, center: 0, max: 1 }, pitch: { index: 1, invert: false, min: -1, center: 0, max: 1 }, throttle: { index: 2, invert: false, min: -1, center: 0, max: 1 }, yaw: { index: 3, invert: false, min: -1, center: 0, max: 1 } },
+        switches: [
+          { action: 'assist', source: { type: 'axis', index: 4, above: true } },
+          { action: 'arm', source: { type: 'axis', index: 5, above: true } },
+          { action: 'stop', source: { type: 'axis', index: 6, above: true } },
+          { action: 'fire', source: { type: 'axis', index: 7, above: true } },
+        ],
+        updatedAt: 1,
+      },
+    }
+    possess('sim-1', { input: 'gamepad', pad: 1, since: 0 })
+    const axes = (a: number, arm: number, stop: number, fire: number) => [0, 0, -1, 0, a, arm, stop, fire]
+    h.pads = [nonStd(tx(0, axes(-1, -1, -1, -1)))]
+    const out = step(20, 2)
+    expect(out.pads[0].profiled).toBe(true)
+    h.pads = [nonStd(tx(0, axes(1, -1, -1, -1)))]
+    step()
+    expect(h.calls).toContain('assist sim-1 true')
+    h.pads = [nonStd(tx(0, axes(1, 1, -1, -1)))]
+    step(100, 11)
+    expect(h.calls).toContain('arm sim-1 true')
+    h.pads = [nonStd(tx(0, axes(1, -1, -1, 1)))]
+    step(20, 2)
+    expect(fires(h)[0]).toMatch(/true/)
+    h.pads = [nonStd(tx(0, axes(1, -1, 1, -1)))]
+    step()
+    expect(h.calls.filter((c) => c === 'stop sim-1')).toHaveLength(1)
+    step(20, 3)
+    expect(h.calls.filter((c) => c === 'stop sim-1')).toHaveLength(1)
+  })
+  it('ignores gamepad buttons on a transmitter (no accidental arm or possession)', () => {
+    const { h, step } = harness([sim('sim-1')])
+    h.pads = [nonStd(tx(0, [0, 0, -1, 0], [4, 5, 9]))]
+    step(100, 15)
+    expect(h.calls.filter((c) => c.startsWith('arm') || c.startsWith('release'))).toEqual([])
+  })
+})
+
+describe('mapping wizard isolation (05 §6.3)', () => {
+  it('a controller in setup sends nothing and its buttons act on nothing', () => {
+    const { h, engine, step } = harness([sim('sim-1')])
+    h.pads = [gp(0)]
+    step(20, 2)
+    const n = h.sent.length
+    engine.setLearning(1, true)
+    h.pads = [gp(0, [1, 1, 1, 1], [3, 5])]
+    step(20, 5)
+    expect(h.sent.length).toBe(n)
+    expect(h.calls.filter((c) => c.startsWith('assist') || c.startsWith('fire'))).toEqual([])
+    engine.setLearning(1, false)
+    h.pads = [gp(0)]
+    step(20, 2)
+    expect(h.sent.length).toBeGreaterThan(n)
   })
 })

@@ -55,10 +55,14 @@ export function throttleCurve(y: number, centre: number): number {
   return v <= 0 ? c * (1 + v) : c + (1 - c) * v
 }
 
-/** Throttle centre for a vehicle in its current mode (02 §7.5 left stick row, §5.5 hover point). */
-export function throttleCentre(v: Pick<Vehicle, 'mode_class' | 'calibration'> | null): number {
+/**
+ * Throttle centre for a vehicle in its current mode (02 §7.5 left stick row, §5.5 hover point). A simulated aircraft
+ * with hover assist off centres on 0.5, its physical hover point at full charge (05 §6.2).
+ */
+export function throttleCentre(v: (Pick<Vehicle, 'mode_class' | 'calibration'> & { sim?: Vehicle['sim'] }) | null): number {
   if (!v) return 0.5
   if (v.mode_class === 'althold' || v.mode_class === 'position') return 0.5
+  if (v.sim && !v.sim.hover_assist) return 0.5
   return clamp(v.calibration?.hover ?? 0.5, 0.2, 0.7)
 }
 
@@ -178,16 +182,24 @@ export const KEY_YAW_DEFLECTION = 0.6
 export const KEY_SLEW_PER_S = 5
 export const KEY_THROTTLE_PER_S = 0.8
 
-export type FlightKey = 'w' | 'a' | 's' | 'd' | 'q' | 'e' | 'r' | 'f'
-export const FLIGHT_KEYS: readonly FlightKey[] = ['w', 'a', 's', 'd', 'q', 'e', 'r', 'f']
+/** Held flight keys; X (fire, 05 §6.3) is held like the others. */
+export type FlightKey = 'w' | 'a' | 's' | 'd' | 'q' | 'e' | 'r' | 'f' | 'x'
+export const FLIGHT_KEYS: readonly FlightKey[] = ['w', 'a', 's', 'd', 'q', 'e', 'r', 'f', 'x']
 
-/** Target roll / pitch / yaw for the held keys (W forward, S back, A left, D right, Q / E yaw). */
-export function keyTargets(held: ReadonlySet<string>): { roll: number; pitch: number; yaw: number } {
+/**
+ * Target roll / pitch / yaw for the held keys (W forward, S back, A left, D right, Q / E yaw). The reach follows the
+ * control feel since v0.3 (05 §6.1: 0.6 / 0.8 / 1.0); the defaults are the v0.2 values.
+ */
+export function keyTargets(
+  held: ReadonlySet<string>,
+  reach = KEY_DEFLECTION,
+  yawReach = KEY_YAW_DEFLECTION,
+): { roll: number; pitch: number; yaw: number } {
   const k = (c: string) => (held.has(c) ? 1 : 0)
   return {
-    roll: (k('d') - k('a')) * KEY_DEFLECTION,
-    pitch: (k('w') - k('s')) * KEY_DEFLECTION,
-    yaw: (k('e') - k('q')) * KEY_YAW_DEFLECTION,
+    roll: (k('d') - k('a')) * reach,
+    pitch: (k('w') - k('s')) * reach,
+    yaw: (k('e') - k('q')) * yawReach,
   }
 }
 

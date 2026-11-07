@@ -1,11 +1,14 @@
 // Body of the top-bar controller popover (02 §7.4, 320 wide; the shell owns trigger and surface): one row per
 // controller (number, model, bound aircraft, live preview), dead zone 0.04-0.15, expo 0-0.6, mapping reference.
+// v0.3 (05 §6.3, WP-C): device kind (transmitter / generic), Set up mapping for them, the control feel selector and
+// the transmitter rows of the mapping table.
 import * as React from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useT } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { useRelay, type PadInfo } from '@/store/relay'
 import { useInputGate, usePads } from '@/store/selectors'
+import { Button } from '@/ui/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/ui/components/ui/collapsible'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/components/ui/select'
 import { Separator } from '@/ui/components/ui/separator'
@@ -13,11 +16,16 @@ import { Slider } from '@/ui/components/ui/slider'
 import { Icon, StateIcon } from '@/ui/icons'
 import { possessWith, releaseVehicle } from './actions'
 import { RECONNECT_GRACE_MS } from './bindings'
+import { FeelSelector } from './ControllerSettings'
 import { DEADZONE_RANGE, EXPO_RANGE } from './mapping'
-import { getPadPreview, useInputUi } from './store'
+import { MappingReference, RowsTable, TRANSMITTER_ROWS } from './MappingTables'
+import { MappingWizard } from './MappingWizard'
+import { getPadPreview, useInputUi, usePadDevice } from './store'
 import { setPrefs, usePrefs } from '@/settings/prefs'
 import { useCT, type ControlKey } from './strings'
 import './control.css'
+
+export { MappingReference } from './MappingTables'
 
 function MiniStick({ pad, side }: { pad: number; side: 'l' | 'r' }) {
   const dot = React.useRef<HTMLElement>(null)
@@ -52,12 +60,14 @@ function Countdown({ since }: { since: number }) {
   return <span className="num text-hud-sub text-[var(--g400)]">{ct('pad.disconnectedFor', { s })}</span>
 }
 
-function PadRow({ pad }: { pad: PadInfo }) {
+function PadRow({ pad, onSetup }: { pad: PadInfo; onSetup(): void }) {
   const t = useT()
   const ct = useCT()
+  const device = usePadDevice(pad.index)
+  const special = device && device.kind !== 'gamepad' ? device : null
   const vehicles = useRelay(useShallow((s) => (s.fleet?.vehicles ?? []).map((v) => `${v.id}\u0001${v.label}\u0001${v.kind}`)))
   const lostSince = useInputUi((s) => (pad.vehicle ? s.padLost[pad.vehicle]?.since : undefined))
-  const model = ct(`pad.model.${pad.model}` as ControlKey)
+  const model = special ? ct(special.kind === 'transmitter' ? 'pad.kind.transmitter' : 'pad.kind.generic') : ct(`pad.model.${pad.model}` as ControlKey)
   const items = [{ value: 'none', label: t('pad.panel.none') }, ...vehicles.map((x) => {
     const [id, label, kind] = x.split('\u0001')
     return { value: id, label: kind === 'sim' && !/sim/i.test(label) ? `${label} · ${t('kind.sim')}` : label }
@@ -100,7 +110,18 @@ function PadRow({ pad }: { pad: PadInfo }) {
           </SelectContent>
         </Select>
       </div>
-      {pad.model === 'unknown' ? <p className="pl-6 text-hud-sub text-[var(--g500)]">{ct('pad.unrecognisedNote')}</p> : null}
+      {pad.model === 'unknown' && !special ? <p className="pl-6 text-hud-sub text-[var(--g500)]">{ct('pad.unrecognisedNote')}</p> : null}
+      {special ? (
+        <div className="flex items-center gap-2 pl-6">
+          <span className="flex-1 text-hud-sub text-[var(--g500)]">
+            {special.profiled ? ct('pad.profiled') : special.kind === 'transmitter' ? ct('pad.defaultAetr') : ct('pad.unrecognisedNote')}
+          </span>
+          <Button variant="outline" size="sm" className="h-7" onClick={onSetup} disabled={!pad.connected} data-pad-setup={pad.index}>
+            <Icon icon="sliders" className="size-3.5" />
+            {ct('wiz.open')}
+          </Button>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -123,39 +144,6 @@ function PrefSlider({ label, value, range, onChange }: { label: string; value: n
   )
 }
 
-const MAP_ROWS: [ControlKey, ControlKey][] = [
-  ['map.leftY', 'map.leftYDo'],
-  ['map.leftX', 'map.leftXDo'],
-  ['map.right', 'map.rightDo'],
-  ['map.options', 'map.optionsDo'],
-  ['map.l1r1', 'map.l1r1Do'],
-  ['map.l2r2', 'map.l2r2Do'],
-  ['map.triangle', 'map.triangleDo'],
-  ['map.square', 'map.squareDo'],
-  ['map.circle', 'map.circleDo'],
-  ['map.dpad', 'map.dpadDo'],
-  ['map.touchpad', 'map.touchpadDo'],
-  ['map.cross', 'map.crossDo'],
-]
-
-/** The DualSense map of 02 §7.5 as a lieflat table; also usable in Settings > Controllers. */
-export function MappingReference({ className }: { className?: string }) {
-  const ct = useCT()
-  return (
-    <table data-lf-table="" className={cn('w-full text-hud-sub', className)}>
-      <caption className="sr-only">{ct('map.title')}</caption>
-      <tbody>
-        {MAP_ROWS.map(([k, d]) => (
-          <tr key={k} className="border-t border-[var(--border)] first:border-t-0">
-            <th scope="row" className="py-1 pr-3 text-left align-top font-[450] whitespace-nowrap text-[var(--g200)]">{ct(k)}</th>
-            <td className="py-1 text-[var(--g400)]">{ct(d)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  )
-}
-
 export function PadsPopover() {
   const t = useT()
   const ct = useCT()
@@ -164,6 +152,18 @@ export function PadsPopover() {
   const deadzone = usePrefs((p) => p.padDeadzone)
   const expo = usePrefs((p) => p.padExpo)
   const [mapOpen, setMapOpen] = React.useState(false)
+  const [setup, setSetup] = React.useState<number | null>(null)
+  const devices = useInputUi((s) => s.devices)
+  const hasTransmitter = Object.values(devices).some((d) => d.kind === 'transmitter')
+  const setupPad = setup !== null ? pads.find((p) => p.index === setup && p.connected) : undefined
+  const setupDevice = setup !== null ? devices[setup] : undefined
+  if (setupPad && setupDevice && setupDevice.kind !== 'gamepad') {
+    return (
+      <div className="flex max-h-[min(640px,calc(100vh-96px))] flex-col gap-3 overflow-y-auto" data-pads-popover="">
+        <MappingWizard pad={setupPad.index} deviceId={setupDevice.id} kind={setupDevice.kind} vehicle={setupPad.vehicle} onClose={() => setSetup(null)} />
+      </div>
+    )
+  }
   return (
     <div className="flex max-h-[min(640px,calc(100vh-96px))] flex-col gap-3 overflow-y-auto" data-pads-popover="">
       <div className="flex items-center justify-between">
@@ -175,13 +175,17 @@ export function PadsPopover() {
       ) : (
         <div className="flex flex-col gap-3">
           {pads.map((p) => (
-            <PadRow key={p.index} pad={p} />
+            <PadRow key={p.index} pad={p} onSetup={() => setSetup(p.index)} />
           ))}
           <p className="text-hud-sub text-[var(--g500)]">{ct('pad.bindHint')}</p>
         </div>
       )}
       <Separator />
       <div className="flex flex-col gap-2.5">
+        <div className="flex items-center gap-3">
+          <span className="w-20 flex-none text-hud-sub text-[var(--g300)]">{ct('feel.title')}</span>
+          <FeelSelector />
+        </div>
         <PrefSlider label={t('pad.panel.deadzone')} value={deadzone} range={DEADZONE_RANGE} onChange={(v) => setPrefs({ padDeadzone: v })} />
         <PrefSlider label={t('pad.panel.expo')} value={expo} range={EXPO_RANGE} onChange={(v) => setPrefs({ padExpo: v })} />
       </div>
@@ -193,6 +197,7 @@ export function PadsPopover() {
         </CollapsibleTrigger>
         <CollapsibleContent>
           <MappingReference className="mt-1" />
+          {hasTransmitter ? <RowsTable rows={TRANSMITTER_ROWS} caption={ct('set.txTitle')} className="mt-2" /> : null}
         </CollapsibleContent>
       </Collapsible>
       <p className="text-hud-sub text-[var(--g500)]">{ct('pad.auto')}</p>

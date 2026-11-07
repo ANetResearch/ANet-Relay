@@ -3,6 +3,7 @@
 // nothing persistent (dead zone and expo live in settings/prefs.ts, WP8). Live stick values change at 50 Hz and are therefore not React
 // state: frame loops read getLiveSticks(id) directly (CONTRACTS.md rule 6).
 import { create } from 'zustand'
+import type { PadKind } from './devices'
 import type { PadModel, StickFrame } from './mapping'
 import type { SourceKey } from './bindings'
 
@@ -16,7 +17,7 @@ export interface HoldState {
   durationMs: number
 }
 
-export type AwaitReason = 'focus' | 'link'
+export type AwaitReason = 'focus' | 'link' | 'throttle'
 
 export interface HintCard {
   key: string
@@ -38,6 +39,16 @@ export interface InputUiState {
   awaiting: Readonly<Record<string, AwaitReason>>
   hints: readonly HintCard[]
   dismissHint(key: string): void
+  /** WP-C (05 §6.3): device kind and learned-profile flag by controller number */
+  devices: Readonly<Record<number, PadDevice>>
+  /** WP-C (05 §7.4): aircraft a fire input is held for */
+  firing: readonly string[]
+}
+
+export interface PadDevice {
+  id: string
+  kind: PadKind
+  profiled: boolean
 }
 
 export const useInputUi = create<InputUiState>()((set) => ({
@@ -47,7 +58,25 @@ export const useInputUi = create<InputUiState>()((set) => ({
   awaiting: {},
   hints: [],
   dismissHint: (key) => set((s) => ({ hints: s.hints.filter((h) => h.key !== key) })),
+  devices: {},
+  firing: [],
 }))
+
+/** Engine-side: publishes device kinds and the fire state when they change (InputLayer). */
+export function publishDevices(out: { pads: readonly { index: number; id: string; kind: PadKind; profiled: boolean }[]; firing: readonly string[] }): void {
+  const s = useInputUi.getState()
+  const devices: Record<number, PadDevice> = {}
+  for (const p of out.pads) devices[p.index] = { id: p.id, kind: p.kind, profiled: p.profiled }
+  const key = (d: Readonly<Record<number, PadDevice>>) => Object.entries(d).map(([i, x]) => `${i}:${x.id}:${x.kind}:${x.profiled}`).join('|')
+  const patch: Partial<InputUiState> = {}
+  if (key(s.devices) !== key(devices)) patch.devices = devices
+  if (s.firing.join('|') !== out.firing.join('|')) patch.firing = [...out.firing]
+  if (Object.keys(patch).length) useInputUi.setState(patch)
+}
+
+export function usePadDevice(pad: number | null): PadDevice | null {
+  return useInputUi((s) => (pad === null ? null : (s.devices[pad] ?? null)))
+}
 
 /** Hold in progress on this aircraft (Options / L1 + R1 / Circle), for HoldProgress on cards and stage labels. */
 export function useHold(vehicleId: string | null): HoldState | null {
@@ -75,6 +104,8 @@ export interface LiveSticks {
   /** true while frames are actually going out */
   sending: boolean
   source: SourceKey
+  /** the mode class holds altitude (throttle centre means hold) */
+  hold?: boolean
   /** performance.now() of the computation */
   at: number
 }

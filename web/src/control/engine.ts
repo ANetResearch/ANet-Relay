@@ -4,23 +4,29 @@
 // Stop rules: no frames while the window is unfocused, while the link is lost or for a disconnected controller;
 // after focus returns or the link recovers, frames resume only once a stick moves. Everything that touches the
 // outside world goes through EngineDeps so the rules are unit-tested (engine.test.ts).
+// v0.3 (05 §6, WP-C): control feel presets, Mode 1 and axis inversion, a radial dead zone on the attitude stick, a
+// linear throttle with an optional hold detent and a 300 ms continuity ramp across mode class changes, momentary
+// R / F in hold modes, Z (throttle to the hover point), H / Triangle (hover assist), hold-to-fire on R1 and X,
+// D-pad up / down for the feel preset, transmitters and learned controller profiles with switch bindings, and H5.
 import type { Vehicle } from '@/api'
 import { HoldTimer } from '@/ui/relay/HoldProgress'
 import {
-  acceptsSticks,
   allocateIndex,
+  assistAction,
   autoBindTarget,
   HOLD_MS,
   isWindowSource,
   linkUsable,
-  modeToggleTarget,
   optionsDecision,
   optionsHoldVehicle,
   possessedBy,
   RECONNECT_GRACE_MS,
   sourceOf,
+  throttleReady,
   type SourceKey,
 } from './bindings'
+import { defaultProfile, padKind, readMapped, type MappedReading, type PadKind, type PadProfile, type SwitchAction } from './devices'
+import { FireTracker } from './fire'
 import {
   FLIGHT_KEYS,
   isStopChord,
@@ -28,13 +34,11 @@ import {
   keyTargets,
   keyThrottle,
   moved,
-  padFrame,
   padModel,
   readPad,
   roundFrame,
   slew,
   throttleCentre,
-  throttleCurve,
   type FlightKey,
   type GamepadLike,
   type PadModel,
@@ -42,6 +46,19 @@ import {
   type ShapePrefs,
   type StickFrame,
 } from './mapping'
+import {
+  DEFAULT_CONTROL,
+  FEELS,
+  isHoldClass,
+  logicalSticks,
+  shapeLogical,
+  stepFeel,
+  ThrottleContinuity,
+  throttleFromStick,
+  type ControlFeel,
+  type ControlPrefs,
+  type Logical,
+} from './shaping'
 import type { AwaitReason, HintCard, HoldKind, HoldState } from './store'
 
 /** Axis change that counts as "moved a stick" after a pause (raw units). */
@@ -65,6 +82,15 @@ export interface EngineActions {
   moveSelection(delta: 1 | -1): void
   viewCycle(): void
   notice(n: EngineNotice): void
+  /** hover assist of a simulated aircraft (05 §5.2) */
+  simAssist(vehicle: string, on: boolean): Promise<unknown>
+  /**
+   * Hold-to-fire (05 §7.4): `on` at the press and again every 100 ms while held, `off` at the release. Only for
+   * possessed simulated aircraft whose sticks are flowing. The arena package supplies the transport.
+   */
+  fire(vehicle: string, on: boolean): void
+  /** D-pad up / down: the window's control feel preset changed */
+  setFeel(feel: ControlFeel): void
 }
 
 export interface EngineDeps {
@@ -75,7 +101,10 @@ export interface EngineDeps {
   focused(): boolean
   send(vehicle: string, f: StickFrame): void
   cancel(vehicle: string): void
-  prefs(): ShapePrefs
+  /** dead zone and expo, plus the v0.3 control preferences (missing fields take DEFAULT_CONTROL) */
+  prefs(): ShapePrefs & Partial<ControlPrefs>
+  /** learned controller profiles by device id (05 §6.3) */
+  profiles?(): Readonly<Record<string, PadProfile>>
   act: EngineActions
 }
 
@@ -83,6 +112,10 @@ export interface EnginePad {
   index: number
   id: string
   model: PadModel
+  /** gamepad, transmitter or generic (05 §6.3) */
+  kind: PadKind
+  /** a learned profile maps this device */
+  profiled: boolean
   connected: boolean
   vehicle: string | null
   /** raw axes (y up positive) of the last reading, for the live preview */
@@ -99,7 +132,9 @@ export interface EngineOutput {
   /** new connection cards since the last tick */
   hints: HintCard[]
   /** frames computed this tick, by vehicle */
-  frames: Map<string, { frame: StickFrame; centre: number; sending: boolean; source: SourceKey }>
+  frames: Map<string, { frame: StickFrame; centre: number; sending: boolean; source: SourceKey; hold: boolean }>
+  /** aircraft a fire input is held for this tick (05 §7.4) */
+  firing: string[]
 }
 
 interface Slot {
@@ -107,14 +142,24 @@ interface Slot {
   id: string
   browserIndex: number
   model: PadModel
+  kind: PadKind
+  profiled: boolean
   connected: boolean
   lostAt: number | null
   released: boolean
   reading: PadReading | null
+  /** logical sticks of this tick (before shaping) and how to shape them */
+  logical: Logical | null
+  radial: boolean
+  /** transmitter / profiled reading: switches and the absolute throttle */
+  mapped: MappedReading | null
   prev: PadReading['pressed'] | null
+  prevSwitch: Record<SwitchAction, boolean> | null
   holds: Record<HoldKind, HoldTimer>
   holdVehicle: Partial<Record<HoldKind, string | null>>
   stopLatched: boolean
+  /** the mapping wizard runs on this device: it flies nothing (05 §6.3) */
+  learning: boolean
 }
 
 interface Await {
@@ -151,6 +196,15 @@ export class InputEngine {
   private releasing = new Set<string>()
   private hintSeq = 0
 
+  // WP-C (05 §6)
+  /** R / F in hold modes: momentary stick y, slewed */
+  private holdY = 0
+  /** mode class of the aircraft the window source drives: 'hold' | 'manual' | null */
+  private windowClass: 'hold' | 'manual' | null = null
+  private continuity = new ThrottleContinuity()
+  private fire = new FireTracker()
+  private learningPads = new Set<number>()
+
   constructor(private deps: EngineDeps) {}
 
   // ------------------------------------------------------------------ external input
@@ -169,7 +223,7 @@ export class InputEngine {
   keyUp(k: string): void {
     // R / F integrate by key time, not by tick count: a short tap between two slow ticks still moves the throttle
     if (k === 'r' || k === 'f') {
-      if (!this.paused) this.integrateThrottle(this.deps.now())
+      if (!this.paused && this.windowClass !== 'hold') this.integrateThrottle(this.deps.now())
       this.throttleKeys.delete(k)
     }
     this.held.delete(k as FlightKey)
@@ -188,6 +242,32 @@ export class InputEngine {
     for (const k of ['w', 'a', 's', 'd', 'q', 'e'] as FlightKey[]) this.held.delete(k)
     this.kb = { roll: 0, pitch: 0, yaw: 0 }
     this.activity++
+  }
+
+  /** Z (05 §6.1): the throttle stick back to the hover point (hold modes: back to centre). */
+  throttleToHover(): void {
+    this.throttleY = 0
+    this.holdY = 0
+    this.activity++
+  }
+
+  /** H (05 §6.3): hover assist of the aircraft this window flies, as Triangle on a controller. */
+  toggleAssist(): void {
+    const v = this.deps.vehicles().find((x) => x.possession && x.controller === 'human' && isWindowSource(sourceOf(x.possession)))
+    if (v) this.runAssist(v)
+  }
+
+  private runAssist(v: Vehicle): void {
+    const a = assistAction(v)
+    if (!a) return
+    if (a.kind === 'assist') void this.deps.act.simAssist(v.id, a.on).catch(() => undefined)
+    else void this.deps.act.mode(v.id, a.name).catch(() => undefined)
+  }
+
+  /** The mapping wizard (05 §6.3) holds this controller: its sticks, buttons and switches act on nothing. */
+  setLearning(pad: number, on: boolean): void {
+    if (on) this.learningPads.add(pad)
+    else this.learningPads.delete(pad)
   }
 
   /** On-screen sticks: x, y in -1..1 (y up positive). The left y is the throttle and stays where it is left. */
@@ -220,7 +300,8 @@ export class InputEngine {
     this.lastTick = now
     const vehicles = d.vehicles()
     const selected = d.selected()
-    const prefs = d.prefs()
+    const prefs: ControlPrefs = { ...DEFAULT_CONTROL, ...d.prefs() }
+    const feel = FEELS[prefs.feel] ?? FEELS.standard
     const hints: HintCard[] = []
 
     // focus (02 §5.3): blur stops every human stick at once; focus back waits for a stick movement
@@ -231,13 +312,20 @@ export class InputEngine {
     this.expirePending(now)
     this.pollPads(now, vehicles, selected, prefs, hints)
 
-    // keyboard axes slew toward the held-key targets
+    // keyboard axes slew toward the held-key targets; reach follows the control feel (05 §6.1)
     if (!this.paused) {
-      const tg = keyTargets(this.held)
+      const tg = keyTargets(this.held, feel.keys, feel.yaw)
       this.kb.roll = slew(this.kb.roll, tg.roll, KEY_SLEW_PER_S, dt)
       this.kb.pitch = slew(this.kb.pitch, tg.pitch, KEY_SLEW_PER_S, dt)
       this.kb.yaw = slew(this.kb.yaw, tg.yaw, KEY_SLEW_PER_S, dt)
-      this.integrateThrottle(now)
+      if (this.windowClass === 'hold') {
+        // hold modes: R / F climb and sink while held and the stick springs back to centre (hold) on release
+        const dir = (this.held.has('r') ? 1 : 0) - (this.held.has('f') ? 1 : 0)
+        this.holdY = slew(this.holdY, dir * feel.keys, KEY_SLEW_PER_S, dt)
+        for (const k of this.throttleKeys.keys()) this.throttleKeys.set(k, now)
+      } else {
+        this.integrateThrottle(now)
+      }
     }
 
     const frames: EngineOutput['frames'] = new Map()
@@ -249,40 +337,64 @@ export class InputEngine {
       const source = sourceOf(v.possession)
       driven.add(v.id)
       const centre = throttleCentre(v)
+      const hold = isHoldClass(v.mode_class)
+      const airborne = v.landed === 'air' || v.landed === 'takeoff' || (v.armed && v.landed !== 'ground')
+      const padSlot = isWindowSource(source) ? undefined : this.slots.find((s) => s.index === Number(source.slice(4)))
 
       // a new possession (or a new source on it): seed the window throttle, start without a wait
       if (this.known.get(v.id) !== source) {
         this.known.set(v.id, source)
         this.awaits.delete(v.id)
         this.pending.delete(source)
+        this.continuity.forget(v.id)
         // airborne: centre (= hover or hold) so the switch does not drop height; on the ground in a self-levelling
         // mode: throttle low, so the aircraft can be armed
         if (isWindowSource(source)) {
-          const airborne = v.landed === 'air' || v.landed === 'takeoff' || (v.armed && v.landed !== 'ground')
           this.throttleY = !airborne && v.mode_class === 'manual' ? -1 : 0
+          this.holdY = 0
+          this.windowClass = hold ? 'hold' : 'manual'
+        }
+        // H5 (05 §6.3): a transmitter's throttle does not spring back, so it must be brought to its start position
+        if (padSlot?.kind === 'transmitter') this.awaits.set(v.id, { reason: 'throttle', base: null })
+      }
+
+      // the mode class of the window-flown aircraft changed: re-seat the throttle stick (05 §6.2)
+      if (isWindowSource(source)) {
+        const cls = hold ? 'hold' : 'manual'
+        if (this.windowClass !== cls) {
+          this.windowClass = cls
+          this.holdY = 0
+          if (cls === 'manual') this.throttleY = airborne ? 0 : -1
         }
       }
 
       let frame: StickFrame | null = null
       let base: Await['base'] = null
+      let throttle01: number | null = null
       if (isWindowSource(source)) {
+        const y = this.screen.left.active || !hold ? this.throttleY : this.holdY
         frame = {
-          roll: this.screen.right.active ? this.screen.right.x : this.kb.roll,
-          pitch: this.screen.right.active ? this.screen.right.y : this.kb.pitch,
-          yaw: this.screen.left.active ? this.screen.left.x : this.kb.yaw,
-          throttle: throttleCurve(this.throttleY, centre),
+          roll: this.screen.right.active ? this.screen.right.x * feel.tilt : this.kb.roll,
+          pitch: this.screen.right.active ? this.screen.right.y * feel.tilt : this.kb.pitch,
+          yaw: this.screen.left.active ? this.screen.left.x * feel.yaw : this.kb.yaw,
+          throttle: throttleFromStick(y, centre, hold, prefs.throttleDetent && !this.screen.left.active),
         }
         base = this.activity
       } else {
         const pad = Number(source.slice(4))
-        const slot = this.slots.find((s) => s.index === pad)
-        if (slot && slot.connected && slot.reading) {
-          frame = padFrame(slot.reading, centre)
+        const slot = padSlot
+        if (slot && slot.connected && slot.reading && slot.logical && !slot.learning) {
+          frame = shapeLogical(slot.logical, centre, hold, prefs, slot.radial)
           base = slot.reading.raw
+          if (slot.mapped) throttle01 = slot.mapped.throttle01
+        } else if (slot && slot.learning) {
+          frame = null
         } else if (this.gateOpen) {
           padLost[v.id] = { pad, since: slot?.lostAt ?? now }
         }
       }
+      // continuity across a mode class or hover assist change (05 §6.2)
+      if (frame) frame.throttle = this.continuity.apply(v.id, `${hold ? 'h' : 'm'}|${v.sim ? String(v.sim.hover_assist) : '-'}`, frame.throttle, now)
 
       // link (H3): lost stops frames; recovery waits for a stick movement
       const usable = linkUsable(v.link.state)
@@ -294,17 +406,20 @@ export class InputEngine {
 
       // focus came back: wait for a movement
       if (this.paused) {
-        if (!this.awaits.has(v.id) || this.awaits.get(v.id)!.reason !== 'link') this.awaits.set(v.id, { reason: 'focus', base: null })
+        const reason = this.awaits.get(v.id)?.reason
+        if (reason !== 'link' && reason !== 'throttle') this.awaits.set(v.id, { reason: 'focus', base: null })
       }
       const w = this.awaits.get(v.id)
-      if (w && !this.paused && frame) {
+      if (w && w.reason === 'throttle') {
+        if (frame && throttle01 !== null && throttleReady(throttle01, hold)) this.awaits.delete(v.id)
+      } else if (w && !this.paused && frame) {
         if (w.base === null) w.base = base
         else if (resumed(w.base, base)) this.awaits.delete(v.id)
       }
 
       const send = Boolean(frame) && focused && !this.paused && usable && !this.awaits.has(v.id)
       const out = frame ? roundFrame(frame) : { roll: 0, pitch: 0, yaw: 0, throttle: centre }
-      frames.set(v.id, { frame: out, centre, sending: send, source })
+      frames.set(v.id, { frame: out, centre, sending: send, source, hold })
       if (send) {
         d.send(v.id, out)
         this.sending.add(v.id)
@@ -321,8 +436,25 @@ export class InputEngine {
       this.awaits.delete(id)
       this.lostLink.delete(id)
       this.releasing.delete(id)
+      this.continuity.forget(id)
       if (this.sending.delete(id)) d.cancel(id)
     }
+    if (![...driven].some((id) => isWindowSource(this.known.get(id) ?? 'pad:0'))) this.windowClass = null
+
+    // hold-to-fire (05 §7.4): R1, X or a fire switch, for possessed simulated aircraft whose sticks flow
+    const wanted = new Set<string>()
+    for (const v of vehicles) {
+      const f = frames.get(v.id)
+      if (!f || !f.sending || v.kind !== 'sim') continue
+      if (isWindowSource(f.source)) {
+        if (this.held.has('x')) wanted.add(v.id)
+        continue
+      }
+      const slot = this.slots.find((s) => s.index === Number(f.source.slice(4)))
+      if (!slot || !slot.connected || slot.learning) continue
+      if ((slot.kind !== 'transmitter' && slot.reading?.pressed.r1) || slot.mapped?.switches.fire) wanted.add(v.id)
+    }
+    this.fire.tick(wanted, now, (id, on) => d.act.fire(id, on))
 
     // a disconnected controller keeps its aircraft for RECONNECT_GRACE_MS, then releases it (02 §7.3)
     for (const s of this.slots) {
@@ -344,7 +476,7 @@ export class InputEngine {
       gateOpen: this.gateOpen,
       pads: this.slots
         .map((s) => ({
-          index: s.index, id: s.id, model: s.model, connected: s.connected,
+          index: s.index, id: s.id, model: s.model, kind: s.kind, profiled: s.profiled, connected: s.connected,
           vehicle: possessedBy(vehicles, `pad:${s.index}`)?.id ?? null, raw: s.reading?.raw ?? null,
         }))
         .sort((a, b) => a.index - b.index),
@@ -354,6 +486,7 @@ export class InputEngine {
       awaiting,
       hints,
       frames,
+      firing: [...wanted],
     }
   }
 
@@ -368,17 +501,20 @@ export class InputEngine {
     for (const s of this.slots) for (const h of Object.values(s.holds)) h.release()
     for (const id of this.sending) this.deps.cancel(id)
     this.sending.clear()
+    this.holdY = 0
+    this.fire.releaseAll((id, on) => this.deps.act.fire(id, on))
   }
 
   /** Release everything this engine sends (unmount). */
   dispose(): void {
     for (const id of this.sending) this.deps.cancel(id)
     this.sending.clear()
+    this.fire.releaseAll((id, on) => this.deps.act.fire(id, on))
   }
 
   // ------------------------------------------------------------------ gamepads
 
-  private pollPads(now: number, vehicles: readonly Vehicle[], selected: string | null, prefs: ShapePrefs, hints: HintCard[]): void {
+  private pollPads(now: number, vehicles: readonly Vehicle[], selected: string | null, prefs: ControlPrefs, hints: HintCard[]): void {
     let list: readonly (GamepadLike | null)[] = []
     try {
       list = this.deps.gamepads()
@@ -427,8 +563,9 @@ export class InputEngine {
         continue
       }
       const slot: Slot = {
-        index, id: p.id, browserIndex: p.index, model: padModel(p), connected: true, lostAt: null, released: false,
-        reading: null, prev: null, holds: newHolds(), holdVehicle: {}, stopLatched: false,
+        index, id: p.id, browserIndex: p.index, model: padModel(p), kind: padKind(p), profiled: false, connected: true,
+        lostAt: null, released: false, reading: null, logical: null, radial: true, mapped: null, prev: null,
+        prevSwitch: null, holds: newHolds(), holdVehicle: {}, stopLatched: false, learning: false,
       }
       this.slots.push(slot)
       hints.push(this.connectHint(slot, vehicles, now))
@@ -436,14 +573,61 @@ export class InputEngine {
     for (const idx of [...this.overflowWarned]) if (!present.some((p) => p.index === idx)) this.overflowWarned.delete(idx)
 
     // readings and buttons
+    const profiles = this.deps.profiles?.() ?? {}
     for (const s of this.slots) {
       if (!s.connected) continue
       const p = present.find((g) => g.index === s.browserIndex)
       if (!p) continue
-      const r = readPad(p, prefs)
+      s.learning = this.learningPads.has(s.index)
+      const learned = s.kind !== 'gamepad' ? profiles[s.id] : undefined
+      s.profiled = Boolean(learned)
+      let r = readPad(p, prefs)
+      if (s.kind === 'transmitter' || learned) {
+        // through the device profile (a transmitter defaults to AETR); a transmitter has no gamepad buttons
+        const m = readMapped(p, learned ?? defaultProfile(s.id, s.kind === 'transmitter' ? 'transmitter' : 'generic'))
+        s.mapped = m
+        s.logical = m.logical
+        s.radial = false
+        if (s.kind === 'transmitter') r = { ...r, pressed: noButtons(), l2: 0, r2: 0 }
+        r = { ...r, raw: m.raw }
+      } else {
+        s.mapped = null
+        s.logical = logicalSticks(r.raw, prefs.stickMode)
+        s.radial = prefs.stickMode === 2
+      }
       s.reading = r
-      this.buttons(s, r, now, vehicles, selected)
+      if (s.learning) {
+        for (const h of Object.values(s.holds)) h.release()
+      } else {
+        this.buttons(s, r, now, vehicles, selected, prefs.feel)
+        this.switches(s, now, vehicles)
+      }
       s.prev = r.pressed
+      s.prevSwitch = s.mapped?.switches ?? null
+    }
+  }
+
+  /** Switch bindings of a transmitter or profiled controller (05 §6.3): assist, arm (sims), stop; fire is read in tick. */
+  private switches(s: Slot, now: number, vehicles: readonly Vehicle[]): void {
+    const sw = s.mapped?.switches
+    if (!sw) return
+    const d = this.deps
+    const mine = possessedBy(vehicles, `pad:${s.index}`)
+    const prev = s.prevSwitch
+    // stop: a switch thrown to its stop position stops this aircraft at once, like L2 + R2 (also while unfocused)
+    if (sw.stop && !(prev?.stop ?? false) && prev !== null && mine) d.act.stop(mine.id)
+    if (this.paused || prev === null) return
+    // hover assist follows the switch position, on each change
+    if (sw.assist !== prev.assist && mine && mine.kind === 'sim' && mine.sim && mine.sim.hover_assist !== sw.assist) {
+      void d.act.simAssist(mine.id, sw.assist).catch(() => undefined)
+    }
+    // arm: held 1 s, simulated aircraft only (as L1 + R1)
+    if (mine && mine.kind === 'real') {
+      if (sw.arm && !prev.arm) d.act.notice({ kind: 'realArm' })
+    } else if (s.kind === 'transmitter' || sw.arm) {
+      this.hold(s, 'arm', sw.arm && Boolean(mine), now, mine?.id ?? null, () => {
+        if (mine) void d.act.arm(mine.id, !mine.armed).catch(() => undefined)
+      })
     }
   }
 
@@ -463,7 +647,7 @@ export class InputEngine {
     return { key: `pad-${slot.index}-${++this.hintSeq}`, pad: slot.index, model: slot.model, state, vehicle, createdAt: now }
   }
 
-  private buttons(s: Slot, r: PadReading, now: number, vehicles: readonly Vehicle[], selected: string | null): void {
+  private buttons(s: Slot, r: PadReading, now: number, vehicles: readonly Vehicle[], selected: string | null, feel: ControlFeel): void {
     const d = this.deps
     const mine = possessedBy(vehicles, `pad:${s.index}`)
     const edge = (b: keyof PadReading['pressed']) => r.pressed[b] && !(s.prev?.[b] ?? false)
@@ -492,13 +676,14 @@ export class InputEngine {
       if (dec.action === 'blocked') d.act.notice(dec.reason === 'taken' ? { kind: 'taken', vehicle: dec.vehicle, by: dec.by } : { kind: 'noSelection' })
     }
 
-    // L1 + R1 held 1 s: arm / disarm, simulated aircraft only (H4)
+    // L1 + R1 held 1 s: arm / disarm, simulated aircraft only (H4); a transmitter arms through its switch instead
     const chord = r.pressed.l1 && r.pressed.r1
     const chordEdge = chord && !((s.prev?.l1 ?? false) && (s.prev?.r1 ?? false))
+    const armSwitch = Boolean(s.mapped?.switches.arm)
     if (mine && mine.kind === 'real') {
       if (chordEdge) d.act.notice({ kind: 'realArm' })
-      this.hold(s, 'arm', false, now, null, () => undefined)
-    } else {
+      if (!armSwitch) this.hold(s, 'arm', false, now, null, () => undefined)
+    } else if (!armSwitch && s.kind !== 'transmitter') {
       this.hold(s, 'arm', chord && Boolean(mine), now, mine?.id ?? null, () => {
         if (mine) void d.act.arm(mine.id, !mine.armed).catch(() => undefined)
       })
@@ -511,11 +696,10 @@ export class InputEngine {
       if (resetTarget) void d.act.resetSim(resetTarget.id).catch(() => undefined)
     })
 
-    // single presses
-    if (edge('triangle') && mine && acceptsSticks(mine.mode_class)) {
-      const target = modeToggleTarget(mine)
-      if (target) void d.act.mode(mine.id, target).catch(() => undefined)
-    }
+    // single presses; Triangle is hover assist (05 §6.3): the sim's switch, or stabilise <-> altitude hold on a real one
+    if (edge('triangle') && mine) this.runAssist(mine)
+    if (edge('up')) d.act.setFeel(stepFeel(feel, 1))
+    if (edge('down')) d.act.setFeel(stepFeel(feel, -1))
     if (edge('square')) {
       const target = mine?.id ?? selected
       if (target) d.act.course(target)
@@ -556,6 +740,10 @@ export class InputEngine {
     for (const [k, p] of this.pending) if (now > p.until) this.pending.delete(k)
   }
 }
+
+/** All gamepad buttons released: a transmitter's buttons carry no gamepad meaning (its switches are bound instead). */
+const NO_BUTTONS: PadReading['pressed'] = readPad({ id: '', index: 0, connected: true, mapping: '', axes: [], buttons: [] }, DEFAULT_CONTROL).pressed
+const noButtons = (): PadReading['pressed'] => NO_BUTTONS
 
 function resumed(base: Await['base'], cur: Await['base']): boolean {
   if (base === null || cur === null) return false
