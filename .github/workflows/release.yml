@@ -99,10 +99,17 @@ jobs:
           security import "${RUNNER_TEMP}/developer-id.p12" -P "${CSC_KEY_PASSWORD}" -f pkcs12 -k "${keychain}" -T /usr/bin/codesign
           rm -f "${RUNNER_TEMP}/developer-id.p12"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${kpass}" "${keychain}" > /dev/null
+          # A .p12 exported from Keychain Access carries the certificate and key but not Apple's Developer ID G2
+          # intermediate; without it the identity is untrusted and find-identity -v drops it.
+          curl -fsSL --retry 3 https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o "${RUNNER_TEMP}/DeveloperIDG2CA.cer"
+          security import "${RUNNER_TEMP}/DeveloperIDG2CA.cer" -k "${keychain}" || true
           security list-keychains -d user -s "${keychain}" $(security list-keychains -d user | tr -d '"')
+          # Certificate type and validity only; the holder's name is masked.
+          echo "Code-signing identities in CSC_LINK:"
+          security find-identity -p codesigning "${keychain}" | sed -E 's/"([^":]+):[^"]*"/"\1: ..."/'
           identity="$(security find-identity -v -p codesigning "${keychain}" | awk '/Developer ID Application/ {print $2; exit}')"
           if [ -z "${identity}" ]; then
-            echo "CSC_LINK holds no valid Developer ID Application identity." >&2
+            echo "CSC_LINK holds no valid Developer ID Application identity: export the Developer ID Application certificate together with its private key (My Certificates in Keychain Access) as .p12." >&2
             exit 1
           fi
           echo "MAC_SIGN_IDENTITY=${identity}" >> "${GITHUB_ENV}"
@@ -127,7 +134,7 @@ jobs:
       - name: Remove signing material (macOS)
         if: always() && matrix.platform == 'mac'
         run: |
-          rm -f "${RUNNER_TEMP}/AuthKey.p8" "${RUNNER_TEMP}/developer-id.p12"
+          rm -f "${RUNNER_TEMP}/AuthKey.p8" "${RUNNER_TEMP}/developer-id.p12" "${RUNNER_TEMP}/DeveloperIDG2CA.cer"
           if [ -f "${RUNNER_TEMP}/relay-signing.keychain-db" ]; then
             security delete-keychain "${RUNNER_TEMP}/relay-signing.keychain-db" || true
           fi
