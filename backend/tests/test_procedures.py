@@ -471,6 +471,35 @@ def test_emergency_stop_aborts_a_flight_step(svc, stepper):
     assert any(e["kind"] == "procedure_aborted" for e in svc.events.after(0, 5000))
 
 
+def test_flight_steps_fail_clearly_with_hover_assist_off(svc, stepper):
+    # WP-E seam (05 §4.3 x §5.1): a simulator without hover assist has no altitude or position source
+    vid, v = boot(svc, stepper)
+    svc.possess(vid, "keyboard")
+    svc.set_sim_assist(vid, False, OP)
+    svc.procedure_start(vid, OP, "hover_tune", {"auto_answer": True})
+    view = drive(svc, stepper, vid, OP, budget=60)
+    assert view["state"] == "failed"
+    s9 = by_id(view, "S9")
+    assert s9["verdict"] == "fail" and s9["findings"][0]["code"] == "hover_assist_off"
+    assert "悬停辅助已关闭" in s9["findings"][0]["text_zh"]
+    assert by_id(view, "S10")["verdict"] == "skipped"
+    assert not v.armed and v.plan is None
+
+
+def test_hover_assist_switched_off_mid_flight_lands_and_fails(svc, stepper):
+    vid, v = boot(svc, stepper)
+    svc.possess(vid, "keyboard")
+    svc.procedure_start(vid, OP, "preflight_quick", {"auto_answer": True, "hover_s": 20})
+    drive(svc, stepper, vid, OP, budget=90, until=lambda w: w["step"] == "S9" and v.airborne())
+    stepper.run(2.0)
+    svc.set_sim_assist(vid, False, OP)
+    view = drive(svc, stepper, vid, OP, budget=60)
+    s9 = by_id(view, "S9")
+    assert view["state"] == "failed" and s9["verdict"] == "fail"
+    assert any("Hover assist was switched off" in f["text_en"] for f in s9["findings"])
+    assert stepper.until(lambda: not v.armed and v.landed == "ground", 30)
+
+
 def test_arming_outside_the_procedure_aborts(svc, stepper):
     vid, _v = boot(svc, stepper)
     svc.possess(vid, "keyboard")

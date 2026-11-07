@@ -846,6 +846,38 @@ class FlightStep(Step):
 
     phase = "prompt"
 
+    # -- WP-E: hover assist (05 §5.1). With assist off a simulator flies like an FPV quad without barometer or
+    # position source: the scripted takeoff, hover and hold-mode steps cannot fly, so the step fails clearly.
+
+    @staticmethod
+    def _assist_off(ctx: Context) -> bool:
+        v = ctx.v
+        sim = getattr(v.driver, "sim", None) if v.kind == "sim" else None
+        return sim is not None and not getattr(sim, "hover_assist", True)
+
+    def _assist_result(self, ctx: Context) -> StepResult:
+        ctx.shared["hover_failed"] = True
+        return StepResult(
+            "fail",
+            findings=[
+                finding(
+                    "hover_assist_off",
+                    "fail",
+                    "Hover assist is off: the simulator has no altitude or position source for the scripted "
+                    "flight. Turn hover assist on and run the step again.",
+                    "悬停辅助已关闭：模拟机没有自动飞行段所需的高度与定位源。请开启悬停辅助后重新运行本步骤。",
+                )
+            ],
+        )
+
+    def _assist_lost(self, ctx: Context) -> StepResult | None:
+        """Hover assist switched off while the segment flies: land through the usual failure path."""
+        return self._fail(
+            ctx,
+            "Hover assist was switched off during the flight segment.",
+            "飞行段期间悬停辅助被关闭。",
+        )
+
     def _ask_start(self, ctx: Context) -> None:
         self.phase = "prompt"
         blocking = ctx.preflight_blocking()
@@ -942,6 +974,8 @@ class HoverStep(FlightStep):
         self.only = tuple(self.config.get("only") or ())
         self.window: HoverWindow | None = None
         self.result_ready: StepResult | None = None
+        if self._assist_off(ctx):
+            return self._assist_result(ctx)
         self._ask_start(ctx)
         return None
 
@@ -952,12 +986,16 @@ class HoverStep(FlightStep):
             return StepResult("skipped")
         if answer != "start":
             return super().answer(ctx, answer, value, confirm)
+        if self._assist_off(ctx):
+            return self._assist_result(ctx)
         self._take_off(ctx, confirm, self.hover_s)
         return None
 
     def tick(self, ctx: Context, now: float) -> StepResult | None:
         v = ctx.v
         if self.phase in ("takeoff", "hover"):
+            if self._assist_off(ctx):
+                return self._assist_lost(ctx)
             failed = self._plan_failed(ctx)
             if failed:
                 return self._fail(ctx, f"The flight segment stopped: {failed}.", f"飞行段中止：{failed}。")
@@ -1053,6 +1091,14 @@ class StepResponseStep(FlightStep):
                 self.resume("Landing", "正在降落")
                 return None
             return result
+        if self._assist_off(ctx):
+            result = self._assist_result(ctx)
+            if ctx.v.airborne():
+                self.result_ready = result
+                self._begin_landing(ctx)
+                self.resume("Landing", "正在降落")
+                return None
+            return result
         if ctx.v.airborne():
             self._to_mode(ctx)
             return None
@@ -1066,6 +1112,8 @@ class StepResponseStep(FlightStep):
             return StepResult("skipped")
         if answer != "start":
             return super().answer(ctx, answer, value, confirm)
+        if self._assist_off(ctx):
+            return self._assist_result(ctx)
         self._take_off(ctx, confirm, 3.0)
         return None
 
@@ -1085,6 +1133,8 @@ class StepResponseStep(FlightStep):
 
     def tick(self, ctx: Context, now: float) -> StepResult | None:
         v = ctx.v
+        if self.phase in ("takeoff", "mode", "steps") and self._assist_off(ctx):
+            return self._assist_lost(ctx)
         if self.phase == "takeoff":
             failed = self._plan_failed(ctx)
             if failed:
