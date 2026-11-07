@@ -153,6 +153,7 @@ def fresh_state() -> dict[str, Any]:
         "hud": None,
         "rc": None,
         "servo": None,
+        "servo16": None,
         "sensors": [],
         "sensor_bits": (0, 0, 0),
         "prearm": None,
@@ -346,6 +347,7 @@ def _rc_channels(state, msg, fields, notes, now, wall):
 
 def _servo_output(state, msg, fields, notes, now, wall):
     state["servo"] = [int(fields.get(f"servo{i}_raw") or 0) for i in range(1, 9)]
+    state["servo16"] = [int(fields.get(f"servo{i}_raw") or 0) for i in range(1, 17)]
 
 
 def _radio_status(state, msg, fields, notes, now, wall):
@@ -378,6 +380,7 @@ def _command_ack(state, msg, fields, notes, now, wall):
         "command_name": cmd_entry.name.replace("MAV_CMD_", "") if cmd_entry else str(command),
         "result": result,
         "result_name": res_entry.name.replace("MAV_RESULT_", "") if res_entry else str(result),
+        "progress": int(fields.get("progress") or 0),
         "t": now,
         "wall": wall,
     }

@@ -25,7 +25,7 @@ from typing import Any, TypeVar
 
 from . import authority as auth
 from . import course as coursemod
-from . import plans, preflight, skills
+from . import device, plans, preflight, skills
 from .alerts import AlertBook, Condition
 from .authority import Actor, Authority
 from .config import (
@@ -38,7 +38,6 @@ from .config import (
     LINK_OFFLINE_S,
     LOSS_WINDOW_S,
     MODE_CONFIRM_S,
-    MOTOR_CONFIRM,
     PARAM_FETCH_DELAY_S,
     PILOT_OVERRIDE,
     POSITION_FRESH_S,
@@ -63,6 +62,7 @@ from .drivers.mavlink import MavlinkDriver
 from .drivers.sim import SimDriver
 from .errors import RelayError, err
 from .events import EventBus
+from .fleet_device import DeviceOps
 from .flighthealth import FlightHealth
 from .history import History
 from .mav import bridge as bridgemod
@@ -182,6 +182,9 @@ class Vehicle:
         self.baro_ground: float | None = None  # VFR_HUD altitude on the ground (altitude fallback)
         self.ground_alt: float | None = None  # altitude() when the aircraft armed
         self.plan: plans.Plan | None = None
+        self.rc_frame: dict[str, Any] | None = None  # channel override resent at the stick rate (04 §2)
+        self.motor_seq: dict[str, Any] | None = None  # "all motors" test in progress
+        self.deferred: list[tuple[float, Callable[[Any], None]]] = []
         self.health = FlightHealth()
         self.position_lost_since: float | None = None
         self.course_clear_at: float | None = None
@@ -259,6 +262,12 @@ class Vehicle:
         att = self.state["attitude"]
         return None if att is None else (float(att["roll"]), float(att["pitch"]))
 
+    def speed(self) -> float | None:
+        local = self.state["local"]
+        if local is None:
+            return None
+        return math.sqrt(local["vx"] ** 2 + local["vy"] ** 2 + local["vz"] ** 2)
+
     def param(self, name: str, default: float) -> float:
         entry = self.state["params"].get(name)
         return default if entry is None else float(entry["value"])
@@ -322,7 +331,7 @@ class Vehicle:
         return auth.controller(self.auth, claim is not None and sessions.alive(claim.session_id))
 
 
-class FleetService:
+class FleetService(DeviceOps):
     def __init__(
         self,
         settings: Settings | None = None,
@@ -504,6 +513,7 @@ class FleetService:
             self._next["stick"] = max(self._next["stick"] + 1.0 / STICK_HZ, now)
             for v in list(self.vehicles.values()):
                 self._stick_tick(v, now)
+                self._device_tick(v, now)
                 self._plan_tick(v)
                 self._health_tick(v, now)
         if now >= self._next["heartbeat"]:
@@ -1055,6 +1065,13 @@ class FleetService:
             elif not v.skill.active:
                 v.driver.stop_sticks()
             return
+        if v.rc_frame is not None:
+            if now - v.rc_frame["t"] > STICK_TIMEOUT_S:
+                v.rc_frame = None
+                v.driver.stop_sticks()
+            elif now >= v.stop_window_until:
+                v.driver.send_rc(v.rc_frame["channels"], v.rc_frame["axes"], signs)
+            return
         if v.sticks is None:
             return
         if now - v.sticks.t > STICK_TIMEOUT_S:
@@ -1089,6 +1106,7 @@ class FleetService:
         """Stop every stick source on this vehicle (skill, explicit sticks)."""
         self._stop_skill(v, reason, reason)
         v.sticks = None
+        v.rc_frame = None
         v.driver.stop_sticks()
 
     def _apply_effects(self, v: Vehicle, outcome: auth.Outcome, now: float) -> None:
@@ -1107,6 +1125,7 @@ class FleetService:
                 self._stop_skill(v, "control changed", "控制权变化")
             elif effect == auth.STOP_STICKS:
                 v.sticks = None
+                v.rc_frame = None
                 v.driver.stop_sticks()
             elif effect == auth.POSSESS_MODE:
                 self._possess_mode(v, now)
@@ -1114,6 +1133,8 @@ class FleetService:
                 self._abort_course(v, "stopped", now)
             elif effect == auth.EMERGENCY_STOP:
                 v.sticks = None
+                v.rc_frame = None
+                v.motor_seq = None
                 v.stop_seq = {"until": now + STOP_THROTTLE_S}
         self._update_segment(v, v.controller(self.sessions), wall)
 
@@ -1498,6 +1519,7 @@ class FleetService:
                         return {"accepted": False, "reason": "skill_running"}
                     self._stop_skill(v, "operator override", "操作员接管")
             v.sticks = new
+            v.rc_frame = None
             if new.source == "human":
                 v.health.note_stick_input(now)
             if now < v.stop_window_until:
@@ -1521,7 +1543,13 @@ class FleetService:
             pass
 
     def arm(
-        self, vid: str, actor: Actor, on: bool, confirm: str | None = None, wait: bool = True
+        self,
+        vid: str,
+        actor: Actor,
+        on: bool,
+        confirm: str | None = None,
+        wait: bool = True,
+        force: bool = False,
     ) -> dict[str, Any]:
         t0 = self.clock()
 
@@ -1530,10 +1558,16 @@ class FleetService:
             if on or actor.kind == "session":
                 self._check_control(v, actor)
             self._require_link(v)
-            if on:
+            if on and force:
+                # Skips the autopilot's pre-arm checks and Relay's preflight list; the word is the guard.
+                device.require_confirm("force_arm", v.kind, confirm)
+                if v.state["crashed"] and v.kind == "sim":
+                    raise err("crashed")
+                v.stop_window_until = 0.0
+            elif on:
                 self._arm_checks(v, confirm)
                 v.stop_window_until = 0.0
-            v.driver.arm(on)
+            v.driver.arm(on, force=on and force)
 
         self.call(start)
         if not wait or not self.threaded:
@@ -1687,6 +1721,35 @@ class FleetService:
             if not isinstance(seconds, (int, float)) or isinstance(seconds, bool) or not 0 <= seconds <= 120:
                 raise err("invalid_request", reason="seconds must be 0-120")
             params["seconds"] = float(seconds)
+        elif name == "sticks":
+            for axis in ("roll", "pitch", "yaw"):
+                params[axis] = _skill_number(params, axis, -1.0, 1.0, 0.0)
+            params["throttle"] = _skill_number(params, "throttle", 0.0, 1.0)
+            params["seconds"] = _skill_number(params, "seconds", 0.05, 10.0)
+            if not v.armed:
+                raise err("not_armed")
+        elif name == "attitude":
+            params["roll_deg"] = _skill_number(params, "roll_deg", -30.0, 30.0, 0.0)
+            params["pitch_deg"] = _skill_number(params, "pitch_deg", -30.0, 30.0, 0.0)
+            params["yaw_rate_dps"] = _skill_number(params, "yaw_rate_dps", -90.0, 90.0, 0.0)
+            params["seconds"] = _skill_number(params, "seconds", 0.05, 10.0)
+            if params.get("thrust") is not None:
+                params["thrust"] = _skill_number(params, "thrust", 0.0, 1.0)
+            params["_hover"] = v.calibration.hover
+            if not v.armed or not v.airborne():
+                raise err("not_airborne")
+        elif name == "velocity":
+            for axis in ("vx", "vy", "vz"):
+                params[axis] = _skill_number(params, axis, -2.0, 2.0, 0.0)
+            params["seconds"] = _skill_number(params, "seconds", 0.05, 10.0)
+            if params.get("yaw_rate_dps") is not None:
+                params["yaw_rate_dps"] = _skill_number(params, "yaw_rate_dps", -90.0, 90.0)
+            if not v.armed or not v.airborne():
+                raise err("not_airborne")
+            local = v.local_enu()
+            if local is None:
+                raise err("no_position_estimate")
+            params["_box"] = self._local_box(v, local)
         elif name == "land":
             params["_stick"] = v.autopilot == modes.PX4 and not position
             params["_ground"] = v.ground_alt
@@ -1704,6 +1767,7 @@ class FleetService:
         now = self.clock()
         self._stop_skill(v, "superseded", "被新技能取代")
         v.sticks = None
+        v.rc_frame = None
         v.stop_window_until = 0.0
         skill = skills.make(name, {k: x for k, x in params.items() if k != "confirm"}, now, target_local)
         self._skill_seq += 1
@@ -1731,7 +1795,7 @@ class FleetService:
             first, params = plans.skill_for(normalised[0])
             if first == "takeoff":
                 params["confirm"] = confirm
-            elif not v.airborne():
+            elif first != "sticks" and not v.airborne():
                 raise err("not_airborne")
             for step in normalised:
                 required = skills.REQUIREMENTS[plans.skill_for(step)[0]]
@@ -1836,6 +1900,20 @@ class FleetService:
             labels={"vehicle": v.label, "detail": en, "step": str(plan.index + 1)},
         )
 
+    def _local_box(self, v: Vehicle, local: tuple[float, float, float]) -> tuple[float, ...]:
+        """The safety volume as (xmin, xmax, ymin, ymax, zmin, zmax) in the vehicle's local ENU frame."""
+        origin = v.safety_origin or v.world_enu() or (0.0, 0.0, 0.0)
+        sv = self.settings.safety_volume
+        ox, oy, oz = (origin[i] - v.frame_offset[i] for i in range(3))
+        box = (ox - sv.x / 2, ox + sv.x / 2, oy - sv.y / 2, oy + sv.y / 2, oz, oz + sv.z)
+        if not skills._inside(box, local):
+            raise err(
+                "outside_safety_volume",
+                origin=[round(c, 3) for c in origin],
+                volume={"x": sv.x, "y": sv.y, "z": sv.z},
+            )
+        return box
+
     def _goto_target(self, v: Vehicle, params: dict[str, Any]) -> tuple[float, float, float]:
         try:
             x, y, z = (float(params[k]) for k in ("x", "y", "z"))
@@ -1880,33 +1958,8 @@ class FleetService:
     def motor_test(
         self, vid: str, motor: int, throttle_pct: float, seconds: float, confirm: str | None
     ) -> dict[str, Any]:
-        if confirm != MOTOR_CONFIRM:
-            raise err("confirm_required", expected=MOTOR_CONFIRM)
-        if not isinstance(motor, int) or not 1 <= motor <= 4:
-            raise err("invalid_request", reason="motor must be 1-4")
-        if not isinstance(throttle_pct, (int, float)) or not 5 <= float(throttle_pct) <= 15:
-            raise err("invalid_request", reason="throttle_pct must be 5-15")
-        if not isinstance(seconds, (int, float)) or not 0.5 <= float(seconds) <= 2.0:
-            raise err("invalid_request", reason="seconds must be 0.5-2")
-
-        def run() -> dict[str, Any]:
-            v = self._vehicle(vid)
-            self._require_link(v)
-            if v.armed:
-                raise err("armed")
-            if v.autopilot == modes.PX4:
-                v.driver.command_long(
-                    M.MAV_CMD_ACTUATOR_TEST,
-                    (float(throttle_pct) / 100.0, float(seconds), 0, 0, 100 + motor, 0, 0),
-                )
-            else:
-                v.driver.command_long(
-                    M.MAV_CMD_DO_MOTOR_TEST,
-                    (float(motor), 0.0, float(throttle_pct), float(seconds), 0.0, 0.0, 0.0),
-                )
-            return {"id": vid, "motor": motor, "running_s": float(seconds)}
-
-        return self.call(run)
+        """Legacy operator route ``/motor-test``: the same test without needing possession (04 §2)."""
+        return self.motors_test(vid, Actor.operator(), motor, throttle_pct, seconds, confirm, strict=False)
 
     # ====================================================================== parameters
 
@@ -2572,6 +2625,19 @@ def _number_param(params: dict[str, Any], key: str) -> float:
     value = params.get(key) or 0.0
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise err("invalid_request", reason=f"{key} must be a number of metres")
+    return float(value)
+
+
+def _skill_number(
+    params: dict[str, Any], key: str, low: float, high: float, default: float | None = None
+) -> float:
+    value = params.get(key, default)
+    if value is None:
+        raise err("invalid_request", reason=f"{key} is required")
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise err("invalid_request", reason=f"{key} must be a number")
+    if not low <= float(value) <= high:
+        raise err("invalid_request", reason=f"{key} must be {low:g} to {high:g}")
     return float(value)
 
 

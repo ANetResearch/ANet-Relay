@@ -55,6 +55,7 @@ _AP_BEHAVIOUR = {
     "FLOWHOLD": "loiter",
     "BRAKE": "hold",
     "GUIDED": "guided",
+    "GUIDED_NOGPS": "attitude",
     "AUTO": "hold",
     "CIRCLE": "hold",
     "LAND": "land",
@@ -104,6 +105,10 @@ EMITTABLE = {
     "AUTOPILOT_VERSION",
     "HOME_POSITION",
 }
+REBOOT_SILENCE_S = 2.5
+SETPOINT_STALE_S = 1.0
+MOTOR_OUTPUTS = 4
+FORCE_MAGIC = 21196
 
 I8, I16, I32, F = (
     M.MAV_PARAM_TYPE_INT8,
@@ -247,12 +252,13 @@ class SimAutopilot:
     # ------------------------------------------------------------------ state
 
     def _reset_state(self) -> None:
+        self.home = list(HOME)
         self.armed = False
         self.mode = "STABILIZE" if self.flavour == ARDUPILOT else "STABILIZED"
         self.pilot: tuple[float, float, float, float] | None = None  # roll, pitch, yaw, throttle
         self.pilot_t: float | None = None
         self.mode_t = self.t or 0.0
-        self.rc_raw: list[int] = [0] * 8
+        self.rc_raw: list[int] = [0] * 18
         self.z_target = 0.0
         self.i_vz = 0.0
         self.hold: list[float] | None = None
@@ -264,7 +270,20 @@ class SimAutopilot:
         self.ground_t: float | None = None
         self.airborne_t: float | None = None
         self.takeoff_alt: float | None = None
-        self.motor_test_until = 0.0
+        self.motor_tests: dict[int, tuple[float, float]] = {}  # output -> (throttle 0..1, until)
+        self.servo_set: dict[
+            int, tuple[int, float | None]
+        ] = {}  # output -> (PWM, until) from DO_SET_SERVO / ACTUATOR_TEST
+        self.relays: dict[int, bool] = {}
+        self.att_target: tuple[float, float, float, float, float] | None = (
+            None  # roll, pitch, yaw, rate, thrust
+        )
+        self.att_t: float | None = None
+        self.vel_target: list[float] | None = None  # ENU m/s
+        self.vel_yaw_rate: float | None = None
+        self.vel_t: float | None = None
+        self.pos_sp_t: float | None = None
+        self.reboot_until: float | None = None
         self.low_batt_warned = False
         self.crash_reported = False
         self.failsafe = False
@@ -302,6 +321,8 @@ class SimAutopilot:
             self.handle(msg, now)
 
     def handle(self, msg: Any, now: float) -> None:
+        if self.reboot_until is not None:
+            return  # the flight controller is rebooting and hears nothing
         if self.keep_received:
             self.received.append((now, msg))
             del self.received[: -self.keep_received]
@@ -323,18 +344,24 @@ class SimAutopilot:
             return
         if msg.get_srcSystem() != int(self.param("SYSID_MYGCS", 255)):
             return
-        raw = [msg.chan1_raw, msg.chan2_raw, msg.chan3_raw, msg.chan4_raw]
-        if all(v == 0 for v in raw):
+        raw = [getattr(msg, f"chan{i}_raw") for i in range(1, 19)]
+        if all(v == 0 for v in raw[:4]):
             self.pilot = None
-            self.rc_raw = [0] * 8
+            self.rc_raw = [0] * 18
             return
-        channels = list(self.rc_raw[:4]) if self.pilot is not None else [1500, 1500, 1000, 1500]
+        had_pilot = self.pilot is not None
+        channels = list(self.rc_raw) if had_pilot else [1500, 1500, 1000, 1500] + [0] * 14
         for i, value in enumerate(raw):
             if value == 65535:
                 continue
-            if 800 <= value <= 2200:
+            if value == 0:
+                channels[i] = 0
+            elif 800 <= value <= 2200:
                 channels[i] = value
-        self.rc_raw = channels + [0] * 4
+        self.rc_raw = channels
+        if not had_pilot and all(v == 65535 for v in raw[:4]):
+            self.rc_raw[:4] = [0] * 4  # only aux channels were overridden: no pilot input
+            return
         roll = (channels[0] - 1500) / 500.0
         pitch = -(channels[1] - 1500) / 500.0
         throttle = (channels[2] - 1000) / 1000.0
@@ -359,7 +386,11 @@ class SimAutopilot:
             int(1000 + 1000 * throttle),
             int(1500 + 500 * yaw),
         ]
-        self.rc_raw += [0] * 4
+        self.rc_raw += [0] * 14
+        aux = (msg.aux1, msg.aux2, msg.aux3, msg.aux4, msg.aux5, msg.aux6)
+        for i, value in enumerate(aux):
+            if msg.enabled_extensions & (1 << (2 + i)):
+                self.rc_raw[4 + i] = int(1500 + value / 2)
 
     def _on_set_mode(self, msg, now):
         custom = int(msg.custom_mode)
@@ -374,10 +405,15 @@ class SimAutopilot:
         if msg.coordinate_frame not in (M.MAV_FRAME_LOCAL_NED,):
             return
         mask = msg.type_mask
-        if mask & 0b111:  # position ignored: velocity-only setpoints are not modelled
+        if mask & 0b111 == 0b111 and not mask & 0b111000:  # velocity setpoint
+            self._velocity_setpoint(msg, now)
+            return
+        if mask & 0b111:  # position ignored: other combinations are not modelled
             return
         target = [msg.y, msg.x, -msg.z]
         yaw = None if mask & 1024 else msg.yaw
+        self.vel_target = None
+        self.pos_sp_t = now
         if self.flavour == ARDUPILOT:
             if self.mode == "GUIDED" and self.armed:
                 self.target = target
@@ -388,6 +424,31 @@ class SimAutopilot:
             if self.mode == "OFFBOARD":
                 self.target = target
                 self.target_yaw = yaw
+
+    def _velocity_setpoint(self, msg, now):
+        if self.flavour == PX4:
+            self.offboard_t = now
+            self.pos_sp_t = now
+            if self.mode != "OFFBOARD":
+                return
+        elif self.mode != "GUIDED" or not self.armed:
+            return
+        self.vel_target = [msg.vy, msg.vx, -msg.vz]
+        self.vel_yaw_rate = None if msg.type_mask & 2048 else msg.yaw_rate
+        self.vel_t = now
+
+    def _on_set_attitude_target(self, msg, now):
+        if msg.type_mask & 128:  # attitude ignored: body-rate-only targets are not modelled
+            return
+        w, x, y, z = msg.q
+        roll = math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y))
+        pitch = math.asin(max(-1.0, min(1.0, 2 * (w * y - z * x))))
+        yaw = math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+        rate = 0.0 if msg.type_mask & 4 else msg.body_yaw_rate
+        self.att_target = (roll, pitch, yaw, rate, min(1.0, max(0.0, msg.thrust)))
+        self.att_t = now
+        if self.flavour == PX4:
+            self.offboard_t = now
 
     def _on_request_data_stream(self, msg, now):
         if self.flavour != ARDUPILOT:
@@ -433,36 +494,20 @@ class SimAutopilot:
             self._send(M.MAVLink_timesync_message(tc1=int(now * 1e9), ts1=msg.ts1))
 
     def _on_command_long(self, msg, now):
-        cmd = msg.command
-        result = M.MAV_RESULT_UNSUPPORTED
         p = (msg.param1, msg.param2, msg.param3, msg.param4, msg.param5, msg.param6, msg.param7)
-        if cmd == M.MAV_CMD_COMPONENT_ARM_DISARM:
-            result = self._arm(p[0] > 0.5, now)
-        elif cmd == M.MAV_CMD_DO_SET_MODE:
-            name = self._mode_from_numbers(int(p[0]), int(p[1]), int(p[2]))
-            result = self._set_mode(name, now) if name else M.MAV_RESULT_DENIED
-        elif cmd == M.MAV_CMD_NAV_TAKEOFF:
-            result = self._takeoff(p[6], now)
-        elif cmd == M.MAV_CMD_NAV_LAND:
-            result = self._set_mode("LAND", now)
-        elif cmd == M.MAV_CMD_NAV_RETURN_TO_LAUNCH:
-            result = self._set_mode("RTL", now)
-        elif cmd == M.MAV_CMD_SET_MESSAGE_INTERVAL:
-            result = self._message_interval(int(p[0]), p[1], now)
-        elif cmd == M.MAV_CMD_REQUEST_MESSAGE:
-            result = self._request_message(int(p[0]), now)
-        elif cmd == M.MAV_CMD_REQUEST_AUTOPILOT_CAPABILITIES:
-            result = self._request_message(M.MAVLINK_MSG_ID_AUTOPILOT_VERSION, now)
-        elif cmd in (M.MAV_CMD_DO_MOTOR_TEST, M.MAV_CMD_ACTUATOR_TEST):
-            if self.armed:
-                result = M.MAV_RESULT_DENIED
-            else:
-                seconds = p[3] if cmd == M.MAV_CMD_DO_MOTOR_TEST else p[1]
-                self.motor_test_until = now + min(3.0, max(0.0, seconds))
-                result = M.MAV_RESULT_ACCEPTED
+        self._ack(msg, self._command(msg.command, p, now))
+
+    def _on_command_int(self, msg, now):
+        geographic = msg.frame in (0, 3, 5, 6, 10, 11)
+        x = msg.x / 1e7 if geographic else float(msg.x)
+        y = msg.y / 1e7 if geographic else float(msg.y)
+        p = (msg.param1, msg.param2, msg.param3, msg.param4, x, y, msg.z)
+        self._ack(msg, self._command(msg.command, p, now))
+
+    def _ack(self, msg, result: int) -> None:
         self._send(
             M.MAVLink_command_ack_message(
-                command=cmd,
+                command=msg.command,
                 result=result,
                 progress=0,
                 result_param2=0,
@@ -470,6 +515,59 @@ class SimAutopilot:
                 target_component=msg.get_srcComponent(),
             )
         )
+
+    def _command(self, cmd: int, p: tuple[float, ...], now: float) -> int:
+        """Run one MAV_CMD and return its MAV_RESULT. Unknown commands are UNSUPPORTED."""
+        if cmd == M.MAV_CMD_COMPONENT_ARM_DISARM:
+            return self._arm(p[0] > 0.5, now, force=p[1] == FORCE_MAGIC)
+        if cmd == M.MAV_CMD_DO_SET_MODE:
+            name = self._mode_from_numbers(int(p[0]), int(p[1]), int(p[2]))
+            return self._set_mode(name, now) if name else M.MAV_RESULT_DENIED
+        if cmd == M.MAV_CMD_NAV_TAKEOFF:
+            return self._takeoff(p[6], now)
+        if cmd == M.MAV_CMD_NAV_LAND:
+            return self._set_mode("LAND", now)
+        if cmd == M.MAV_CMD_NAV_RETURN_TO_LAUNCH:
+            return self._set_mode("RTL", now)
+        if cmd == M.MAV_CMD_NAV_LOITER_UNLIM:
+            return self._set_mode("LOITER", now)
+        if cmd == M.MAV_CMD_SET_MESSAGE_INTERVAL:
+            return self._message_interval(int(p[0]), p[1], now)
+        if cmd == M.MAV_CMD_REQUEST_MESSAGE:
+            return self._request_message(int(p[0]), now)
+        if cmd == M.MAV_CMD_REQUEST_AUTOPILOT_CAPABILITIES:
+            return self._request_message(M.MAVLINK_MSG_ID_AUTOPILOT_VERSION, now)
+        if cmd == M.MAV_CMD_DO_MOTOR_TEST:
+            return self._motor_test(int(p[0]), p[2] / 100.0, p[3], now)
+        if cmd == M.MAV_CMD_ACTUATOR_TEST:
+            return self._actuator_test(p[0], p[1], int(p[4]), now)
+        if cmd in (M.MAV_CMD_DO_SET_SERVO, M.MAV_CMD_DO_REPEAT_SERVO):
+            return self._set_servo(int(p[0]), p[1])
+        if cmd == M.MAV_CMD_DO_SET_RELAY:
+            self.relays[int(p[0])] = p[1] > 0.5
+            return M.MAV_RESULT_ACCEPTED
+        if cmd == M.MAV_CMD_DO_FLIGHTTERMINATION:
+            return self._terminate(p[0] > 0.5)
+        if cmd == M.MAV_CMD_PREFLIGHT_CALIBRATION:
+            return self._calibrate(p)
+        if cmd == M.MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN:
+            return self._reboot(int(p[0]), now)
+        if cmd == M.MAV_CMD_DO_SET_HOME:
+            return self._set_home(p)
+        if cmd == M.MAV_CMD_CONDITION_YAW:
+            return self._condition_yaw(p)
+        if cmd == M.MAV_CMD_DO_REPOSITION:
+            return self._reposition(p)
+        if cmd == M.MAV_CMD_MISSION_START:
+            return M.MAV_RESULT_FAILED  # no mission is stored
+        if cmd in (
+            M.MAV_CMD_DO_CHANGE_SPEED,
+            M.MAV_CMD_DO_SET_ROI_LOCATION,
+            M.MAV_CMD_DO_SET_ROI_NONE,
+            M.MAV_CMD_DO_PAUSE_CONTINUE,
+        ):
+            return M.MAV_RESULT_ACCEPTED
+        return M.MAV_RESULT_UNSUPPORTED  # payload commands: no gripper or camera is fitted
 
     # ------------------------------------------------------------------ commands
 
@@ -488,7 +586,8 @@ class SimAutopilot:
         if name not in table:
             return M.MAV_RESULT_DENIED
         behaviour = table[name]
-        if behaviour in POSITION_BEHAVIOURS and not self.has_position:
+        attitude_ok = name == "OFFBOARD" and self.att_t is not None and now - self.att_t <= 0.5
+        if behaviour in POSITION_BEHAVIOURS and not self.has_position and not attitude_ok:
             self._text(M.MAV_SEVERITY_WARNING, f"Mode change to {name} failed: requires position")
             return M.MAV_RESULT_DENIED
         if name == "OFFBOARD" and (self.offboard_t is None or now - self.offboard_t > 0.5):
@@ -515,10 +614,14 @@ class SimAutopilot:
             self.hold = [s.p[0], s.p[1], s.p[2]]
         return M.MAV_RESULT_ACCEPTED
 
-    def _arm(self, on: bool, now: float) -> int:
+    def _arm(self, on: bool, now: float, force: bool = False) -> int:
         s = self.quad.s
         if not on:
             if not self.armed:
+                return M.MAV_RESULT_ACCEPTED
+            if force:
+                s.motor = 0.0
+                self._disarm("Disarming motors (forced)")
                 return M.MAV_RESULT_ACCEPTED
             if not s.on_ground:
                 self._text(M.MAV_SEVERITY_WARNING, "Disarm denied: vehicle is flying")
@@ -531,6 +634,8 @@ class SimAutopilot:
         behaviour = self.behaviour
         if s.crashed:
             problem = "Crash detected, reset required"
+        elif force:
+            problem = None  # 21196: the pre-arm checks are skipped
         elif not s.on_ground:
             problem = "Vehicle is not on the ground"
         elif self.quad.battery.voltage < self._crit_voltage():
@@ -587,6 +692,131 @@ class SimAutopilot:
         self.target = [s.p[0], s.p[1], alt]
         self.target_yaw = None
         self.airborne_t = now
+        return M.MAV_RESULT_ACCEPTED
+
+    def _motor_test(self, motor: int, throttle: float, seconds: float, now: float) -> int:
+        if self.armed or not 1 <= motor <= MOTOR_OUTPUTS:
+            return M.MAV_RESULT_DENIED
+        if throttle <= 0.0 or seconds <= 0.0:
+            self.motor_tests.pop(motor, None)
+        else:
+            self.motor_tests[motor] = (min(1.0, throttle), now + min(10.0, seconds))
+        return M.MAV_RESULT_ACCEPTED
+
+    def _actuator_test(self, value: float, timeout: float, function: int, now: float) -> int:
+        """PX4 ACTUATOR_TEST: functions 101.. are motors, 201.. servos (after the motor outputs)."""
+        if 101 <= function <= 116:
+            if self.armed:
+                return M.MAV_RESULT_DENIED
+            output = function - 100
+            if output > MOTOR_OUTPUTS:
+                return M.MAV_RESULT_DENIED
+            if math.isnan(value) or value <= 0.0:
+                self.motor_tests.pop(output, None)
+            else:
+                until = now + (min(10.0, timeout) if timeout > 0 else 1e9)
+                self.motor_tests[output] = (min(1.0, value), until)
+            return M.MAV_RESULT_ACCEPTED
+        if 201 <= function <= 216:
+            output = MOTOR_OUTPUTS + function - 200
+            if output > 16:
+                return M.MAV_RESULT_DENIED
+            if math.isnan(value):
+                self.servo_set.pop(output, None)
+            else:
+                pwm = round(1500 + 500 * max(-1.0, min(1.0, value)))
+                self.servo_set[output] = (pwm, now + min(10.0, timeout) if timeout > 0 else None)
+            return M.MAV_RESULT_ACCEPTED
+        return M.MAV_RESULT_DENIED
+
+    def _set_servo(self, output: int, pwm: float) -> int:
+        if not 1 <= output <= 16:
+            return M.MAV_RESULT_DENIED
+        if pwm == 0:
+            self.servo_set.pop(output, None)
+        elif 800 <= pwm <= 2200:
+            self.servo_set[output] = (int(pwm), None)
+        else:
+            return M.MAV_RESULT_DENIED
+        return M.MAV_RESULT_ACCEPTED
+
+    def _terminate(self, on: bool) -> int:
+        if on and self.armed:
+            self.quad.s.motor = 0.0
+            self._disarm("Flight termination: motors stopped")
+        return M.MAV_RESULT_ACCEPTED
+
+    def _calibrate(self, p: tuple[float, ...]) -> int:
+        if self.armed:
+            return M.MAV_RESULT_DENIED
+        what = (
+            "gyroscope"
+            if p[0]
+            else "barometer"
+            if p[2]
+            else "level"
+            if p[4] == 2
+            else "accelerometer"
+            if p[4]
+            else None
+        )
+        if what is None:
+            return M.MAV_RESULT_UNSUPPORTED
+        self._text(M.MAV_SEVERITY_INFO, f"Calibrating {what}")
+        return M.MAV_RESULT_ACCEPTED
+
+    def _reboot(self, autopilot: int, now: float) -> int:
+        if autopilot == 0:
+            return M.MAV_RESULT_ACCEPTED
+        if self.armed:
+            return M.MAV_RESULT_DENIED
+        if autopilot != 1:
+            return M.MAV_RESULT_UNSUPPORTED
+        self.reboot_until = now + REBOOT_SILENCE_S
+        return M.MAV_RESULT_ACCEPTED
+
+    def _boot(self, now: float) -> None:
+        """Back from a reboot: fresh boot clock, default mode, disarmed, no message streams."""
+        self.reboot_until = None
+        self.boot = now
+        self.intervals.clear()
+        self.due.clear()
+        self._reset_state()
+        self.mode_t = now
+        self.next_heartbeat = 0.0
+
+    def _geo(self) -> tuple[float, float]:
+        s = self.quad.s
+        lat = HOME[0] + math.degrees(s.p[1] / 6371000.0)
+        lon = HOME[1] + math.degrees(s.p[0] / (6371000.0 * math.cos(math.radians(HOME[0]))))
+        return lat, lon
+
+    def _set_home(self, p: tuple[float, ...]) -> int:
+        if p[0] > 0.5:
+            lat, lon = self._geo()
+            self.home = [lat, lon, HOME[2] + self.quad.s.p[2]]
+        elif abs(p[4]) <= 90 and abs(p[5]) <= 180:
+            self.home = [p[4], p[5], p[6]]
+        else:
+            return M.MAV_RESULT_DENIED
+        msg = self._build("HOME_POSITION", self.t or 0.0)
+        if msg is not None:
+            self._send(msg)
+        return M.MAV_RESULT_ACCEPTED
+
+    def _condition_yaw(self, p: tuple[float, ...]) -> int:
+        if self.armed and self.behaviour == "guided":
+            base = self.quad.s.yaw if p[3] else 0.0
+            self.target_yaw = wrap_pi(base + math.radians(p[0]))
+        return M.MAV_RESULT_ACCEPTED
+
+    def _reposition(self, p: tuple[float, ...]) -> int:
+        if not (self.armed and self.behaviour == "guided" and self.has_position):
+            return M.MAV_RESULT_DENIED
+        x = math.radians(p[5] - HOME[1]) * 6371000.0 * math.cos(math.radians(HOME[0]))
+        y = math.radians(p[4] - HOME[0]) * 6371000.0
+        self.target = [x, y, max(0.0, p[6] - HOME[2])]
+        self.vel_target = None
         return M.MAV_RESULT_ACCEPTED
 
     def _set_interval(self, name: str, interval: float, now: float) -> None:
@@ -745,8 +975,7 @@ class SimAutopilot:
         if name == "GLOBAL_POSITION_INT":
             if not self.has_position:
                 return None
-            lat = HOME[0] + math.degrees(s.p[1] / 6371000.0)
-            lon = HOME[1] + math.degrees(s.p[0] / (6371000.0 * math.cos(math.radians(HOME[0]))))
+            lat, lon = self._geo()
             return M.MAVLink_global_position_int_message(
                 time_boot_ms=boot_ms,
                 lat=int(lat * 1e7),
@@ -762,9 +991,9 @@ class SimAutopilot:
             if not self.has_position:
                 return None
             return M.MAVLink_home_position_message(
-                latitude=int(HOME[0] * 1e7),
-                longitude=int(HOME[1] * 1e7),
-                altitude=int(HOME[2] * 1000),
+                latitude=int(self.home[0] * 1e7),
+                longitude=int(self.home[1] * 1e7),
+                altitude=int(self.home[2] * 1000),
                 x=0,
                 y=0,
                 z=0,
@@ -787,29 +1016,19 @@ class SimAutopilot:
                 vtol_state=M.MAV_VTOL_STATE_UNDEFINED, landed_state=self.landed_state()
             )
         if name == "RC_CHANNELS":
-            raw = self.rc_raw + [0] * 10
+            raw = self.rc_raw
+            count = 18 if any(raw[8:]) else 8 if any(raw) else 0
             return M.MAVLink_rc_channels_message(
                 time_boot_ms=boot_ms,
-                chancount=8 if self.pilot else 0,
+                chancount=count,
                 rssi=255,
                 **{f"chan{i + 1}_raw": raw[i] for i in range(18)},
             )
         if name == "SERVO_OUTPUT_RAW":
-            if self.armed or now < self.motor_test_until:
-                pwm = int(1000 + 1000 * (s.motor if self.armed else 0.08))
-            else:
-                pwm = 1000
             return M.MAVLink_servo_output_raw_message(
                 time_usec=int(boot_ms * 1000) & 0xFFFFFFFF,
                 port=0,
-                servo1_raw=pwm,
-                servo2_raw=pwm,
-                servo3_raw=pwm,
-                servo4_raw=pwm,
-                servo5_raw=0,
-                servo6_raw=0,
-                servo7_raw=0,
-                servo8_raw=0,
+                **{f"servo{i}_raw": self._servo_pwm(i, now) for i in range(1, 17)},
             )
         if name == "VIBRATION":
             level = 4.0 + 3.0 * s.motor if self.armed else 0.3
@@ -864,6 +1083,22 @@ class SimAutopilot:
             )
         return None
 
+    def _servo_pwm(self, output: int, now: float) -> int:
+        """PWM on one output: DO_SET_SERVO wins, then a running motor test, then the flight controller."""
+        held = self.servo_set.get(output)
+        if (
+            held is not None
+            and (held[1] is None or now < held[1])
+            and not (self.armed and output <= MOTOR_OUTPUTS)
+        ):
+            return held[0]
+        test = self.motor_tests.get(output)
+        if test is not None and now < test[1]:
+            return int(1000 + 1000 * test[0])
+        if output <= MOTOR_OUTPUTS:
+            return int(1000 + 1000 * self.quad.s.motor) if self.armed else 1000
+        return 0
+
     def _emit_due(self, now: float) -> None:
         if now >= self.next_heartbeat:
             self._send(self._heartbeat())
@@ -886,6 +1121,13 @@ class SimAutopilot:
             self.t = now
             self.boot = now
             self.mode_t = now
+        if self.reboot_until is not None:
+            self.t = now
+            data = b"".join(self.out)  # the COMMAND_ACK queued before the reboot goes out; then silence
+            self.out.clear()
+            if now >= self.reboot_until:
+                self._boot(now)
+            return data
         steps = int((now - self.t) / DT)
         if steps > MAX_STEPS:
             self.t = now - MAX_STEPS * DT
@@ -1114,6 +1356,10 @@ class SimAutopilot:
                 if rate != 0.0:
                     self.z_target = s.p[2]
                 cmd.throttle = self._vertical(self.z_target, rate, dt, up, dn)
+        elif behaviour == "attitude" or (behaviour == "guided" and self._attitude_active(now)):
+            cmd = self._attitude_command(now)
+        elif behaviour == "guided" and self._velocity_active(now):
+            cmd = self._velocity_command(now, dt, up, dn)
         elif behaviour in ("guided", "takeoff"):
             target = self.target or [s.p[0], s.p[1], s.p[2]]
             if s.on_ground and target[2] <= 0.05:
@@ -1152,6 +1398,55 @@ class SimAutopilot:
         elif behaviour == "rtl":
             cmd = self._rtl(now, dt, up, dn)
         self.quad.step(cmd, armed=True, dt=dt)
+
+    def _attitude_active(self, now: float) -> bool:
+        """PX4 OFFBOARD follows attitude setpoints while newer than the last position or velocity one."""
+        if self.att_t is None or now - self.att_t > SETPOINT_STALE_S:
+            return False
+        return self.pos_sp_t is None or self.att_t >= self.pos_sp_t
+
+    def _attitude_command(self, now: float) -> Command:
+        """Follow SET_ATTITUDE_TARGET; without a fresh setpoint stay level at the last thrust."""
+        s = self.quad.s
+        cmd = Command()
+        if self.att_target is None:
+            return cmd
+        roll, pitch, yaw, rate, thrust = self.att_target
+        fresh = self.att_t is not None and now - self.att_t <= SETPOINT_STALE_S
+        limit = self._max_tilt()
+        if fresh:
+            cmd.roll = max(-limit, min(limit, roll))
+            cmd.pitch = max(-limit, min(limit, pitch))
+            cmd.yaw_rate = rate + KP_YAW * wrap_pi(yaw - s.yaw)
+        cmd.throttle = SPIN_ARM if s.on_ground and thrust < 0.05 else thrust
+        return cmd
+
+    def _velocity_active(self, now: float) -> bool:
+        if self.vel_target is None:
+            return False
+        if self.vel_t is not None and now - self.vel_t <= SETPOINT_STALE_S:
+            return True
+        s = self.quad.s
+        self.vel_target = None  # setpoint stream ended: hold where the aircraft is
+        self.target, self.target_yaw = [s.p[0], s.p[1], s.p[2]], None
+        return False
+
+    def _velocity_command(self, now: float, dt: float, up: float, dn: float) -> Command:
+        s = self.quad.s
+        cmd = Command()
+        assert self.vel_target is not None
+        vx, vy, vz = self.vel_target
+        if s.on_ground and vz <= 0.0:
+            cmd.throttle = SPIN_ARM
+            return cmd
+        cmd.roll, cmd.pitch = self._velocity_tilt(vx, vy)
+        cmd.yaw_rate = self.vel_yaw_rate or 0.0
+        if vz != 0.0:
+            self.z_target = s.p[2]
+        else:
+            self.z_target = self.z_target if self.z_target > 0.0 else s.p[2]
+        cmd.throttle = self._vertical(self.z_target, vz, dt, up, dn)
+        return cmd
 
     def _loiter(self, roll_s: float, pitch_s: float) -> tuple[float, float]:
         s = self.quad.s

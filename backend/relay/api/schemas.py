@@ -153,7 +153,9 @@ class SkillView(_Model):
     detail: str | None
 
 
-PlanAction = Literal["takeoff", "hover", "hold", "move", "yaw", "land", "goto", "rtl"]
+PlanAction = Literal[
+    "takeoff", "hover", "hold", "move", "yaw", "land", "goto", "rtl", "sticks", "attitude", "velocity"
+]
 
 
 HealthLevel = Literal["ok", "warn", "bad", "na"]
@@ -356,6 +358,16 @@ EventKind = Literal[
     "plan_finished",
     "plan_failed",
     "plan_cancelled",
+    "device_command",
+    "motor_test",
+    "motor_test_stopped",
+    "actuator_set",
+    "rc_override",
+    "message_interval",
+    "home_set",
+    "rebooting",
+    "calibration_started",
+    "terminated",
 ]
 
 
@@ -468,6 +480,9 @@ class SticksBody(_Body):
 class ArmBody(_Body):
     arm: bool = True
     confirm: str | None = None
+    force: bool = Field(
+        default=False, description='skip the autopilot pre-arm checks; needs confirm "FORCE" (04 §2)'
+    )
 
 
 class ModeBody(_Body):
@@ -486,6 +501,16 @@ class PlanStep(_Body):
     y: float | None = None
     z: float | None = None
     yaw: float | None = None
+    roll: float | None = Field(default=None, description="sticks: -1..1")
+    pitch: float | None = Field(default=None, description="sticks: -1..1")
+    throttle: float | None = Field(default=None, description="sticks: 0..1")
+    roll_deg: float | None = Field(default=None, description="attitude: roll in degrees, right wing down +")
+    pitch_deg: float | None = Field(default=None, description="attitude: pitch in degrees, nose up +")
+    yaw_rate_dps: float | None = Field(default=None, description="attitude / velocity: yaw rate, deg/s")
+    thrust: float | None = Field(default=None, description="attitude: collective thrust 0..1")
+    vx: float | None = Field(default=None, description="velocity: m/s east")
+    vy: float | None = Field(default=None, description="velocity: m/s north")
+    vz: float | None = Field(default=None, description="velocity: m/s up")
 
 
 class SkillBody(_Body):
@@ -500,6 +525,16 @@ class SkillBody(_Body):
     up: float | None = Field(default=None, description="move: metres up (negative: down)")
     deg: float | None = Field(default=None, description="yaw: degrees, positive clockwise")
     seconds: float | None = Field(default=None, description="hold: seconds before the skill reports done")
+    roll: float | None = Field(default=None, description="sticks: -1..1")
+    pitch: float | None = Field(default=None, description="sticks: -1..1")
+    throttle: float | None = Field(default=None, description="sticks: 0..1")
+    roll_deg: float | None = Field(default=None, description="attitude: roll in degrees, right wing down +")
+    pitch_deg: float | None = Field(default=None, description="attitude: pitch in degrees, nose up +")
+    yaw_rate_dps: float | None = Field(default=None, description="attitude / velocity: yaw rate, deg/s")
+    thrust: float | None = Field(default=None, description="attitude: collective thrust 0..1")
+    vx: float | None = Field(default=None, description="velocity: m/s east")
+    vy: float | None = Field(default=None, description="velocity: m/s north")
+    vz: float | None = Field(default=None, description="velocity: m/s up")
     confirm: str | None = None
 
 

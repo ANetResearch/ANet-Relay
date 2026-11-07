@@ -86,6 +86,26 @@ CATALOGUE: dict[str, tuple[int, str, str]] = {
     ),
     "arm_rejected": (409, "The autopilot did not arm: {reason}.", "飞控未解锁：{reason}。"),
     "mode_rejected": (409, "The autopilot did not switch to {mode}.", "飞控未切换到 {mode}。"),
+    "must_be_disarmed": (
+        409,
+        "Disarm the aircraft before {action}.",
+        "{action}前须先给飞机上锁。",
+    ),
+    "command_not_allowed": (
+        400,
+        "Command {command} is not in the command catalogue.",
+        "命令 {command} 不在命令目录中。",
+    ),
+    "message_not_seen": (
+        404,
+        "No {message} message has been received from this aircraft.",
+        "尚未从这架飞机收到 {message} 消息。",
+    ),
+    "param_not_found": (
+        404,
+        "The autopilot did not return parameter {name}.",
+        "飞控未返回参数 {name}。",
+    ),
     "not_armed": (409, "Arm the aircraft first.", "须先解锁飞机。"),
     "armed": (409, "Disarm the aircraft first.", "须先给飞机上锁。"),
     "not_airborne": (409, "The aircraft must be in the air first.", "飞机须先起飞。"),
