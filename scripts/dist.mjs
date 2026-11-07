@@ -17,5 +17,7 @@ if (!process.argv.includes("--prebuilt")) {
   run(process.execPath, ["scripts/build-web.mjs"]);
   run(process.execPath, ["scripts/build-backend.mjs"]);
 }
+// The Copilot bundle is cheap and must match the sources, so it is always rebuilt.
+run(process.execPath, ["scripts/build-copilot.mjs"]);
 
 run(bin("electron-builder"), ["--config", "electron-builder.yml", FLAGS[platform], `--${arch}`, "--publish", "never"]);

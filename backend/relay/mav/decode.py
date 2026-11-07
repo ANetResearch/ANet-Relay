@@ -435,7 +435,8 @@ def _estimator_status(state, msg, fields, notes, now, wall):
 
 
 def _vibration(state, msg, fields, notes, now, wall):
-    state["vibration"] = {k: fields.get(k) for k in ("vibration_x", "vibration_y", "vibration_z")}
+    keys = ("vibration_x", "vibration_y", "vibration_z", "clipping_0", "clipping_1", "clipping_2")
+    state["vibration"] = {k: fields.get(k) for k in keys}
 
 
 def _timesync(state, msg, fields, notes, now, wall):

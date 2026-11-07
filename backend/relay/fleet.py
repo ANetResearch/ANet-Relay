@@ -25,7 +25,7 @@ from typing import Any, TypeVar
 
 from . import authority as auth
 from . import course as coursemod
-from . import preflight, skills
+from . import plans, preflight, skills
 from .alerts import AlertBook, Condition
 from .authority import Actor, Authority
 from .config import (
@@ -63,6 +63,7 @@ from .drivers.mavlink import MavlinkDriver
 from .drivers.sim import SimDriver
 from .errors import RelayError, err
 from .events import EventBus
+from .flighthealth import FlightHealth
 from .history import History
 from .mav import bridge as bridgemod
 from .mav import decode, discovery, modes
@@ -107,6 +108,7 @@ PX4_INTERVALS = (
     (M.MAVLINK_MSG_ID_EXTENDED_SYS_STATE, 2),
     (M.MAVLINK_MSG_ID_RC_CHANNELS, 4),
     (M.MAVLINK_MSG_ID_SERVO_OUTPUT_RAW, 4),
+    (M.MAVLINK_MSG_ID_VIBRATION, 2),
 )
 SIM_POSITION_HZ = 50.0
 BATTERY_SUSTAIN_S = 2.0
@@ -176,6 +178,10 @@ class Vehicle:
         self.rtt_ms: float | None = None
         self.rtt_at: float | None = None
         self.airborne_alerted = False
+        self.baro_ground: float | None = None  # VFR_HUD altitude on the ground (altitude fallback)
+        self.ground_alt: float | None = None  # altitude() when the aircraft armed
+        self.plan: plans.Plan | None = None
+        self.health = FlightHealth()
         self.position_lost_since: float | None = None
         self.course_clear_at: float | None = None
         self.crash_event = False
@@ -238,7 +244,23 @@ class Vehicle:
         glob = self.state["global"]
         if glob is not None:
             return glob["relative_alt"]
+        # Barometer only: VFR_HUD altitude above the reading taken on the ground.
+        hud = self.state["hud"] or {}
+        if hud.get("alt") is not None and self.baro_ground is not None:
+            return float(hud["alt"]) - self.baro_ground
         return None
+
+    def heading(self) -> float | None:
+        att = self.state["attitude"]
+        return None if att is None else float(att["yaw"])
+
+    def tilt(self) -> tuple[float, float] | None:
+        att = self.state["attitude"]
+        return None if att is None else (float(att["roll"]), float(att["pitch"]))
+
+    def param(self, name: str, default: float) -> float:
+        entry = self.state["params"].get(name)
+        return default if entry is None else float(entry["value"])
 
     def home_amsl(self) -> float | None:
         glob = self.state["global"]
@@ -358,6 +380,7 @@ class FleetService:
         self.custom_courses: dict[str, dict[str, Any]] = self._load_courses()
         self._best: dict[str, float | None] = {}
         self._skill_seq = 0
+        self._plan_seq = 0
         self.events.add_listener(self._record_event)
         if self.link is not None:
             self._open_listen()
@@ -480,6 +503,8 @@ class FleetService:
             self._next["stick"] = max(self._next["stick"] + 1.0 / STICK_HZ, now)
             for v in list(self.vehicles.values()):
                 self._stick_tick(v, now)
+                self._plan_tick(v)
+                self._health_tick(v, now)
         if now >= self._next["heartbeat"]:
             self._next["heartbeat"] = now + HEARTBEAT_PERIOD_S
             self._heartbeats(now)
@@ -626,9 +651,14 @@ class FleetService:
         if v.link_state in ("waiting", "offline") or v.link_state in ("delayed", "lost"):
             self._set_link(v, "ok", now)
         armed = v.armed
+        hud = v.state["hud"] or {}
+        if not armed and hud.get("alt") is not None:
+            v.baro_ground = float(hud["alt"])
         if armed != v.last_armed:
             v.last_armed = armed
             if armed:
+                v.health.reset()
+                v.ground_alt = v.altitude()
                 v.armed_t0 = now
                 v.armed_time_s = 0.0
                 v.flight_time_s = 0.0
@@ -1029,6 +1059,13 @@ class FleetService:
             return
         v.driver.send_sticks(v.sticks, signs)
 
+    def _health_tick(self, v: Vehicle, now: float) -> None:
+        if v.skill is not None and v.skill.active:
+            sticks = v.skill.out
+        else:
+            sticks = v.sticks
+        v.health.sample(v, now, sticks, v.mode in modes.HOLD_STICK_MODES)
+
     def _drain_skill(self, v: Vehicle) -> None:
         skill = v.skill
         if skill is None:
@@ -1075,10 +1112,17 @@ class FleetService:
         self._update_segment(v, v.controller(self.sessions), wall)
 
     def _possess_mode(self, v: Vehicle, now: float) -> None:
-        if v.autopilot is None or modes.accepts_sticks(v.autopilot, v.mode):
+        if v.autopilot is None:
             return
         target = modes.possess_mode(v.autopilot, v.has_baro(), self.settings.possess_mode)
-        if target is None:
+        if target is None or v.mode == target:
+            return
+        # A stick mode is kept, except that on the ground a manual-throttle mode (STABILIZE / STABILIZED /
+        # MANUAL, as a keyboard script leaves it) becomes altitude hold when the setting asks for it: with a
+        # manual throttle every stick wobble is a climb or a sink, which reads as "unsteady after take-off".
+        if modes.accepts_sticks(v.autopilot, v.mode) and (
+            v.mode in modes.HOLD_STICK_MODES or v.landed == "air" or target not in modes.HOLD_STICK_MODES
+        ):
             return
         v.driver.set_mode(target)
         v.mode_wait = (target, now + MODE_CONFIRM_S, False)
@@ -1168,7 +1212,7 @@ class FleetService:
 
         return self.call(run)
 
-    def add_sims(self, count: int = 1, flavour: str = ARDUPILOT) -> list[str]:
+    def add_sims(self, count: int = 1, flavour: str = ARDUPILOT, position: bool = True) -> list[str]:
         if flavour not in (ARDUPILOT, PX4):
             raise err("invalid_request", reason="autopilot must be ardupilot or px4")
         if not 1 <= int(count) <= SIM_LIMIT:
@@ -1184,7 +1228,7 @@ class FleetService:
                 n = next(i for i in range(1, SIM_LIMIT + 1) if f"sim-{i}" not in existing)
                 vid = f"sim-{n}"
                 existing.add(vid)
-                autopilot = SimAutopilot(flavour, position=True, position_hz=SIM_POSITION_HZ, name=vid)
+                autopilot = SimAutopilot(flavour, position=position, position_hz=SIM_POSITION_HZ, name=vid)
                 v = Vehicle(vid, "sim", f"SIM-{n}", SimDriver(autopilot))
                 self._attach(v)
                 v.created = now
@@ -1448,6 +1492,8 @@ class FleetService:
                         return {"accepted": False, "reason": "skill_running"}
                     self._stop_skill(v, "operator override", "操作员接管")
             v.sticks = new
+            if new.source == "human":
+                v.health.note_stick_input(now)
             if now < v.stop_window_until:
                 return {"accepted": False, "reason": "stop_window"}
             return {"accepted": True}
@@ -1551,59 +1597,238 @@ class FleetService:
         if name not in skills.SKILL_NAMES:
             raise err("unknown_skill", skill=name, skills=list(skills.SKILL_NAMES))
         params = dict(params or {})
-        sv = self.settings.safety_volume
 
         def run() -> dict[str, Any]:
             v = self._vehicle(vid)
             self._check_control(v, actor)
             self._require_link(v)
-            required = skills.REQUIREMENTS[name]
-            if not v.capabilities.has(required):
-                raise err("capability_missing", required=required)
-            now = self.clock()
-            target_local = None
-            if name == "takeoff":
-                alt = params.get("alt", 1.0)
-                if (
-                    not isinstance(alt, (int, float))
-                    or isinstance(alt, bool)
-                    or not 0.2 <= float(alt) <= sv.z
-                ):
-                    raise err("outside_safety_volume", reason=f"alt must be 0.2-{sv.z:g} m", limit_z=sv.z)
-                params["alt"] = float(alt)
-                if v.autopilot == modes.PX4 and not v.capabilities.position:
-                    raise err("capability_missing", required="position")
-                if not v.armed:
-                    self._arm_checks(v, params.get("confirm"))
-            elif name == "goto":
-                target = self._goto_target(v, params)
-                target_local = (
-                    target[0] - v.frame_offset[0],
-                    target[1] - v.frame_offset[1],
-                    target[2] - v.frame_offset[2],
-                )
-                local = v.local_enu()
-                params["distance"] = math.dist(local, target_local) if local else 3.0
-                if not v.armed:
-                    raise err("not_armed")
-            elif name == "rtl" and not v.armed:
-                raise err("not_armed")
-            self._stop_skill(v, "superseded", "被新技能取代")
-            v.sticks = None
-            v.stop_window_until = 0.0
-            skill = skills.make(name, {k: x for k, x in params.items() if k != "confirm"}, now, target_local)
-            self._skill_seq += 1
-            skill.id = self._skill_seq
-            v.skill = skill
-            self.events.emit(
-                "skill_started",
-                v.id,
-                data={"skill": name, "skill_id": skill.id, "params": _public(skill.params)},
-                labels={"vehicle": v.label, "skill": name},
-            )
+            prepared, target_local = self._prepare_skill(v, name, params)
+            self._cancel_plan(v, "superseded by a skill", "被单独的技能取代")
+            skill = self._start_skill(v, name, prepared, target_local)
             return {"id": vid, "skill": skill.view()}
 
         return self.call(run)
+
+    def _prepare_skill(
+        self, v: Vehicle, name: str, params: dict[str, Any]
+    ) -> tuple[dict[str, Any], tuple[float, float, float] | None]:
+        """Check a skill against the vehicle and return its executor parameters (vehicle thread)."""
+        params = dict(params)
+        sv = self.settings.safety_volume
+        required = skills.REQUIREMENTS[name]
+        if not v.capabilities.has(required):
+            raise err("capability_missing", required=required)
+        position = v.capabilities.position
+        target_local = None
+        if name == "takeoff":
+            alt = params.get("alt", 1.0)
+            if not isinstance(alt, (int, float)) or isinstance(alt, bool) or not 0.2 <= float(alt) <= sv.z:
+                raise err("outside_safety_volume", reason=f"alt must be 0.2-{sv.z:g} m", limit_z=sv.z)
+            params["alt"] = float(alt)
+            # Without a position estimate GUIDED / OFFBOARD takeoff is refused: climb on the stick.
+            params["_stick"] = not position
+            if not v.armed:
+                self._arm_checks(v, params.get("confirm"))
+        elif name == "goto":
+            target = self._goto_target(v, params)
+            target_local = (
+                target[0] - v.frame_offset[0],
+                target[1] - v.frame_offset[1],
+                target[2] - v.frame_offset[2],
+            )
+            local = v.local_enu()
+            params["distance"] = math.dist(local, target_local) if local else 3.0
+            if not v.armed:
+                raise err("not_armed")
+        elif name == "move":
+            forward, right, up = (_number_param(params, k) for k in ("forward", "right", "up"))
+            params.update(forward=forward, right=right, up=up)
+            if not v.armed or not v.airborne():
+                raise err("not_airborne")
+            altitude = v.altitude()
+            if altitude is not None and up and not 0.2 <= altitude + up - (v.ground_alt or 0.0) <= sv.z:
+                raise err("outside_safety_volume", reason=f"altitude must stay 0.2-{sv.z:g} m", limit_z=sv.z)
+            if position:
+                local = v.local_enu()
+                heading = v.heading() or 0.0
+                assert local is not None
+                east = forward * math.sin(heading) + right * math.cos(heading)
+                north = forward * math.cos(heading) - right * math.sin(heading)
+                world = v.world_enu() or local
+                self._goto_target(v, {"x": world[0] + east, "y": world[1] + north, "z": world[2] + up})
+                target_local = (local[0] + east, local[1] + north, local[2] + up)
+                params["distance"] = math.dist(local, target_local)
+                params["yaw"] = None
+            else:
+                if math.hypot(forward, right) > skills.MOVE_OPEN_LOOP_MAX_M:
+                    raise err(
+                        "outside_safety_volume",
+                        reason="without a position estimate a move is at most "
+                        f"{skills.MOVE_OPEN_LOOP_MAX_M:g} m",
+                    )
+                tilt = skills.max_tilt_deg(v.autopilot, v.param)
+                params["_profile"] = list(skills.open_loop_profile(forward, right, tilt))
+                params["distance"] = math.hypot(forward, right)
+        elif name == "yaw":
+            deg = params.get("deg")
+            if not isinstance(deg, (int, float)) or isinstance(deg, bool) or not -360 <= float(deg) <= 360:
+                raise err("invalid_request", reason="deg must be -360 to 360")
+            params["deg"] = float(deg)
+            if not v.armed or not v.airborne():
+                raise err("not_airborne")
+        elif name == "hold":
+            seconds = params.get("seconds", 0.0) or 0.0
+            if not isinstance(seconds, (int, float)) or isinstance(seconds, bool) or not 0 <= seconds <= 120:
+                raise err("invalid_request", reason="seconds must be 0-120")
+            params["seconds"] = float(seconds)
+        elif name == "land":
+            params["_stick"] = v.autopilot == modes.PX4 and not position
+            params["_ground"] = v.ground_alt
+        elif name == "rtl" and not v.armed:
+            raise err("not_armed")
+        return params, target_local
+
+    def _start_skill(
+        self,
+        v: Vehicle,
+        name: str,
+        params: dict[str, Any],
+        target_local: tuple[float, float, float] | None,
+    ) -> skills.Skill:
+        now = self.clock()
+        self._stop_skill(v, "superseded", "被新技能取代")
+        v.sticks = None
+        v.stop_window_until = 0.0
+        skill = skills.make(name, {k: x for k, x in params.items() if k != "confirm"}, now, target_local)
+        self._skill_seq += 1
+        skill.id = self._skill_seq
+        v.skill = skill
+        self.events.emit(
+            "skill_started",
+            v.id,
+            data={"skill": name, "skill_id": skill.id, "params": _public(skill.params)},
+            labels={"vehicle": v.label, "skill": name},
+        )
+        return skill
+
+    # ====================================================================== plans
+
+    def run_plan(
+        self, vid: str, actor: Actor, steps: Any, name: str | None = None, confirm: str | None = None
+    ) -> dict[str, Any]:
+        normalised = plans.normalise_steps(steps)
+
+        def run() -> dict[str, Any]:
+            v = self._vehicle(vid)
+            self._check_control(v, actor)
+            self._require_link(v)
+            first, params = plans.skill_for(normalised[0])
+            if first == "takeoff":
+                params["confirm"] = confirm
+            elif not v.airborne():
+                raise err("not_airborne")
+            for step in normalised:
+                required = skills.REQUIREMENTS[plans.skill_for(step)[0]]
+                if not v.capabilities.has(required):
+                    raise err("capability_missing", required=required, action=step["action"])
+            prepared, target_local = self._prepare_skill(v, first, params)
+            self._cancel_plan(v, "superseded by a new plan", "被新的动作序列取代")
+            self._plan_seq += 1
+            plan = plans.Plan(self._plan_seq, normalised, actor, self.clock(), name=name)
+            v.plan = plan
+            self.events.emit(
+                "plan_started",
+                v.id,
+                data={"plan_id": plan.id, "steps": normalised, "name": name},
+                labels={"vehicle": v.label, "count": str(len(normalised))},
+            )
+            skill = self._start_skill(v, first, prepared, target_local)
+            plan.skill_id = skill.id
+            return {"id": vid, "plan": plan.view()}
+
+        return self.call(run)
+
+    def cancel_plan(self, vid: str, actor: Actor) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            v = self._vehicle(vid)
+            self._check_control(v, actor)
+            plan = v.plan
+            if plan is None or not plan.running:
+                raise err("no_plan")
+            self._cancel_plan(v, "cancelled", "已取消")
+            # Keep the aircraft where it is: hold in the stick mode with neutral sticks.
+            if v.armed and v.airborne() and v.capabilities.althold:
+                prepared, _ = self._prepare_skill(v, "hold", {})
+                self._start_skill(v, "hold", prepared, None)
+            return {"id": vid, "plan": plan.view()}
+
+        return self.call(run)
+
+    def _cancel_plan(self, v: Vehicle, en: str, zh: str) -> None:
+        plan = v.plan
+        if plan is None or not plan.running:
+            return
+        plan.state = "cancelled"
+        plan.detail, plan.detail_zh = en, zh
+        plan.finished = self.clock()
+        self.events.emit(
+            "plan_cancelled",
+            v.id,
+            data={"plan_id": plan.id, "index": plan.index, "detail": en, "detail_en": en, "detail_zh": zh},
+            labels={"vehicle": v.label, "detail": en},
+        )
+
+    def _plan_tick(self, v: Vehicle) -> None:
+        plan = v.plan
+        if plan is None or not plan.running:
+            return
+        skill = v.skill
+        if skill is None or skill.id != plan.skill_id:
+            self._fail_plan(v, "superseded", "被其他指令取代")
+            return
+        if skill.state == "failed":
+            self._fail_plan(v, skill.detail or "step failed", skill.detail_zh or skill.detail or "步骤失败")
+            return
+        if skill.state != "done":
+            return
+        plan.results.append(skill.detail)
+        self.events.emit(
+            "plan_step",
+            v.id,
+            data={"plan_id": plan.id, "index": plan.index, "action": plan.steps[plan.index]["action"]},
+            labels={"vehicle": v.label, "step": str(plan.index + 1), "count": str(len(plan.steps))},
+        )
+        plan.index += 1
+        if plan.index >= len(plan.steps):
+            plan.state = "done"
+            plan.finished = self.clock()
+            self.events.emit(
+                "plan_finished",
+                v.id,
+                data={"plan_id": plan.id, "results": plan.results},
+                labels={"vehicle": v.label},
+            )
+            return
+        name, params = plans.skill_for(plan.steps[plan.index])
+        try:
+            prepared, target_local = self._prepare_skill(v, name, params)
+        except RelayError as exc:
+            self._fail_plan(v, exc.message_en, exc.message_zh)
+            return
+        plan.skill_id = self._start_skill(v, name, prepared, target_local).id
+
+    def _fail_plan(self, v: Vehicle, en: str, zh: str) -> None:
+        plan = v.plan
+        assert plan is not None
+        plan.state = "failed"
+        plan.detail, plan.detail_zh = en, zh
+        plan.finished = self.clock()
+        self.events.emit(
+            "plan_failed",
+            v.id,
+            data={"plan_id": plan.id, "index": plan.index, "detail": en, "detail_en": en, "detail_zh": zh},
+            labels={"vehicle": v.label, "detail": en, "step": str(plan.index + 1)},
+        )
 
     def _goto_target(self, v: Vehicle, params: dict[str, Any]) -> tuple[float, float, float]:
         try:
@@ -2223,6 +2448,15 @@ class FleetService:
             }
         cells = v.cells()
         items = self._preflight_items(v)
+        link = {
+            "state": v.link_state,
+            "heartbeat_age_s": _round(age, 2),
+            "rx_hz": round(rx, 1),
+            "tx_hz": round(tx, 1),
+            "loss_pct": loss,
+            "rtt_ms": rtt,
+        }
+        human = v.sticks is not None and v.sticks.source == "human" and now - v.sticks.t < STICK_TIMEOUT_S
         gps = st["gps"]
         return {
             "id": v.id,
@@ -2233,14 +2467,7 @@ class FleetService:
             "firmware": st["firmware"],
             "sysid": st["sysid"],
             "bridge": v.bridge,
-            "link": {
-                "state": v.link_state,
-                "heartbeat_age_s": _round(age, 2),
-                "rx_hz": round(rx, 1),
-                "tx_hz": round(tx, 1),
-                "loss_pct": loss,
-                "rtt_ms": rtt,
-            },
+            "link": link,
             "armed": v.armed,
             "mode": v.mode,
             "mode_class": modes.mode_class(v.autopilot, v.mode),
@@ -2286,6 +2513,8 @@ class FleetService:
             "controller": v.controller(self.sessions),
             "sticks": sticks,
             "skill": None if v.skill is None else v.skill.view(),
+            "plan": None if v.plan is None else v.plan.view(),
+            "health": v.health.view(v, now, link, human),
             "calibration": v.calibration.view(),
             "confirmed": v.confirmed.view(),
             "preflight": preflight.summary(items),
@@ -2328,6 +2557,13 @@ class FleetService:
 
 def _level_rank(level: str) -> int:
     return {"unknown": 0, "ok": 0, "warn": 1, "critical": 2}.get(level, 0)
+
+
+def _number_param(params: dict[str, Any], key: str) -> float:
+    value = params.get(key) or 0.0
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise err("invalid_request", reason=f"{key} must be a number of metres")
+    return float(value)
 
 
 def _public(params: dict[str, Any]) -> dict[str, Any]:

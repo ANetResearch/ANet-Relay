@@ -14,6 +14,9 @@ files:
   - package.json
   - electron/**/*
   - "!electron/**/*.d.ts"
+  # Copilot ships as agent.bundle.mjs (scripts/build-copilot.mjs); its sources need devDependencies.
+  - "!electron/copilot/agent.mjs"
+  - "!electron/copilot/test/**"
   - web/dist/**/*
   - brand/icon.png
 extraResources:

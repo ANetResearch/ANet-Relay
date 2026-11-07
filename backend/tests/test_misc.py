@@ -32,10 +32,11 @@ def test_event_bus_texts_and_ring():
     assert len(TEMPLATES) >= 37
 
 
-def test_every_documented_event_kind_has_text():
+def test_every_event_kind_is_documented_and_has_text():
     from relay.api.schemas import EventKind
 
-    assert set(EventKind.__args__) <= set(TEMPLATES)
+    # a kind missing from the schema fails validation of every /events read that includes it
+    assert set(EventKind.__args__) == set(TEMPLATES)
 
 
 def test_sessions_lease_rate_limit_and_tokens():

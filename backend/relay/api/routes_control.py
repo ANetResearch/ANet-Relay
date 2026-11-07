@@ -52,7 +52,7 @@ def confirm(request: Request, vid: str, body: schemas.ConfirmBody) -> dict[str, 
 @router.post("/sims", tags=["sims"], dependencies=OPERATOR, responses=ERRORS)
 def add_sims(request: Request, body: schemas.SimsBody | None = None) -> dict[str, Any]:
     body = body or schemas.SimsBody()
-    return {"added": service(request).add_sims(body.count, body.autopilot)}
+    return {"added": service(request).add_sims(body.count, body.autopilot, body.position)}
 
 
 @router.delete("/sims", tags=["sims"], dependencies=OPERATOR, responses=ERRORS)
@@ -119,6 +119,19 @@ def mode(request: Request, vid: str, body: schemas.ModeBody) -> dict[str, Any]:
 def skill(request: Request, vid: str, name: str, body: schemas.SkillBody | None = None) -> dict[str, Any]:
     params = (body or schemas.SkillBody()).model_dump(exclude_none=True)
     return service(request).run_skill(vid, actor(request, "control"), name, params)
+
+
+@router.post("/vehicles/{vid}/plan", tags=["control"], responses=ERRORS)
+def plan(request: Request, vid: str, body: schemas.PlanBody) -> dict[str, Any]:
+    """Fly a sequence of skills: takeoff, hover, move, yaw, land, goto, rtl (03 §5.8)."""
+    steps = [step.model_dump(exclude_none=True) for step in body.steps]
+    return service(request).run_plan(vid, actor(request, "control"), steps, body.name, body.confirm)
+
+
+@router.post("/vehicles/{vid}/plan/cancel", tags=["control"], responses=ERRORS)
+def plan_cancel(request: Request, vid: str) -> dict[str, Any]:
+    """Cancel the running plan; an airborne aircraft holds where it is."""
+    return service(request).cancel_plan(vid, actor(request, "control"))
 
 
 @router.post("/vehicles/{vid}/course/start", tags=["courses"], responses=ERRORS)

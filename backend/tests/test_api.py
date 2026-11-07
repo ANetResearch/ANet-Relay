@@ -7,6 +7,7 @@ from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 
 from relay.api.app import create_app
+from relay.config import VERSION
 from relay.fleet import FleetService
 from relay.history import History
 
@@ -45,7 +46,7 @@ def error(resp):
 def test_health_capabilities_openapi(client):
     assert client.get("/api/v1/health").json()["ok"] is True
     caps = client.get("/api/v1/capabilities").json()
-    assert {s["name"] for s in caps["skills"]} == {"takeoff", "land", "hold", "rtl", "goto"}
+    assert {s["name"] for s in caps["skills"]} == {"takeoff", "land", "hold", "rtl", "goto", "move", "yaw"}
     assert caps["limits"]["stick_timeout_s"] == 0.8
     spec = client.get("/openapi.json").json()
     assert "/api/v1/vehicles/{vid}/possess" in spec["paths"]
@@ -200,7 +201,7 @@ def test_courses_topology_events_history(client):
 def test_ws_hello_fleet_and_event(client):
     with client.websocket_connect("/api/v1/stream") as ws:
         hello = ws.receive_json()
-        assert hello == {"type": "hello", "version": "0.1.0", "operator": False, "session": None}
+        assert hello == {"type": "hello", "version": VERSION, "operator": False, "session": None}
         assert ws.receive_json()["type"] == "fleet"
         client.post("/api/v1/sims", headers=OP)
         for _ in range(50):

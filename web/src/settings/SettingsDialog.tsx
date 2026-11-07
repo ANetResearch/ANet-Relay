@@ -20,6 +20,7 @@ import { Value } from '@/ui/relay'
 import { t8, useT8, type AnyKey } from '@/fleet/copy'
 import { CopyButton, openExternal } from '@/agents/CopyButton'
 import { applyBackendUi, DEADZONE_RANGE, EXPO_RANGE, setPrefs, usePrefs, type StartView, type Units } from './prefs'
+import { CopilotSettings } from '@/copilot/CopilotSettings'
 import './settings.css'
 
 export interface SettingsDialogProps {
@@ -48,6 +49,7 @@ const SECTIONS: { id: SettingsSection; key: AnyKey; icon: Parameters<typeof Icon
   { id: 'general', key: 'set.general', icon: 'settings' },
   { id: 'safety', key: 'set.safety', icon: 'stop' },
   { id: 'controllers', key: 'set.controllers', icon: 'gamepad' },
+  { id: 'copilot', key: 'set.copilot', icon: 'copilot' },
   { id: 'network', key: 'set.network', icon: 'network' },
   { id: 'data', key: 'set.data', icon: 'database' },
   { id: 'about', key: 'set.about', icon: 'info' },
@@ -426,6 +428,8 @@ export function SettingsDialog({ open, section, onOpenChange }: SettingsDialogPr
               <Safety s={s} save={save} />
             ) : current === 'controllers' ? (
               <Controllers />
+            ) : current === 'copilot' ? (
+              <CopilotSettings Row={Row} />
             ) : current === 'network' && s ? (
               <Network s={s} save={save} />
             ) : current === 'data' && s ? (

@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { Backend, describeExit } from "./backend.mjs";
+import { createCopilotHost } from "./copilot/host.mjs";
 import { buildMenu, MENU_ACTIONS } from "./menu.mjs";
 import {
   backendLaunch,
@@ -18,7 +19,7 @@ import {
 } from "./paths.mjs";
 import { DEFAULT_PORT, PORT_RANGE_END, PortError } from "./ports.mjs";
 import { APP_INDEX_URL, APP_ORIGIN, handleScheme, registerScheme } from "./protocol.mjs";
-import { setLanguage, strings } from "./strings.mjs";
+import { language, setLanguage, strings } from "./strings.mjs";
 
 const DEV = !app.isPackaged;
 const DEV_URL = DEV ? process.env.RELAY_WEB_URL || "" : "";
@@ -43,6 +44,7 @@ let backend = null;
 let quitting = false;
 let starting = false;
 let dialogAbort = null;
+let copilotHost = null;
 const bridgeWindows = new Map();
 
 /** Backend supervision state mirrored to the renderer (02 §15). */
@@ -231,6 +233,13 @@ function registerIpc() {
   handle("relay:quit", () => {
     app.quit();
     return true;
+  });
+
+  copilotHost = createCopilotHost({
+    window: () => mainWindow,
+    relayBase: () => (backendState.state === "ready" ? (backend?.origin ?? null) : null),
+    language,
+    trusted: isTrustedSender,
   });
 }
 
@@ -476,6 +485,7 @@ let shutdownDone = false;
 function onBeforeQuit(event) {
   quitting = true;
   dialogAbort?.abort();
+  void copilotHost?.dispose();
   if (shutdownDone || !backend) return;
   event.preventDefault();
   backend

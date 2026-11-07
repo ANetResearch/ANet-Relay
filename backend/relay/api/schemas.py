@@ -153,6 +153,51 @@ class SkillView(_Model):
     detail: str | None
 
 
+PlanAction = Literal["takeoff", "hover", "hold", "move", "yaw", "land", "goto", "rtl"]
+
+
+HealthLevel = Literal["ok", "warn", "bad", "na"]
+
+
+class HealthItem(_Model):
+    key: Literal[
+        "oscillation",
+        "lean",
+        "yaw_drift",
+        "alt_hold",
+        "hover_throttle",
+        "motors",
+        "vibration",
+        "battery_sag",
+        "link",
+        "stick_stream",
+    ]
+    level: HealthLevel
+    value: float | None
+    unit: str
+    detail: dict[str, Any] | None = None
+
+
+class FlightHealthView(_Model):
+    """Rolling diagnostics over the last few seconds (03 §5.9). Flight items need the aircraft airborne."""
+
+    state: Literal["ok", "warn", "bad", "idle"]
+    window_s: float
+    airborne_samples: int
+    items: list[HealthItem]
+
+
+class PlanView(_Model):
+    id: int
+    name: str | None
+    state: Literal["running", "done", "failed", "cancelled"]
+    index: int = Field(description="step being flown (equals count once done)")
+    count: int
+    steps: list[dict[str, Any]]
+    results: list[str | None]
+    detail: str | None
+
+
 class Signs(_Model):
     roll: Literal[1, -1]
     pitch: Literal[1, -1]
@@ -237,6 +282,8 @@ class Vehicle(_Model):
     controller: Literal["none", "human", "agent"]
     sticks: SticksView | None
     skill: SkillView | None
+    plan: PlanView | None
+    health: FlightHealthView
     calibration: CalibrationView
     confirmed: ConfirmedView
     preflight: PreflightSummary
@@ -304,6 +351,11 @@ EventKind = Literal[
     "course_finished",
     "course_aborted",
     "listen_error",
+    "plan_started",
+    "plan_step",
+    "plan_finished",
+    "plan_failed",
+    "plan_cancelled",
 ]
 
 
@@ -422,6 +474,20 @@ class ModeBody(_Body):
     name: str
 
 
+class PlanStep(_Body):
+    action: PlanAction
+    alt: float | None = Field(default=None, description="takeoff: metres above the ground")
+    seconds: float | None = Field(default=None, description="hover / hold: seconds to hold")
+    forward: float | None = Field(default=None, description="move: metres forward (negative: back)")
+    right: float | None = Field(default=None, description="move: metres right (negative: left)")
+    up: float | None = Field(default=None, description="move: metres up (negative: down)")
+    deg: float | None = Field(default=None, description="yaw: degrees, positive clockwise")
+    x: float | None = None
+    y: float | None = None
+    z: float | None = None
+    yaw: float | None = None
+
+
 class SkillBody(_Body):
     model_config = ConfigDict(extra="allow")
     alt: float | None = None
@@ -429,7 +495,18 @@ class SkillBody(_Body):
     y: float | None = None
     z: float | None = None
     yaw: float | None = Field(default=None, description="goto heading in degrees (0 north, clockwise)")
+    forward: float | None = Field(default=None, description="move: metres forward (negative: back)")
+    right: float | None = Field(default=None, description="move: metres right (negative: left)")
+    up: float | None = Field(default=None, description="move: metres up (negative: down)")
+    deg: float | None = Field(default=None, description="yaw: degrees, positive clockwise")
+    seconds: float | None = Field(default=None, description="hold: seconds before the skill reports done")
     confirm: str | None = None
+
+
+class PlanBody(_Body):
+    steps: list[PlanStep] = Field(min_length=1, max_length=24)
+    name: str | None = Field(default=None, max_length=80)
+    confirm: str | None = Field(default=None, description='"ARM" when the plan arms a real aircraft')
 
 
 class CourseStartBody(_Body):
@@ -458,6 +535,7 @@ class MotorTestBody(_Body):
 class SimsBody(_Body):
     count: int = Field(default=1, ge=1, le=8)
     autopilot: Literal["ardupilot", "px4"] = "ardupilot"
+    position: bool = Field(default=True, description="false: no position estimate (barometer only)")
 
 
 class SessionBody(_Body):

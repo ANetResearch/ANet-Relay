@@ -58,8 +58,8 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | 层级 | 接口 | 所需能力 |
 |---|---|---|
 | 1 | `sticks`（roll、pitch、yaw、throttle） | `manual`（有飞控心跳） |
-| 2 | `arm`、`mode`，技能 `takeoff`、`land`、`hold` | 起飞与悬停需要 `althold` |
-| 3 | 技能 `goto`、`rtl`，穿环航线 | `position`（新鲜的本地位置估计） |
+| 2 | `arm`、`mode`，技能 `takeoff`、`land`、`hold`、`move`、`yaw`；动作序列 | 起飞、悬停、平移、转向需要 `althold` |
+| 3 | 技能 `goto`、`rtl`，穿环航线；闭环 `move` | `position`（新鲜的本地位置估计） |
 
 每架飞机在快照中报告 `capabilities: {manual, althold, position}`。缺少能力时返回 `capability_missing` 或 `no_position_estimate`。模拟机三者齐备；真机只有接入光流、动作捕捉或 UWB 等本地定位源时才具备 `position`。
 
@@ -91,7 +91,7 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | `GET /health` | – | `{ok, version, uptime_s}` |
 | `GET /capabilities` | – | 坐标系、门限、技能及参数、模式名称、确认词 |
 | `GET /fleet` | – | 机群快照：飞机、会话、告警、安全区 |
-| `GET /vehicles/{id}` | – | 单机状态，另含 `detail`（home、安全区原点、单节电压、起飞前检查项） |
+| `GET /vehicles/{id}` | – | 单机状态，另含 `detail`（home、安全区原点、单节电压、起飞前检查项）。`health` 为飞行健康诊断（见第 5 节） |
 | `GET /vehicles/{id}/preflight` | – | 起飞前检查项 |
 | `GET /topology` | – | 地面站、飞机、数传、会话、链路与相对距离 |
 | `GET /events?after=&limit=&vehicle=&tail=` | – | `seq > after` 的事件，按时间正序；`tail=true` 返回最新的 `limit` 条 |
@@ -105,7 +105,9 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | `POST /vehicles/{id}/sticks` | 控制者 | `{roll, pitch, yaw, throttle}`；以 10–50 Hz 重复发送 |
 | `POST /vehicles/{id}/arm` | 控制者 | `{arm: true}`（真机：`{arm: true, confirm: "ARM"}`）或 `{arm: false}` |
 | `POST /vehicles/{id}/mode` | 控制者 | `{name}`，例如 `LOITER`、`ALT_HOLD`、`POSCTL` |
-| `POST /vehicles/{id}/skills/{name}` | 控制者 | `takeoff {alt}`、`land`、`hold`、`rtl`、`goto {x, y, z, yaw?}` |
+| `POST /vehicles/{id}/skills/{name}` | 控制者 | `takeoff {alt}`、`land`、`hold {seconds?}`、`move {forward?, right?, up?}`、`yaw {deg}`、`rtl`、`goto {x, y, z, yaw?}` |
+| `POST /vehicles/{id}/plan` | 控制者 | `{steps, name?, confirm?}`：执行动作序列（见下文） |
+| `POST /vehicles/{id}/plan/cancel` | 控制者 | 取消正在执行的序列；空中的飞机原地悬停 |
 | `POST /vehicles/{id}/course/start` | 控制者 | `{course_id}`（缺省 `cage-loop`） |
 | `POST /vehicles/{id}/course/stop` | 控制者 | 中止航线 |
 | `POST /vehicles/{id}/stop` | 控制者 | 急停 |
@@ -116,13 +118,41 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 
 | 技能 | 所需能力 | 行为 |
 |---|---|---|
-| `takeoff {alt}` | althold（PX4 需 position） | 模拟机按需自动解锁，爬升到起飞点上方 `alt` 米（0.2 m 至安全区高度）并保持。地面上的真机须先解锁，或在调用中携带 `confirm: "ARM"` 并通过起飞前检查。已在空中时立即完成。 |
+| `takeoff {alt}` | althold | 模拟机按需自动解锁，爬升到起飞点上方 `alt` 米（0.2 m 至安全区高度）并保持。有位置估计时使用飞控自身的起飞（GUIDED / OFFBOARD）；没有位置估计时在 ALT_HOLD / ALTCTL 下以油门杆爬升，并按气压高度改平。地面上的真机须先解锁，或在调用中携带 `confirm: "ARM"` 并通过起飞前检查。已在空中时立即完成。 |
 | `land` | 任意 | 原地降落；飞机落地并上锁后完成。 |
-| `hold` | althold | 保持位置（LOITER / POSCTL）或高度（ALT_HOLD / ALTCTL）。 |
+| `hold {seconds?}` | althold | 保持位置（LOITER / POSCTL）或高度（ALT_HOLD / ALTCTL）。带 `seconds` 时，到时报告 `done` 并继续保持。 |
+| `move {forward?, right?, up?}` | althold，须在空中 | 机体坐标系下的米数（负值为后、左、下）。有位置估计时：闭环 `goto` 到目标点。没有位置估计时：**开环**，按定时倾斜并推算距离（误差约 ±30%），每步水平距离不超过 2 m；`up` 使用气压高度。 |
+| `yaw {deg}` | althold，须在空中 | 按姿态航向转动 `deg` 度，顺时针为正；误差 3° 以内完成。 |
 | `rtl` | position | 返回起飞点并降落。 |
 | `goto {x, y, z, yaw?}` | position | 飞往飞机位置坐标系中的目标点；距离 0.15 m 以内即完成。 |
 
 技能运行或保持期间，Relay 持续发送中位杆量（油门 0.5）作为遥控保活，使飞控的遥控丢失保护保持静默；这依赖的失控保护设置见 `hardware.zh-CN.md`。
+
+### 动作序列（plan）
+
+动作序列是最多 24 步的有序列表，每步一个技能，由 Relay 依次执行：
+
+```json
+POST /api/v1/vehicles/sim-1/plan
+{"name": "bench", "steps": [
+  {"action": "takeoff", "alt": 1.0},
+  {"action": "hover", "seconds": 3},
+  {"action": "move", "forward": 1},
+  {"action": "move", "forward": -1},
+  {"action": "yaw", "deg": 45},
+  {"action": "land"}
+]}
+```
+
+可用动作：`takeoff {alt}`（缺省 1 m）、`hover {seconds}` / `hold {seconds}`（缺省 3 s）、`move {forward, right, up}`、`yaw {deg}`、`land`、`goto {x, y, z, yaw?}`、`rtl`。序列开始前会校验每一步（`invalid_request` 指出出错的步骤与字段；缺少能力的步骤返回 `capability_missing`）。不以 `takeoff` 开头的序列要求飞机已在空中（`not_airborne`）。真机从地面开始的序列需要 `confirm: "ARM"`。
+
+飞机的 `plan` 字段报告 `{id, name, state, index, count, steps, results, detail}`，`state` 为 `running`、`done`、`failed` 或 `cancelled`；事件 `plan_started`、`plan_step`、`plan_finished`、`plan_failed`、`plan_cancelled` 标记进度。任一步失败、新的技能、控制者发送杆量、操作员拨杆或接管、急停，都会结束序列。`POST /plan/cancel` 主动结束序列（没有序列时返回 `no_plan`），空中的飞机原地悬停。
+
+`sdk/python/examples/bench_routine.py` 执行上面的序列：`python3 sdk/python/examples/bench_routine.py --vehicle sim-1`；真机加 `--arm-real`。
+
+### 飞行健康
+
+每架飞机带有 `health`：最近 5 秒的滚动诊断，在检查器 概览 → 飞行健康 中显示。`state` 为 `ok`、`warn`、`bad` 或 `idle`（未解锁）；`items` 列出 `{key, level, value, unit, detail}`，包括 `oscillation`（横滚、俯仰角速度均方根，°/s）、`lean`（摇杆回中时保持的倾角）、`yaw_drift`、`alt_hold`（定高时垂直速度离散度）、`hover_throttle`、`motors`（各电机平均输出差、触顶比例）、`vibration`（峰值、加速度计削波）、`battery_sag`（每节压降）、`link` 和 `stick_stream`（手动飞行时 Relay 窗口发出的杆量更新）。飞行类项目在空中 1.5 秒后才评估，此前 `level` 为 `na`。各项含义与调整方法见 [`flight-tuning.zh-CN.md`](flight-tuning.zh-CN.md)。
 
 ### 杆量
 
@@ -156,6 +186,7 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | `claim_started` / `claim_released` | 认领变化 |
 | `agent_session_expired` | 租约到期 |
 | `skill_started` / `skill_finished` / `skill_failed` | 技能进度，含 `data.skill_id` |
+| `plan_started` / `plan_step` / `plan_finished` / `plan_failed` / `plan_cancelled` | 动作序列进度，含 `data.plan_id` |
 | `armed` / `disarmed` / `mode_changed` | 飞控状态 |
 | `link_delayed` / `link_lost` / `link_restored` | 链路质量；进入 `lost` 时 Relay 停止杆量与技能 |
 | `battery_warn` / `battery_critical` / `crashed` | 风险 |
@@ -174,7 +205,7 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | 401 | `auth_required`、`session_expired`（重新打开会话） |
 | 403 | `operator_required`、`session_required`、`untrusted_host` |
 | 404 | `vehicle_not_found`、`course_not_found`、`unknown_skill` |
-| 409 | `not_claimed`、`claimed_by_other`、`possessed_by_human`、`claim_suspended`、`preflight_blocked`、`arm_rejected`、`mode_rejected`、`not_armed`、`crashed`、`capability_missing`、`no_position_estimate` |
+| 409 | `not_claimed`、`claimed_by_other`、`possessed_by_human`、`claim_suspended`、`preflight_blocked`、`arm_rejected`、`mode_rejected`、`not_armed`、`crashed`、`capability_missing`、`no_position_estimate`、`not_airborne`、`no_plan` |
 | 429 | `rate_limited` |
 | 503 | `link_not_ready`、`backend_busy` |
 
@@ -191,7 +222,9 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | `relay_claim` / `relay_release_claim` | 认领与释放 |
 | `relay_arm` / `relay_disarm` | 解锁（真机：`confirm: "ARM"`）与上锁 |
 | `relay_mode` | 按名称切换飞行模式 |
-| `relay_takeoff` / `relay_land` / `relay_hold` / `relay_goto` | 技能；除非 `wait: false`，否则等待完成 |
+| `relay_takeoff` / `relay_land` / `relay_hold` / `relay_goto` | 技能；除非 `wait: false`，否则等待完成。`relay_hold` 接受 `seconds` |
+| `relay_move` / `relay_yaw` | 机体坐标系下的相对平移与转向（无位置估计时为开环） |
+| `relay_plan` | 执行动作序列（见第 5 节）并等待完成 |
 | `relay_stop` | 急停 |
 | `relay_course_start` | 启动穿环航线，返回待穿越的环 |
 
@@ -241,7 +274,8 @@ Relay 不在 8765 端口运行时，追加 `"--base", "http://127.0.0.1:<port>"`
 | `stream(timeout=None)` | WebSocket 消息生成器（`hello`、`fleet`、`event`） |
 | `claim(id)` · `unclaim(id)` | 控制权 |
 | `sticks(id, roll, pitch, yaw, throttle)` · `arm(id, confirm=None)` · `disarm(id)` · `mode(id, name)` | 直接控制 |
-| `takeoff(id, alt)` · `land(id)` · `hold(id)` · `rtl(id)` · `goto(id, x, y, z, yaw=None)` | 技能；`wait=True` 阻塞到完成，失败时抛出异常 |
+| `takeoff(id, alt)` · `land(id)` · `hold(id, seconds=0)` · `rtl(id)` · `goto(id, x, y, z, yaw=None)` · `move(id, forward=0, right=0, up=0)` · `yaw(id, deg)` | 技能；`wait=True` 阻塞到完成，失败时抛出异常 |
+| `plan(id, steps, name=None, confirm=None, wait=True)` · `cancel_plan(id)` | 动作序列；等待时若序列失败或被取消，抛出 `plan_failed` |
 | `skill(id, name, params, wait)` · `wait_skill(id, skill_id)` | 通用技能调用与等待 |
 | `course_start(id, course_id)` · `course_stop(id)` · `stop(id)` | 航线与急停 |
 
@@ -251,5 +285,15 @@ Relay 不在 8765 端口运行时，追加 `"--base", "http://127.0.0.1:<port>"`
 
 1. 按 `hardware.zh-CN.md` 完成飞机与 Wi-Fi 数传的设置，确认它以 `real-<ip>` 出现在机群中，例如 `real-10-7-7-36`。
 2. 在 Relay 窗口完成操作员步骤：无桨确认杆量方向，确认桨叶与防护网，通过全部阻断类起飞前检查。
-3. 在代码中替换飞机 ID。解锁需要 `confirm: "ARM"`。位置类技能（`goto`、`rtl`、航线）需要本地定位源；没有定位源时，只在定高类模式下使用 `takeoff`、`hold` 与 `land`。
+3. 在代码中替换飞机 ID。解锁需要 `confirm: "ARM"`。位置类技能（`goto`、`rtl`、航线）需要本地定位源；没有定位源时，在定高类模式下使用 `takeoff`、`hold`、`yaw`、`land` 与开环 `move`，并预期飞机悬停时会缓慢漂移。
 4. 窗口前始终保留操作员。附身与急停随时优先于任何智能体。
+
+## 11. Copilot（内置智能体）
+
+桌面应用内置 Copilot，一个基于 [pi](https://github.com/earendil-works/pi)（`@earendil-works/pi-agent-core`）的小型智能体。它运行在应用主进程中，像其他智能体一样使用本 API：打开名为 `copilot` 的会话，认领被要求操控的飞机，并出现在智能体工作区和接力时间线中。
+
+- **打开：** 顶栏的 Copilot 按钮，或 Ctrl/Cmd + J。每条消息会附带当前选中的飞机。
+- **配置：** 设置 → Copilot：接口类型（OpenAI 兼容端点选 `openai-completions`，另有 `anthropic-messages`、`openai-responses`）、Base URL、模型 ID 和 API Key。**测试连接** 会发送一次简短请求。Key 通过操作系统钥匙串（Electron `safeStorage`）加密保存在应用数据目录，不会回传到界面；端点只会收到对话内容和工具结果。
+- **工具：** 机群与单机状态、起飞、悬停、平移、转向、降落、动作序列、取消、释放和急停，与第 5 节的技能相同，不提供原始杆量。
+- **安全：** 对真机的每个运动指令（起飞、平移、转向、悬停、降落、动作序列），聊天中都会出现审批卡片，操作员批准前不会发送任何指令（120 秒未处理视为拒绝）。接管和急停对 Copilot 与其他智能体同样有效。
+

@@ -457,6 +457,7 @@ export const zh: Record<MessageKey, string> = {
   'set.safety': '安全',
   'set.controllers': '手柄',
   'set.network': '网络',
+  'set.copilot': 'Copilot',
   'set.data': '数据',
   'set.about': '关于',
   'set.language': '语言',

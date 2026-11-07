@@ -1,7 +1,7 @@
 {
   "name": "anet-relay",
   "productName": "ANet Relay",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "ANet Relay - Ground control for agent swarms.",
   "author": {
     "name": "Agent Network",
@@ -25,6 +25,7 @@
     "start": "npm run build:web && electron .",
     "build:web": "node scripts/build-web.mjs",
     "build:backend": "node scripts/build-backend.mjs",
+    "build:copilot": "node scripts/build-copilot.mjs",
     "dist:mac": "node scripts/dist.mjs mac",
     "dist:linux": "node scripts/dist.mjs linux",
     "dist:win": "node scripts/dist.mjs win",
@@ -35,8 +36,11 @@
     "media": "node scripts/test.mjs media"
   },
   "devDependencies": {
+    "@earendil-works/pi-agent-core": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
     "@playwright/test": "1.64.1",
     "electron": "44.9.3",
-    "electron-builder": "26.18.0"
+    "electron-builder": "26.18.0",
+    "esbuild": "0.28.2"
   }
 }

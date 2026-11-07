@@ -188,9 +188,11 @@ claim.suspended = bool(v.possession)
 
 人工杆量只在"接受杆量"的模式下有意义：ArduPilot STABILIZE / ALT_HOLD / LOITER / POSHOLD / ACRO / SPORT / DRIFT / FLOWHOLD；PX4 MANUAL / STABILIZED / ALTCTL / POSCTL / ACRO。附身时若当前模式不属于此类（GUIDED、AUTO、RTL、LAND、OFFBOARD、MISSION…），后端发送模式切换到设置的附身模式（缺省：飞控报告有气压计 → ALT_HOLD / ALTCTL；否则 STABILIZE / STABILIZED），等待心跳确认（≤ 1.5 s），失败则保持附身并告警 `mode_switch_failed`。交还时不改模式——智能体自己决定。
 
+补充（v0.2.0）：附身设置为 `auto` 且有气压计时，若飞机**在地面**处于油门直通的杆量模式（STABILIZE / STABILIZED / MANUAL / ACRO 等，例如平台随附的 `keyboard_rc_controller.py` 飞过之后），同样切到 ALT_HOLD / ALTCTL；空中附身不改模式，避免在操作员手上突然变化。
+
 ### 5.5 数据流
 
-首个有效飞控心跳后立即：ArduPilot `REQUEST_DATA_STREAM`（EXTRA1 20 Hz、EXTRA2 4、EXTRA3 2、EXTENDED_STATUS 2、POSITION 10、RC_CHANNELS 4、RAW_CONTROLLER 0）；PX4 `MAV_CMD_SET_MESSAGE_INTERVAL`（ATTITUDE 20 Hz、LOCAL_POSITION_NED 10、GLOBAL_POSITION_INT 4、SYS_STATUS 2、BATTERY_STATUS 2、VFR_HUD 4、EXTENDED_SYS_STATE 2、RC_CHANNELS 4、SERVO_OUTPUT_RAW 4）；两者都 `MAV_CMD_REQUEST_MESSAGE(AUTOPILOT_VERSION)`。每 10 s 检查缺失的关键消息并重请求一次。参数表在首次心跳后 2 s 自动拉取（可在设置关闭）。
+首个有效飞控心跳后立即：ArduPilot `REQUEST_DATA_STREAM`（EXTRA1 20 Hz、EXTRA2 4、EXTRA3 2、EXTENDED_STATUS 2、POSITION 10、RC_CHANNELS 4、RAW_CONTROLLER 0）；PX4 `MAV_CMD_SET_MESSAGE_INTERVAL`（ATTITUDE 20 Hz、LOCAL_POSITION_NED 10、GLOBAL_POSITION_INT 4、SYS_STATUS 2、BATTERY_STATUS 2、VFR_HUD 4、EXTENDED_SYS_STATE 2、RC_CHANNELS 4、SERVO_OUTPUT_RAW 4、VIBRATION 2）；ArduPilot 的 VIBRATION 随 EXTRA3 下发；两者都 `MAV_CMD_REQUEST_MESSAGE(AUTOPILOT_VERSION)`。每 10 s 检查缺失的关键消息并重请求一次。参数表在首次心跳后 2 s 自动拉取（可在设置关闭）。
 
 ### 5.6 技能（智能体与界面共用）
 
@@ -210,6 +212,43 @@ claim.suspended = bool(v.possession)
 - `position`：有本地位置估计（`LOCAL_POSITION_NED` 新鲜 ≤ 0.5 s、更新 ≥ 5 Hz，且 EKF/estimator 状态正常）。
 
 goto 的目标点必须在安全区内（设置项；缺省 3 × 3 × 2 m，原点为该机首次解锁点或模拟机网格原点），否则 400 `outside_safety_volume`。
+
+### 5.7 无定位源的杆量技能（v0.2.0）
+
+本平台的典型配置只有 IMU 与气压计。为了让"起飞—悬停—前进 1 m—后退 1 m—转 45°—降落"在这种配置下可用，技能执行器在没有 `position` 时改用定高模式下的杆量实现；技能是唯一的杆量来源，操作员拨杆超过接管阈值即取消技能。
+
+| 技能 | 有位置估计 | 无位置估计（ALT_HOLD / ALTCTL + 杆量） |
+|---|---|---|
+| takeoff(alt) | 同 5.6 | 油门杆 0.72 爬升，接近目标改 0.62，按气压高度（VFR_HUD alt − 解锁前地面值）在 ±0.06 m 内改平 |
+| hold(seconds?) | 同 5.6 | 中位杆量；带 `seconds` 时到时报告完成并继续保持 |
+| move(forward, right, up) | 按当前航向换算为目标点，走 goto 闭环 | 开环：倾斜杆量 = atan(0.8 / g) / 最大倾角（PX4 `MPC_MAN_TILT_MAX`，ArduPilot `ANGLE_MAX`），按 v' = g·tan(倾角) − 0.35·v 推算位移，估计位移加制动距离到达目标即反向制动，稳定 1.2 s 后完成；单步水平距离 ≤ 2 m；`up` 用气压高度闭环 |
+| yaw(deg) | 按姿态航向闭环，误差 ≤ 3° | 同左 |
+| land | 同 5.6 | 定高模式下降杆 0.3，近地 0.36 缓降，落地后上锁 |
+
+开环距离是估算（模拟机上误差约 ±30%），界面、接口文档与 Copilot 都明确告知；精确平移需要光流 + 测距等定位源。`move`、`yaw` 要求飞机在空中（`not_airborne`）。
+
+### 5.8 动作序列（`plans.py`，v0.2.0）
+
+动作序列是最多 24 步的技能列表，由舰队线程在每个杆量周期检查当前技能状态并启动下一步。步骤在开始前全部校验（动作名、字段、范围、能力）；`hover` 是 `hold(seconds)` 的别名。任一步失败或被取代、控制权变化、操作员拨杆、急停都会使序列失败；`plan/cancel` 主动取消并原地悬停。真机从地面开始的序列须带 `confirm: "ARM"`。事件：`plan_started`、`plan_step`、`plan_finished`、`plan_failed`、`plan_cancelled`；快照中每架飞机的 `plan` 字段报告进度。
+
+### 5.9 飞行健康（`flighthealth.py`，v0.2.0）
+
+舰队线程以 10 Hz 采样，保留最近 5 s，每次解锁清零（保留解锁前静置电压）。飞行类项目只在 `landed == "air"` 且样本 ≥ 1.5 s 时评估，起降过程不参与；倾斜与航向漂移只取摇杆回中（|杆量| < 0.06）的样本。
+
+| 项目 | 指标 | 注意 / 异常阈值 |
+|---|---|---|
+| oscillation | 横滚、俯仰角速度去均值后的均方根 | 18 / 40 °/s |
+| lean | 回中时平均倾角 | 3 / 6° |
+| yaw_drift | 回中时平均偏航角速度 | 6 / 15 °/s |
+| alt_hold | 定高且油门回中时垂直速度标准差 | 0.18 / 0.4 m/s |
+| hover_throttle | 平均油门 | < 20% 或 ≥ 70% / ≥ 82% |
+| motors | 各电机平均输出最大差；输出 ≥ 1950 µs 的比例 | 120 / 220 µs；3% / 12% |
+| vibration | VIBRATION 峰值；本次飞行加速度计削波次数 | 15 / 30 m/s²；削波即异常 |
+| battery_sag | （静置电压 − 最低电压）/ 节数 | 0.45 / 0.7 V |
+| link | 丢包率；往返延迟 | 3 / 15%；120 / 300 ms |
+| stick_stream | 人工杆量到达频率；最大间隔 | < 20 / < 10 Hz；0.15 / 0.35 s |
+
+阈值只用于指向原因，不作为调参依据；界面为每项给出原因与处理建议，详见 `docs/flight-tuning.zh-CN.md`。
 
 ## 6. 安全设计
 
@@ -477,3 +516,12 @@ interface Alert { id: string; vehicle: string | null; level: "info" | "warn" | "
 | WP8 机群、接入、检查器、Agents、Records、设置 | 其余界面 | WP5 | 截图 |
 | WP9 集成与 e2e | 全流程、e2e 套件、走查修正 | 全部 | e2e 全绿 |
 | WP10 发布 | README（中英）、横幅与截图、CHANGELOG、硬件指南、推送、打标签、Release | WP9 | GitHub Release |
+
+## 16. Copilot（内置智能体，v0.2.0）
+
+- **位置**：Electron 主进程（`electron/copilot/`），基于 `@earendil-works/pi-agent-core` 与 `pi-ai` 1.4.0，打包时用 esbuild 合并为单文件 `agent.bundle.mjs`（附依赖许可清单）。渲染进程只负责对话界面，经 preload 暴露的 `window.relay.copilot` 收发消息与事件。
+- **接入方式**：与外部智能体完全相同：打开名为 `copilot` 的会话（5 s 心跳续约），调用前自动认领目标飞机；附身时与其他智能体一样被挂起。工具为 `relay_fleet`、`relay_vehicle`、`relay_takeoff`、`relay_hover`、`relay_move`、`relay_yaw`、`relay_land`、`relay_plan`（轮询进度并回传）、`relay_cancel`、`relay_release`、`relay_stop`；不提供原始杆量。
+- **审批**：目标为真机时，运动类工具（起飞、悬停、平移、转向、降落、序列）在执行前向界面发出审批请求，操作员批准后才发送；120 s 未处理视为拒绝，被拒绝的调用以错误返回给模型。
+- **配置**：接口类型（`openai-completions` / `anthropic-messages` / `openai-responses`）、Base URL、模型 ID、API Key。Key 用 Electron `safeStorage`（系统钥匙串）加密存于用户数据目录 `copilot.json`；系统不提供加密时以 0600 权限明文保存并在设置中提示。Key 不回传渲染进程，界面只显示是否已保存及末 4 位。
+- **测试**：`electron/copilot/test` 用 pi 的 faux provider 跑通工具调用；e2e `copilot.e2e.ts` 用本地伪造的 OpenAI 兼容 SSE 端点走完设置、模拟机序列与真机审批拒绝。
+

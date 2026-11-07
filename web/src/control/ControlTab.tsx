@@ -1,5 +1,5 @@
 // Inspector Control tab (02 §5, §11 Control): possession (the app's one solid light button), sticks, Arm / Disarm
-// with type-to-confirm for real aircraft, preflight checklist, mode, skills gated by capabilities, ring course,
+// with type-to-confirm for real aircraft, preflight checklist, mode, flight actions and sequences, ring course,
 // calibration and motor test. Contract: web/CONTRACTS.md#controltab.
 import * as React from 'react'
 import { api, RelayApiError, type Vehicle } from '@/api'
@@ -18,6 +18,7 @@ import { possessWith, releaseVehicle, sourceLabel } from './actions'
 import { isWindowSource, sourceOf } from './bindings'
 import { Calibration } from './Calibration'
 import { CourseGroup } from './CourseGroup'
+import { ActionsBlock, PlanBlock } from './FlightActions'
 import { MotorTest } from './MotorTest'
 import { PreflightList } from './PreflightList'
 import { Sticks } from './Sticks'
@@ -228,46 +229,6 @@ function ModeBlock({ v }: { v: Vehicle }) {
   )
 }
 
-const SKILL_LABEL = { takeoff: 'ctl.takeoff', land: 'ctl.land', hold: 'ctl.hold' } as const
-
-function SkillsBlock({ v }: { v: Vehicle }) {
-  const t = useT()
-  const ct = useCT()
-  const [busy, setBusy] = React.useState<string | null>(null)
-  const human = v.controller === 'human'
-  const skills: ('takeoff' | 'land' | 'hold')[] = v.capabilities.althold ? ['takeoff', 'land', 'hold'] : ['land']
-  const run = async (name: 'takeoff' | 'land' | 'hold') => {
-    setBusy(name)
-    try {
-      await api.skill(v.id, name, name === 'takeoff' ? { alt: 1.0 } : undefined)
-    } catch (e) {
-      notifyError(e)
-    } finally {
-      setBusy(null)
-    }
-  }
-  const sk = v.skill
-  const skLabel = sk && sk.name in SKILL_LABEL ? t(SKILL_LABEL[sk.name as keyof typeof SKILL_LABEL]) : sk?.name
-  return (
-    <Group
-      label={t('ctl.skills')}
-      right={sk ? <span className="text-hud-sub text-[var(--g400)]">{ct(sk.state === 'running' ? 'ctl.skillRunning' : sk.state === 'done' ? 'ctl.skillDone' : 'ctl.skillFailed', { skill: skLabel ?? '' })}</span> : null}
-    >
-      <div className="flex flex-col gap-1.5 px-3">
-        <div className="flex flex-wrap gap-1.5">
-          {skills.map((name) => (
-            <Button key={name} variant="outline" disabled={!human || busy !== null} onClick={() => void run(name)} data-skill={name}>
-              <Icon icon={name} />
-              {t(SKILL_LABEL[name])}
-            </Button>
-          ))}
-        </div>
-        {!v.capabilities.althold ? <p className="text-hud-sub text-[var(--g500)]">{ct('ctl.noSkills')}</p> : null}
-      </div>
-    </Group>
-  )
-}
-
 export function ControlTab({ vehicleId }: ControlTabProps) {
   const v = useVehicle(vehicleId)
   const calibFocus = useInspectorTab((s) => s.focus === 'calibration')
@@ -279,7 +240,8 @@ export function ControlTab({ vehicleId }: ControlTabProps) {
       <ArmBlock v={v} />
       <PreflightList vehicleId={v.id} kind={v.kind} blocking={v.preflight.blocking.length} />
       <ModeBlock v={v} />
-      <SkillsBlock v={v} />
+      <ActionsBlock v={v} />
+      <PlanBlock v={v} />
       <CourseGroup vehicleId={v.id} />
       <Calibration vehicle={v} focus={calibFocus} onFocused={clearFocus} />
       {v.kind === 'real' ? <MotorTest vehicle={v} /> : null}

@@ -29,7 +29,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 __all__ = ["DEFAULT_BASE", "RelayClient", "RelayError"]
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 DEFAULT_BASE = os.environ.get("RELAY_API", "http://127.0.0.1:8765")
 API = "/api/v1"
@@ -318,8 +318,69 @@ class RelayClient:
     def land(self, vehicle_id: str, wait: bool = True, timeout: float = 90.0) -> dict:
         return self.skill(vehicle_id, "land", {}, wait, timeout)
 
-    def hold(self, vehicle_id: str, wait: bool = True, timeout: float = 10.0) -> dict:
-        return self.skill(vehicle_id, "hold", {}, wait, timeout)
+    def hold(
+        self, vehicle_id: str, seconds: float = 0.0, wait: bool = True, timeout: float | None = None
+    ) -> dict:
+        """Hold altitude (and position when estimated); with ``seconds`` it reports done after hovering."""
+        params = {"seconds": seconds} if seconds else {}
+        return self.skill(vehicle_id, "hold", params, wait, timeout or 10.0 + seconds)
+
+    def move(
+        self,
+        vehicle_id: str,
+        forward: float = 0.0,
+        right: float = 0.0,
+        up: float = 0.0,
+        wait: bool = True,
+        timeout: float = 40.0,
+    ) -> dict:
+        """Move in the body frame. Without a position estimate the distance is an open-loop estimate."""
+        params = {"forward": forward, "right": right, "up": up}
+        return self.skill(vehicle_id, "move", params, wait, timeout)
+
+    def yaw(self, vehicle_id: str, deg: float, wait: bool = True, timeout: float = 30.0) -> dict:
+        """Turn by ``deg`` degrees relative to the current heading, positive clockwise."""
+        return self.skill(vehicle_id, "yaw", {"deg": deg}, wait, timeout)
+
+    def plan(
+        self,
+        vehicle_id: str,
+        steps: list[dict],
+        name: str | None = None,
+        confirm: str | None = None,
+        wait: bool = True,
+        timeout: float = 180.0,
+    ) -> dict:
+        """Fly a sequence, e.g. [{"action": "takeoff", "alt": 1}, {"action": "move", "forward": 1}, ...].
+
+        With ``wait`` it returns the finished plan and raises ``plan_failed`` when a step fails.
+        """
+        body: dict[str, Any] = {"steps": steps}
+        if name:
+            body["name"] = name
+        if confirm:
+            body["confirm"] = confirm
+        plan = self._post(f"/vehicles/{vehicle_id}/plan", body)["plan"]
+        if not wait:
+            return plan
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            current = self.vehicle(vehicle_id).get("plan") or {}
+            if current.get("id") == plan["id"] and current.get("state") != "running":
+                if current["state"] != "done":
+                    raise RelayError(
+                        "plan_failed",
+                        409,
+                        f"plan {current['state']} at step {current['index'] + 1}: {current.get('detail')}",
+                        detail=current,
+                    )
+                return current
+            time.sleep(0.25)
+        raise RelayError("timeout", 0, f"plan {plan['id']} did not finish in {timeout:g} s")
+
+    def cancel_plan(self, vehicle_id: str) -> dict:
+        """Cancel the running plan; an airborne aircraft holds where it is."""
+        return self._post(f"/vehicles/{vehicle_id}/plan/cancel")
 
     def rtl(self, vehicle_id: str, wait: bool = True, timeout: float = 180.0) -> dict:
         return self.skill(vehicle_id, "rtl", {}, wait, timeout)

@@ -71,6 +71,18 @@ def capabilities(request: Request) -> dict[str, Any]:
             modes.ARDUPILOT: modes.available_modes(modes.ARDUPILOT),
             modes.PX4: modes.available_modes(modes.PX4),
         },
+        "plan": {
+            "endpoint": "POST /vehicles/{id}/plan",
+            "actions": ["takeoff", "hover", "hold", "move", "yaw", "land", "goto", "rtl"],
+            "example": [
+                {"action": "takeoff", "alt": 1.0},
+                {"action": "hover", "seconds": 3},
+                {"action": "move", "forward": 1},
+                {"action": "move", "forward": -1},
+                {"action": "yaw", "deg": 45},
+                {"action": "land"},
+            ],
+        },
         "confirm": {"arm_real": ARM_CONFIRM, "motor_test": MOTOR_CONFIRM, "param_set": "<parameter name>"},
         "control_levels": [
             {"level": 1, "name": "sticks", "requires": "manual"},
@@ -88,6 +100,15 @@ def _skill_params(name: str) -> dict[str, str]:
             "confirm": "ARM, real aircraft only",
         },
         "goto": {"x": "m east", "y": "m north", "z": "m up", "yaw": "optional heading in degrees"},
+        "hold": {"seconds": "optional: report done after holding this long (hover)"},
+        "move": {
+            "forward": "m forward in the body frame (negative: back)",
+            "right": "m right (negative: left)",
+            "up": "m up (negative: down)",
+            "note": "closed loop with a position estimate; otherwise an open-loop tilt profile, "
+            "at most 2 m, whose distance is an estimate",
+        },
+        "yaw": {"deg": "degrees relative to the current heading, positive clockwise"},
     }.get(name, {})
 
 

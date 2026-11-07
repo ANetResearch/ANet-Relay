@@ -281,10 +281,14 @@ def test_capability_gating_without_position(tmp_path):
         opened = svc.open_session("gate")
         agent = Actor.session(opened["session_id"], "gate")
         svc.claim(vid, agent)
-        for name, params in (("goto", {"x": 0, "y": 0, "z": 1}), ("rtl", {}), ("takeoff", {"alt": 1.0})):
+        for name, params in (("goto", {"x": 0, "y": 0, "z": 1}), ("rtl", {})):
             with pytest.raises(RelayError) as exc:
                 svc.run_skill(vid, agent, name, params)
             assert exc.value.code == "capability_missing"
+        # Takeoff climbs on the throttle stick in ALTCTL; a real aircraft still needs ARM.
+        with pytest.raises(RelayError) as exc:
+            svc.run_skill(vid, agent, "takeoff", {"alt": 1.0})
+        assert exc.value.code != "capability_missing"
         with pytest.raises(RelayError) as exc:
             svc.course_start(vid, agent, "cage-loop")
         assert exc.value.code == "no_position_estimate"

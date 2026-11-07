@@ -4,7 +4,7 @@ import { create } from 'zustand'
 
 export type Workspace = 'fly' | 'agents' | 'records'
 export type ConnectTab = 'scan' | 'address' | 'bridge'
-export type SettingsSection = 'general' | 'safety' | 'controllers' | 'network' | 'data' | 'about'
+export type SettingsSection = 'general' | 'safety' | 'controllers' | 'copilot' | 'network' | 'data' | 'about'
 export type TimelineWindow = 1 | 5 | 15
 
 export interface UiState {

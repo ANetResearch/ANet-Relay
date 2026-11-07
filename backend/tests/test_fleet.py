@@ -322,3 +322,31 @@ def test_snapshot_matches_schema(svc, stepper):
     stepper.run(0.5, [session])
     Fleet.model_validate(svc.fleet())
     assert svc.fleet()["vehicles"][0]["autopilot"] == "PX4"
+
+
+@pytest.mark.parametrize(
+    ("flavour", "manual", "hold"), [("px4", "STABILIZED", "ALTCTL"), ("ardupilot", "STABILIZE", "ALT_HOLD")]
+)
+def test_possess_on_ground_leaves_manual_throttle(svc, stepper, flavour, manual, hold):
+    """A keyboard script leaves STABILIZE behind; possession on the ground moves to altitude hold."""
+    (vid,) = boot(svc, stepper, flavour=flavour)
+    v = svc.vehicles[vid]
+    v.driver.set_mode(manual)
+    assert stepper.until(lambda: v.mode == manual, 2.0)
+    svc.possess(vid, "keyboard")
+    assert stepper.until(lambda: v.mode == hold, 2.0)
+    svc.release(vid)
+
+
+def test_possess_in_the_air_keeps_the_stick_mode(svc, stepper):
+    (vid,) = boot(svc, stepper, flavour="ardupilot")
+    session, agent = open_agent(svc)
+    svc.claim(vid, agent)
+    svc.run_skill(vid, agent, "takeoff", {"alt": 1.0})
+    v = svc.vehicles[vid]
+    assert stepper.until(lambda: v.skill.state == "done", 20, [session])
+    v.driver.set_mode("STABILIZE")
+    assert stepper.until(lambda: v.mode == "STABILIZE", 2.0, [session])
+    svc.possess(vid, "keyboard")
+    stepper.run(1.0, [session])
+    assert v.mode == "STABILIZE"  # no mode change under the operator's hands in flight

@@ -17,3 +17,6 @@ playwright-report/
 refs/
 .DS_Store
 *.log
+electron/copilot/agent.bundle.mjs
+electron/copilot/agent.bundle.mjs.LEGAL.txt
+electron/copilot/agent.bundle.LICENSES.txt

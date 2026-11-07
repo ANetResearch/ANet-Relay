@@ -17,6 +17,19 @@ function subscribe(channel, accept, callback) {
   return () => ipcRenderer.removeListener(channel, listener);
 }
 
+const COPILOT_EVENTS = new Set([
+  "busy",
+  "assistant_start",
+  "text",
+  "assistant_end",
+  "tool_start",
+  "tool_update",
+  "tool_end",
+  "approval",
+  "approval_closed",
+  "error",
+]);
+const validCopilot = (p) => p !== null && typeof p === "object" && COPILOT_EVENTS.has(p.type);
 const validMenu = (p) => p !== null && typeof p === "object" && MENU_ACTIONS.has(p.action);
 const validBackend = (p) => p !== null && typeof p === "object" && BACKEND_STATES.has(p.state);
 
@@ -46,6 +59,18 @@ if (boot) {
       onBackendState: (callback) => subscribe("relay:backend", validBackend, callback),
       /** Subscribe to menu actions ({action, ...}). Returns an unsubscribe function. */
       onMenu: (callback) => subscribe("relay:menu", validMenu, callback),
+      /** Built-in agent (03 §16). The API key stays in the main process. */
+      copilot: Object.freeze({
+        getConfig: () => ipcRenderer.invoke("relay:copilot-config"),
+        saveConfig: (cfg) => ipcRenderer.invoke("relay:copilot-save", cfg),
+        test: () => ipcRenderer.invoke("relay:copilot-test"),
+        prompt: (text, vehicle) => ipcRenderer.invoke("relay:copilot-prompt", { text: String(text), vehicle: vehicle ?? null }),
+        abort: () => ipcRenderer.invoke("relay:copilot-abort"),
+        reset: () => ipcRenderer.invoke("relay:copilot-reset"),
+        approve: (id, ok) => ipcRenderer.invoke("relay:copilot-approve", { id: String(id), ok: Boolean(ok) }),
+        getState: () => ipcRenderer.invoke("relay:copilot-state"),
+        onEvent: (callback) => subscribe("relay:copilot", validCopilot, callback),
+      }),
     }),
   );
 }

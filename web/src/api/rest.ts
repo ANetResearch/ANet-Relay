@@ -89,6 +89,10 @@ const enc = encodeURIComponent
 export type StickFrame = { roll: number; pitch: number; yaw: number; throttle: number }
 export type PossessInput = { input: 'keyboard' | 'screen' | 'gamepad'; pad?: number }
 export type Ok = { ok?: boolean } & Record<string, unknown>
+export type SkillName = 'takeoff' | 'land' | 'hold' | 'rtl' | 'goto' | 'move' | 'yaw'
+export type PlanAction = 'takeoff' | 'hover' | 'hold' | 'move' | 'yaw' | 'land' | 'goto' | 'rtl'
+/** One plan step (03 §5.8): takeoff {alt}, hover {seconds}, move {forward, right, up}, yaw {deg}, land. */
+export type PlanStep = { action: PlanAction; alt?: number; seconds?: number; forward?: number; right?: number; up?: number; deg?: number }
 
 /** Typed helpers for every 03 §10.1 route the window uses. Shapes the doc leaves open are typed as `unknown`. */
 export const api = {
@@ -122,8 +126,11 @@ export const api = {
   arm: (id: string) => op<Ok>('POST', `/vehicles/${enc(id)}/arm`, { arm: true, confirm: 'ARM' }),
   disarm: (id: string) => op<Ok>('POST', `/vehicles/${enc(id)}/arm`, { arm: false }),
   mode: (id: string, name: string) => op<Ok>('POST', `/vehicles/${enc(id)}/mode`, { name }),
-  skill: (id: string, name: 'takeoff' | 'land' | 'hold' | 'rtl' | 'goto', args?: Record<string, number>) =>
+  skill: (id: string, name: SkillName, args?: Record<string, number | string>) =>
     op<Ok>('POST', `/vehicles/${enc(id)}/skills/${name}`, args ?? {}),
+  plan: (id: string, steps: PlanStep[], opts?: { name?: string; confirm?: string }) =>
+    op<Ok>('POST', `/vehicles/${enc(id)}/plan`, { steps, ...opts }),
+  cancelPlan: (id: string) => op<Ok>('POST', `/vehicles/${enc(id)}/plan/cancel`),
   courseStart: (id: string, courseId: string) => op<Ok>('POST', `/vehicles/${enc(id)}/course/start`, { course_id: courseId }),
   courseStop: (id: string) => op<Ok>('POST', `/vehicles/${enc(id)}/course/stop`),
   stop: (id: string) => op<Ok>('POST', `/vehicles/${enc(id)}/stop`),

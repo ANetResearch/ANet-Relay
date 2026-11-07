@@ -1,0 +1,158 @@
+"""Plans and the stick skills for aircraft without a position estimate (03 §5.7, §5.8)."""
+
+import math
+
+import pytest
+from conftest import open_agent
+
+from relay import plans
+from relay.authority import Actor
+from relay.errors import RelayError
+
+OP = Actor.operator()
+
+DEMO = [
+    {"action": "takeoff", "alt": 1.0},
+    {"action": "hover", "seconds": 2},
+    {"action": "move", "forward": 1},
+    {"action": "move", "forward": -1},
+    {"action": "yaw", "deg": 45},
+    {"action": "land"},
+]
+
+
+def boot(svc, stepper, flavour="ardupilot", position=True):
+    (vid,) = svc.add_sims(1, flavour, position)
+    stepper.run(2.5)
+    v = svc.vehicles[vid]
+    assert v.link_state == "ok" and v.capabilities.althold
+    assert v.capabilities.position is position
+    return vid, v
+
+
+def truth(v):
+    s = v.driver.sim.quad.s
+    return list(s.p), s.yaw
+
+
+def heading_change(a, b):
+    return math.degrees((b - a + math.pi) % (2 * math.pi) - math.pi)
+
+
+def step_positions(svc, stepper, v, session, budget=90.0):
+    """Run the plan, recording the true position each time a step finishes."""
+    marks = {}
+    seen = 0
+    end = stepper.clock.t + budget
+    while stepper.clock.t < end and v.plan.running:
+        stepper.run(0.05, [session] if session else None)
+        if len(v.plan.results) > seen:
+            seen = len(v.plan.results)
+            marks[seen] = truth(v)
+    return marks
+
+
+@pytest.mark.parametrize(
+    ("flavour", "position"), [("px4", False), ("ardupilot", False), ("ardupilot", True), ("px4", True)]
+)
+def test_demo_plan_flies_end_to_end(svc, stepper, flavour, position):
+    vid, v = boot(svc, stepper, flavour, position)
+    session, agent = open_agent(svc)
+    svc.claim(vid, agent)
+    start, _ = truth(v)
+    svc.run_plan(vid, agent, DEMO, name="demo")
+    marks = step_positions(svc, stepper, v, session)
+    assert v.plan.state == "done", (v.plan.detail, v.plan.index)
+    assert stepper.until(lambda: not v.armed, 5, [session])  # the autopilot disarms after touchdown
+    # 1 takeoff, 2 hover, 3 forward, 4 back, 5 yaw, 6 land
+    assert 0.85 <= marks[2][0][2] - start[2] <= 1.25
+    forward = math.hypot(marks[3][0][0] - marks[2][0][0], marks[3][0][1] - marks[2][0][1])
+    back = math.hypot(marks[4][0][0] - marks[2][0][0], marks[4][0][1] - marks[2][0][1])
+    if position:
+        assert abs(forward - 1.0) < 0.2 and back < 0.25
+    else:  # open loop: an estimate, but in the right direction and roughly the right size
+        assert 0.7 <= forward <= 1.4 and back <= 0.4
+    assert abs(heading_change(marks[4][1], marks[5][1]) - 45.0) <= 5.0
+    kinds = [e["kind"] for e in svc.events.after(0, 2000)]
+    assert kinds.count("plan_step") == 6 and "plan_finished" in kinds
+
+
+def test_no_position_takeoff_uses_altitude_hold(svc, stepper):
+    vid, v = boot(svc, stepper, "px4", False)
+    session, agent = open_agent(svc)
+    svc.claim(vid, agent)
+    svc.run_skill(vid, agent, "takeoff", {"alt": 1.2})
+    assert stepper.until(lambda: v.skill.state == "done", 20, [session])
+    assert v.mode == "ALTCTL" and abs(v.altitude() - 1.2) < 0.15
+    stepper.run(3.0, [session])
+    assert abs(v.altitude() - 1.2) < 0.2  # holds on the neutral throttle
+
+
+def test_operator_stick_override_fails_the_plan(svc, stepper):
+    vid, v = boot(svc, stepper, "ardupilot", False)
+    svc.possess(vid, "keyboard")
+    svc.run_plan(vid, OP, DEMO[:3])
+    assert stepper.until(lambda: v.plan.index >= 1, 20)
+    svc.sticks(vid, OP, {"roll": 0, "pitch": 0, "yaw": 0, "throttle": 0.5})  # baseline
+    svc.sticks(vid, OP, {"roll": 0.6, "pitch": 0, "yaw": 0, "throttle": 0.5})
+    stepper.run(0.2)
+    assert v.plan.state == "failed" and v.sticks is not None
+
+
+def test_possession_stops_an_agent_plan(svc, stepper):
+    vid, v = boot(svc, stepper, "ardupilot", True)
+    session, agent = open_agent(svc)
+    svc.claim(vid, agent)
+    svc.run_plan(vid, agent, DEMO)
+    assert stepper.until(lambda: v.plan.index >= 1, 20, [session])
+    svc.possess(vid, "keyboard")
+    stepper.run(0.2, [session])
+    assert v.plan.state == "failed"
+
+
+def test_cancel_holds_in_place(svc, stepper):
+    vid, v = boot(svc, stepper, "px4", False)
+    session, agent = open_agent(svc)
+    svc.claim(vid, agent)
+    svc.run_plan(vid, agent, [{"action": "takeoff", "alt": 1.0}, {"action": "hover", "seconds": 30}])
+    assert stepper.until(lambda: v.plan.index >= 1, 20, [session])
+    svc.cancel_plan(vid, agent)
+    assert v.plan.state == "cancelled" and v.skill.name == "hold"
+    alt = v.altitude()
+    stepper.run(2.0, [session])
+    assert v.armed and abs(v.altitude() - alt) < 0.2
+
+
+def test_plan_validation():
+    with pytest.raises(RelayError):
+        plans.normalise_steps([])
+    with pytest.raises(RelayError):
+        plans.normalise_steps([{"action": "flip"}])
+    with pytest.raises(RelayError):
+        plans.normalise_steps([{"action": "move"}])
+    with pytest.raises(RelayError):
+        plans.normalise_steps([{"action": "yaw", "deg": 720}])
+    with pytest.raises(RelayError):
+        plans.normalise_steps([{"action": "takeoff", "speed": 3}])
+    steps = plans.normalise_steps([{"action": "takeoff"}, {"action": "hover"}])
+    assert steps == [{"action": "takeoff", "alt": 1.0}, {"action": "hover", "seconds": 3.0}]
+
+
+def test_plan_needs_airborne_unless_it_takes_off(svc, stepper):
+    vid, _ = boot(svc, stepper)
+    _session, agent = open_agent(svc)
+    svc.claim(vid, agent)
+    with pytest.raises(RelayError) as exc:
+        svc.run_plan(vid, agent, [{"action": "move", "forward": 1}])
+    assert exc.value.code == "not_airborne"
+
+
+def test_open_loop_move_limit(svc, stepper):
+    vid, v = boot(svc, stepper, "px4", False)
+    session, agent = open_agent(svc)
+    svc.claim(vid, agent)
+    svc.run_skill(vid, agent, "takeoff", {"alt": 1.0})
+    assert stepper.until(lambda: v.skill.state == "done", 20, [session])
+    with pytest.raises(RelayError) as exc:
+        svc.run_skill(vid, agent, "move", {"forward": 3})
+    assert exc.value.code == "outside_safety_volume"

@@ -18,6 +18,7 @@ import { ConnectDialog } from '@/connect/ConnectDialog'
 import { SettingsDialog } from '@/settings/SettingsDialog'
 import { GamepadHints } from '@/control/GamepadHint'
 import { InputLayer } from '@/control/InputLayer'
+import { CopilotPanel } from '@/copilot/CopilotPanel'
 
 const Gallery = React.lazy(() => import('@/dev/Gallery').then((m) => ({ default: m.Gallery })))
 const SHOW_GALLERY = typeof location !== 'undefined' && new URLSearchParams(location.search).has('gallery')
@@ -96,6 +97,7 @@ export function App() {
         </div>
         <CommandPalette />
         <Dialogs />
+        <CopilotPanel />
         <GamepadHints />
         <InputLayer />
         <BootLayer />

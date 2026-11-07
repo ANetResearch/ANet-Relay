@@ -11,7 +11,8 @@ import {
   PanelRightOpen, Pause, Play, Plus, Radar, RefreshCw, RotateCcw, Route, Scan, ScanSearch, Search, Server, Settings,
   SignalHigh, SignalZero, SlidersHorizontal, Square, SquareDashed, Target, Terminal, Timer, Trash, TriangleAlert, Video,
   VideoOff, Wifi, WifiOff, X, BatteryFull, BatteryMedium, BatteryLow, BatteryWarning, Drone, ArrowDownUp, Ellipsis,
-  Plane, PlaneTakeoff, PlaneLanding, Crosshair, Network, Power,
+  Plane, PlaneTakeoff, PlaneLanding, Crosshair, Network, Power, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
+  ArrowUpToLine, ArrowDownToLine, RotateCw, ListOrdered, Sparkles, SendHorizontal, Hourglass, KeyRound, Stethoscope,
 } from 'lucide'
 import type { IconNode } from './types'
 
@@ -58,6 +59,22 @@ export const ICONS = {
   'plus': Plus,
   'more': Ellipsis,
   'sort': ArrowDownUp,
+  // flight actions and plans (03 §5.7, §5.8)
+  'move.forward': ArrowUp,
+  'move.back': ArrowDown,
+  'move.left': ArrowLeft,
+  'move.right': ArrowRight,
+  'move.up': ArrowUpToLine,
+  'move.down': ArrowDownToLine,
+  'yaw.cw': RotateCw,
+  'yaw.ccw': RotateCcw,
+  'plan': ListOrdered,
+  'hover': Hourglass,
+  // copilot and diagnostics
+  'copilot': Sparkles,
+  'send': SendHorizontal,
+  'key': KeyRound,
+  'health': Stethoscope,
   'scan': Radar,
   'scan.search': ScanSearch,
   'connect': Link,

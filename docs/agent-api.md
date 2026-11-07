@@ -58,8 +58,8 @@ An agent should therefore treat `possessed_by_human` and `claim_suspended` as "p
 | Level | Interface | Requires capability |
 |---|---|---|
 | 1 | `sticks` (roll, pitch, yaw, throttle) | `manual` (an autopilot heartbeat) |
-| 2 | `arm`, `mode`, skills `takeoff`, `land`, `hold` | `althold` for takeoff and hold |
-| 3 | skills `goto`, `rtl`, ring courses | `position` (a fresh local position estimate) |
+| 2 | `arm`, `mode`, skills `takeoff`, `land`, `hold`, `move`, `yaw`; plans | `althold` for takeoff, hold, move and yaw |
+| 3 | skills `goto`, `rtl`, ring courses; closed-loop `move` | `position` (a fresh local position estimate) |
 
 Every vehicle reports `capabilities: {manual, althold, position}`. A missing capability fails with `capability_missing` or `no_position_estimate`. Simulators have all three. Real aircraft report `position` only with a local position source such as optical flow, motion capture or UWB.
 
@@ -91,7 +91,7 @@ All paths are under `/api/v1`. Bodies are JSON.
 | `GET /health` | – | `{ok, version, uptime_s}` |
 | `GET /capabilities` | – | Frames, limits, skills and their parameters, mode names, confirm words |
 | `GET /fleet` | – | Fleet snapshot: vehicles, sessions, alerts, safety volume |
-| `GET /vehicles/{id}` | – | One vehicle, plus a `detail` object (home, safety origin, cell voltages, preflight items) |
+| `GET /vehicles/{id}` | – | One vehicle, plus a `detail` object (home, safety origin, cell voltages, preflight items). `health` carries the flight diagnostics (§5) |
 | `GET /vehicles/{id}/preflight` | – | Preflight check items |
 | `GET /topology` | – | Station, vehicles, bridges, sessions, links and relative distances |
 | `GET /events?after=&limit=&vehicle=&tail=` | – | Events with `seq > after`, oldest first; `tail=true` returns the newest `limit` |
@@ -105,7 +105,9 @@ All paths are under `/api/v1`. Bodies are JSON.
 | `POST /vehicles/{id}/sticks` | controller | `{roll, pitch, yaw, throttle}`; repeat at 10–50 Hz |
 | `POST /vehicles/{id}/arm` | controller | `{arm: true}` (real aircraft: `{arm: true, confirm: "ARM"}`) or `{arm: false}` |
 | `POST /vehicles/{id}/mode` | controller | `{name}`, for example `LOITER`, `ALT_HOLD`, `POSCTL` |
-| `POST /vehicles/{id}/skills/{name}` | controller | `takeoff {alt}`, `land`, `hold`, `rtl`, `goto {x, y, z, yaw?}` |
+| `POST /vehicles/{id}/skills/{name}` | controller | `takeoff {alt}`, `land`, `hold {seconds?}`, `move {forward?, right?, up?}`, `yaw {deg}`, `rtl`, `goto {x, y, z, yaw?}` |
+| `POST /vehicles/{id}/plan` | controller | `{steps, name?, confirm?}`: run a sequence of skills (below) |
+| `POST /vehicles/{id}/plan/cancel` | controller | Cancel the running plan; an airborne aircraft holds where it is |
 | `POST /vehicles/{id}/course/start` | controller | `{course_id}` (default `cage-loop`) |
 | `POST /vehicles/{id}/course/stop` | controller | Abort the course |
 | `POST /vehicles/{id}/stop` | controller | Emergency stop |
@@ -116,13 +118,41 @@ A skill call returns at once with `{"skill": {"id", "name", "state": "running", 
 
 | Skill | Requires | Behaviour |
 |---|---|---|
-| `takeoff {alt}` | althold (PX4: position) | Arms a simulator if needed, climbs to `alt` metres above the take-off point (0.2 m to the safety-volume height) and holds. A real aircraft on the ground must be armed first, or the call must carry `confirm: "ARM"` and pass preflight. Already airborne: finishes immediately. |
+| `takeoff {alt}` | althold | Arms a simulator if needed, climbs to `alt` metres above the take-off point (0.2 m to the safety-volume height) and holds. With a position estimate it uses the autopilot's take-off (GUIDED / OFFBOARD); without one it climbs in ALT_HOLD / ALTCTL on the throttle stick and levels off on the barometer altitude. A real aircraft on the ground must be armed first, or the call must carry `confirm: "ARM"` and pass preflight. Already airborne: finishes immediately. |
 | `land` | any | Lands in place; finishes when the aircraft is on the ground and disarmed. |
-| `hold` | althold | Holds position (LOITER / POSCTL) or altitude (ALT_HOLD / ALTCTL). |
+| `hold {seconds?}` | althold | Holds position (LOITER / POSCTL) or altitude (ALT_HOLD / ALTCTL). With `seconds`, reports `done` after that time and keeps holding. |
+| `move {forward?, right?, up?}` | althold, airborne | Metres in the aircraft's body frame (negative values go back, left, down). With a position estimate: a closed-loop `goto` to the target. Without one: **open loop**, a timed tilt with a dead-reckoned distance estimate (about ±30 %), horizontal distance at most 2 m per step; `up` uses the barometer altitude. |
+| `yaw {deg}` | althold, airborne | Turns by `deg` degrees, positive clockwise, on the attitude heading; finishes within 3°. |
 | `rtl` | position | Returns to the launch point and lands. |
 | `goto {x, y, z, yaw?}` | position | Flies to the target in the vehicle's position frame; finishes within 0.15 m. |
 
 While a skill runs or holds, Relay streams neutral sticks (throttle 0.5) as an RC keep-alive so the autopilot's RC-loss failsafe stays quiet; see `hardware.zh-CN.md` for the failsafe settings this relies on.
+
+### Plans
+
+A plan is an ordered list of up to 24 steps, each one skill, run one after another by Relay:
+
+```json
+POST /api/v1/vehicles/sim-1/plan
+{"name": "bench", "steps": [
+  {"action": "takeoff", "alt": 1.0},
+  {"action": "hover", "seconds": 3},
+  {"action": "move", "forward": 1},
+  {"action": "move", "forward": -1},
+  {"action": "yaw", "deg": 45},
+  {"action": "land"}
+]}
+```
+
+Actions: `takeoff {alt}` (default 1 m), `hover {seconds}` / `hold {seconds}` (default 3 s), `move {forward, right, up}`, `yaw {deg}`, `land`, `goto {x, y, z, yaw?}`, `rtl`. Every step is validated before the plan starts (`invalid_request` names the step and field; a step whose capability is missing fails with `capability_missing`). A plan that does not start with `takeoff` needs the aircraft in the air (`not_airborne`). On a real aircraft a plan that starts on the ground needs `confirm: "ARM"`.
+
+The vehicle's `plan` field reports `{id, name, state, index, count, steps, results, detail}` with `state` `running`, `done`, `failed` or `cancelled`; events `plan_started`, `plan_step`, `plan_finished`, `plan_failed` and `plan_cancelled` mark progress. A step that fails, a new skill, sticks from the controller, an operator moving a stick or possessing the aircraft, and a stop all end the plan. `POST /plan/cancel` ends it on purpose (`no_plan` if none is running) and leaves an airborne aircraft holding.
+
+`sdk/python/examples/bench_routine.py` flies the sequence above: `python3 sdk/python/examples/bench_routine.py --vehicle sim-1`; on a real aircraft add `--arm-real`.
+
+### Flight health
+
+Every vehicle carries `health`: rolling diagnostics over the last 5 s, shown in the inspector under Overview → Flight health. `state` is `ok`, `warn`, `bad` or `idle` (not armed); `items` lists `{key, level, value, unit, detail}` for `oscillation` (roll and pitch rate RMS, deg/s), `lean` (tilt held with centred sticks), `yaw_drift`, `alt_hold` (vertical speed spread in altitude hold), `hover_throttle`, `motors` (spread of mean motor outputs, saturation), `vibration` (peak, accelerometer clipping), `battery_sag` (per cell), `link` and `stick_stream` (stick updates from the Relay window while a person flies). Flight items are judged only after 1.5 s in the air; `level` is `na` until then. [`flight-tuning.zh-CN.md`](flight-tuning.zh-CN.md) explains each item and what to change.
 
 ### Sticks
 
@@ -156,6 +186,7 @@ Each event is `{seq, t, kind, vehicle, session, text_en, text_zh, data}`. The ki
 | `claim_started` / `claim_released` | Claims changed |
 | `agent_session_expired` | A lease ran out |
 | `skill_started` / `skill_finished` / `skill_failed` | Skill progress, with `data.skill_id` |
+| `plan_started` / `plan_step` / `plan_finished` / `plan_failed` / `plan_cancelled` | Plan progress, with `data.plan_id` |
 | `armed` / `disarmed` / `mode_changed` | Autopilot state |
 | `link_delayed` / `link_lost` / `link_restored` | Link quality; at `lost` Relay stops sticks and skills |
 | `battery_warn` / `battery_critical` / `crashed` | Hazards |
@@ -174,7 +205,7 @@ The full list is in `web/src/api/schema.json` (`EventKind`). Errors share one bo
 | 401 | `auth_required`, `session_expired` (open a new session) |
 | 403 | `operator_required`, `session_required`, `untrusted_host` |
 | 404 | `vehicle_not_found`, `course_not_found`, `unknown_skill` |
-| 409 | `not_claimed`, `claimed_by_other`, `possessed_by_human`, `claim_suspended`, `preflight_blocked`, `arm_rejected`, `mode_rejected`, `not_armed`, `crashed`, `capability_missing`, `no_position_estimate` |
+| 409 | `not_claimed`, `claimed_by_other`, `possessed_by_human`, `claim_suspended`, `preflight_blocked`, `arm_rejected`, `mode_rejected`, `not_armed`, `crashed`, `capability_missing`, `no_position_estimate`, `not_airborne`, `no_plan` |
 | 429 | `rate_limited` |
 | 503 | `link_not_ready`, `backend_busy` |
 
@@ -191,7 +222,9 @@ The full list is in `web/src/api/schema.json` (`EventKind`). Errors share one bo
 | `relay_claim` / `relay_release_claim` | Claim and release |
 | `relay_arm` / `relay_disarm` | Arm (real aircraft: `confirm: "ARM"`) and disarm |
 | `relay_mode` | Set a flight mode by name |
-| `relay_takeoff` / `relay_land` / `relay_hold` / `relay_goto` | Skills; they wait for completion unless `wait: false` |
+| `relay_takeoff` / `relay_land` / `relay_hold` / `relay_goto` | Skills; they wait for completion unless `wait: false`. `relay_hold` takes `seconds` |
+| `relay_move` / `relay_yaw` | Relative moves in the body frame and turns (open loop without a position estimate) |
+| `relay_plan` | Run a sequence of steps (§5 Plans) and wait for it |
 | `relay_stop` | Emergency stop |
 | `relay_course_start` | Start a ring course and return the rings to fly through |
 
@@ -241,7 +274,8 @@ Add `"--base", "http://127.0.0.1:<port>"` when Relay runs on a port other than 8
 | `stream(timeout=None)` | Generator over WebSocket messages (`hello`, `fleet`, `event`) |
 | `claim(id)` · `unclaim(id)` | Authority |
 | `sticks(id, roll, pitch, yaw, throttle)` · `arm(id, confirm=None)` · `disarm(id)` · `mode(id, name)` | Direct control |
-| `takeoff(id, alt)` · `land(id)` · `hold(id)` · `rtl(id)` · `goto(id, x, y, z, yaw=None)` | Skills; `wait=True` blocks until done and raises on failure |
+| `takeoff(id, alt)` · `land(id)` · `hold(id, seconds=0)` · `rtl(id)` · `goto(id, x, y, z, yaw=None)` · `move(id, forward=0, right=0, up=0)` · `yaw(id, deg)` | Skills; `wait=True` blocks until done and raises on failure |
+| `plan(id, steps, name=None, confirm=None, wait=True)` · `cancel_plan(id)` | Plans; waiting raises `plan_failed` when the plan fails or is cancelled |
 | `skill(id, name, params, wait)` · `wait_skill(id, skill_id)` | Generic skill call and wait |
 | `course_start(id, course_id)` · `course_stop(id)` · `stop(id)` | Courses and emergency stop |
 
@@ -251,5 +285,15 @@ Errors raise `RelayError` with `code`, `status`, `message`, `message_zh` and `de
 
 1. Set up the aircraft and its Wi-Fi bridge (`hardware.zh-CN.md`) and confirm it appears in the fleet as `real-<ip>`, for example `real-10-7-7-36`.
 2. Complete the operator steps in the Relay window: verify stick directions without propellers, confirm propellers and the safety net, pass every blocking preflight item.
-3. Replace the vehicle id in your code. Arming needs `confirm: "ARM"`. Position skills (`goto`, `rtl`, courses) need a local position source; without one, stay with `takeoff`, `hold` and `land` in altitude-hold modes.
+3. Replace the vehicle id in your code. Arming needs `confirm: "ARM"`. Position skills (`goto`, `rtl`, courses) need a local position source; without one, use `takeoff`, `hold`, `yaw`, `land` and open-loop `move` in altitude-hold modes, and expect the aircraft to drift slowly while it holds.
 4. Keep an operator at the window. Possession and the stop button override any agent at any time.
+
+## 11. Copilot (built-in agent)
+
+The desktop app includes Copilot, a small agent built on [pi](https://github.com/earendil-works/pi) (`@earendil-works/pi-agent-core`). It runs in the app's main process and uses this API like any other agent: it opens a session named `copilot`, claims the aircraft it is asked to fly, and appears in the Agents workspace and the relay timeline.
+
+- **Open:** the Copilot button in the top bar, or Ctrl/Cmd + J. The selected aircraft is passed with each message.
+- **Configure:** Settings → Copilot: API type (`openai-completions` for OpenAI-compatible endpoints, `anthropic-messages`, `openai-responses`), base URL, model id and API key. **Test connection** sends one short request. The key is encrypted with the operating system keychain (Electron `safeStorage`) in the app's data folder and is never sent back to the renderer; the endpoint receives the conversation and tool results, nothing else.
+- **Tools:** fleet and vehicle status, take-off, hover, move, yaw, land, plans, cancel, release and stop: the same skills as §5, never raw sticks.
+- **Safety:** on a real aircraft every motion command (take-off, hover, move, yaw, land, plans) shows an approval card in the chat; nothing is sent until the operator approves (120 s timeout, then declined). Possession and the stop button override Copilot like any agent.
+

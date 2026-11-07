@@ -87,6 +87,9 @@ STICK_MODES: dict[str, frozenset[str]] = {
     PX4: frozenset({"MANUAL", "STABILIZED", "ALTCTL", "POSCTL", "ACRO"}),
 }
 
+# Stick modes that hold altitude: sticks are rates around a held altitude (03 §5.7).
+HOLD_STICK_MODES = frozenset({"ALT_HOLD", "LOITER", "POSHOLD", "FLOWHOLD", "ALTCTL", "POSCTL"})
+
 
 def autopilot_name(autopilot: int | None) -> str | None:
     if autopilot == M.MAV_AUTOPILOT_ARDUPILOTMEGA:

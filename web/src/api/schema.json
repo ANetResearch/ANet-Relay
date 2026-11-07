@@ -514,7 +514,12 @@
             "ring_passed",
             "course_finished",
             "course_aborted",
-            "listen_error"
+            "listen_error",
+            "plan_started",
+            "plan_step",
+            "plan_finished",
+            "plan_failed",
+            "plan_cancelled"
           ],
           "type": "string"
         },
@@ -663,6 +668,40 @@
       "title": "FleetMessage",
       "type": "object"
     },
+    "FlightHealthView": {
+      "description": "Rolling diagnostics over the last few seconds (03 §5.9). Flight items need the aircraft airborne.",
+      "properties": {
+        "state": {
+          "enum": [
+            "ok",
+            "warn",
+            "bad",
+            "idle"
+          ],
+          "type": "string"
+        },
+        "window_s": {
+          "type": "number"
+        },
+        "airborne_samples": {
+          "type": "integer"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/HealthItem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "state",
+        "window_s",
+        "airborne_samples",
+        "items"
+      ],
+      "title": "FlightHealthView",
+      "type": "object"
+    },
     "GlobalPosition": {
       "properties": {
         "lat": {
@@ -735,6 +774,67 @@
         "uptime_s"
       ],
       "title": "Health",
+      "type": "object"
+    },
+    "HealthItem": {
+      "properties": {
+        "key": {
+          "enum": [
+            "oscillation",
+            "lean",
+            "yaw_drift",
+            "alt_hold",
+            "hover_throttle",
+            "motors",
+            "vibration",
+            "battery_sag",
+            "link",
+            "stick_stream"
+          ],
+          "type": "string"
+        },
+        "level": {
+          "enum": [
+            "ok",
+            "warn",
+            "bad",
+            "na"
+          ],
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unit": {
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "key",
+        "level",
+        "value",
+        "unit",
+        "detail"
+      ],
+      "title": "HealthItem",
       "type": "object"
     },
     "Hello": {
@@ -854,6 +954,80 @@
         "error"
       ],
       "title": "Listen",
+      "type": "object"
+    },
+    "PlanView": {
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "enum": [
+            "running",
+            "done",
+            "failed",
+            "cancelled"
+          ],
+          "type": "string"
+        },
+        "index": {
+          "description": "step being flown (equals count once done)",
+          "type": "integer"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "steps": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "results": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "state",
+        "index",
+        "count",
+        "steps",
+        "results",
+        "detail"
+      ],
+      "title": "PlanView",
       "type": "object"
     },
     "Position": {
@@ -1582,6 +1756,19 @@
             }
           ]
         },
+        "plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlanView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "health": {
+          "$ref": "#/$defs/FlightHealthView"
+        },
         "calibration": {
           "$ref": "#/$defs/CalibrationView"
         },
@@ -1651,6 +1838,8 @@
         "controller",
         "sticks",
         "skill",
+        "plan",
+        "health",
         "calibration",
         "confirmed",
         "preflight",

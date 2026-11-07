@@ -35,6 +35,49 @@ export interface RelayBackendState {
   ports?: [number, number] | null;
 }
 
+export type CopilotApi = "openai-completions" | "anthropic-messages" | "openai-responses";
+
+export interface CopilotConfig {
+  api: CopilotApi;
+  /** e.g. https://api.openai.com/v1, https://api.anthropic.com, http://127.0.0.1:11434/v1 */
+  baseUrl: string;
+  model: string;
+  hasKey: boolean;
+  /** last four characters of the stored key, for recognition only */
+  keyHint: string | null;
+  /** false when the OS offers no keychain: the key is stored in a 0600 file instead */
+  secureStorage: boolean;
+  configured: boolean;
+}
+
+/** apiKey: a string sets it, null or "" clears it, absent keeps the stored key. */
+export type CopilotConfigInput = Partial<Pick<CopilotConfig, "api" | "baseUrl" | "model">> & { apiKey?: string | null };
+
+export type CopilotEvent =
+  | { type: "busy"; busy: boolean }
+  | { type: "assistant_start" }
+  | { type: "text"; delta: string }
+  | { type: "assistant_end"; error: string | null; aborted: boolean }
+  | { type: "tool_start"; id: string; tool: string; args: Record<string, unknown> }
+  | { type: "tool_update"; id: string; text: string }
+  | { type: "tool_end"; id: string; tool: string; error: boolean; text: string }
+  | { type: "approval"; id: string; toolCallId: string; tool: string; vehicle: string; label: string; request: Record<string, unknown> }
+  | { type: "approval_closed"; id: string; approved: boolean; reason?: string }
+  | { type: "error"; error: string };
+
+export interface RelayCopilot {
+  getConfig(): Promise<CopilotConfig>;
+  saveConfig(cfg: CopilotConfigInput): Promise<CopilotConfig>;
+  test(): Promise<{ ok: boolean; ms?: number; reply?: string; error?: string }>;
+  /** Starts a turn; progress arrives through onEvent. error: not_configured | backend_unavailable | busy | empty */
+  prompt(text: string, vehicle?: string | null): Promise<{ ok: boolean; error?: string }>;
+  abort(): Promise<boolean>;
+  reset(): Promise<boolean>;
+  approve(id: string, ok: boolean): Promise<boolean>;
+  getState(): Promise<{ busy: boolean }>;
+  onEvent(callback: (event: CopilotEvent) => void): () => void;
+}
+
 export interface RelayShell {
   /** http://127.0.0.1:<port>, fixed for the lifetime of the page (the shell reloads the page if it changes). */
   readonly apiBase: string | null;
@@ -53,6 +96,7 @@ export interface RelayShell {
   quit(): Promise<boolean>;
   onBackendState(callback: (state: RelayBackendState) => void): () => void;
   onMenu(callback: (event: RelayMenuEvent) => void): () => void;
+  copilot: RelayCopilot;
 }
 
 declare global {

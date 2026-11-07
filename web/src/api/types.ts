@@ -116,6 +116,8 @@ export interface Vehicle {
   controller: 'none' | 'human' | 'agent'
   sticks: SticksView | null
   skill: SkillView | null
+  plan: PlanView | null
+  health: FlightHealthView
   calibration: CalibrationView
   confirmed: ConfirmedView
   preflight: PreflightSummary
@@ -295,6 +297,56 @@ export interface SkillView {
 }
 /**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "PlanView".
+ */
+export interface PlanView {
+  id: number
+  name: string | null
+  state: 'running' | 'done' | 'failed' | 'cancelled'
+  /**
+   * step being flown (equals count once done)
+   */
+  index: number
+  count: number
+  steps: {}[]
+  results: (string | null)[]
+  detail: string | null
+}
+/**
+ * Rolling diagnostics over the last few seconds (03 §5.9). Flight items need the aircraft airborne.
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "FlightHealthView".
+ */
+export interface FlightHealthView {
+  state: 'ok' | 'warn' | 'bad' | 'idle'
+  window_s: number
+  airborne_samples: number
+  items: HealthItem[]
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "HealthItem".
+ */
+export interface HealthItem {
+  key:
+    | 'oscillation'
+    | 'lean'
+    | 'yaw_drift'
+    | 'alt_hold'
+    | 'hover_throttle'
+    | 'motors'
+    | 'vibration'
+    | 'battery_sag'
+    | 'link'
+    | 'stick_stream'
+  level: 'ok' | 'warn' | 'bad' | 'na'
+  value: number | null
+  unit: string
+  detail: {} | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
  * via the `definition` "CalibrationView".
  */
 export interface CalibrationView {
@@ -434,6 +486,11 @@ export interface Event {
     | 'course_finished'
     | 'course_aborted'
     | 'listen_error'
+    | 'plan_started'
+    | 'plan_step'
+    | 'plan_finished'
+    | 'plan_failed'
+    | 'plan_cancelled'
   vehicle: string | null
   session: string | null
   text_en: string

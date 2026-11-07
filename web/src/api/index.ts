@@ -1,10 +1,10 @@
 // Public surface of the API layer. Import types and helpers from '@/api', never from the generated file.
-export type { Fleet, Vehicle, Alert, Hello, Health, ErrorBody } from './types'
+export type { Fleet, Vehicle, Alert, Hello, Health, ErrorBody, FlightHealthView, HealthItem } from './types'
 export type { RelayEvent, EventKind } from './events'
 export { api, request, setTransport, httpTransport, RelayApiError, toApiError } from './rest'
-export type { RestTransport, Method, Auth, StickFrame, PossessInput, Ok } from './rest'
+export type { RestTransport, Method, Auth, StickFrame, PossessInput, Ok, SkillName, PlanAction, PlanStep } from './rest'
 export { env, readEnv, setEnv, normalizeApiBase, streamUrlFor } from './env'
-export type { RelayEnv, RelayBridge, BackendState, BackendStateName, MenuAction, MenuEvent, FixtureName } from './env'
+export type { RelayEnv, RelayBridge, BackendState, BackendStateName, MenuAction, MenuEvent, FixtureName, CopilotApi, CopilotConfig, CopilotConfigInput, CopilotEvent, RelayCopilotBridge } from './env'
 export { RelayStream, parseMessage, backoffDelay, STICKS_MIN_INTERVAL_MS } from './ws'
 export type { StreamState, StreamHandlers, SocketLike, SocketFactory } from './ws'
 export { stream, installStream, sendSticks, cancelSticks } from './stream'

@@ -1,5 +1,5 @@
-// Inspector Overview (02 §11): preflight summary (opens Control), key values in two columns, video group (WP7),
-// the last three status texts, capabilities.
+// Inspector Overview (02 §11): preflight summary (opens Control), key values in two columns, flight health (03 §5.9),
+// video group (WP7), the last three status texts, capabilities.
 import * as React from 'react'
 import type { Vehicle } from '@/api'
 import { duration } from '@/lib/format'
@@ -11,6 +11,7 @@ import { BatteryReadout, LinkStatus, Readout, useAgo, Value } from '@/ui/relay'
 import { VideoSourceGroup } from '@/video/VideoPip'
 import { useT8, type AnyKey } from '@/fleet/copy'
 import { useLength } from '@/settings/prefs'
+import { HealthBlock } from './HealthBlock'
 import { Block } from './parts'
 import { useInspectorTab } from './tabs'
 
@@ -131,6 +132,7 @@ export function OverviewTab({ vehicleId }: { vehicleId: string }) {
           </span>
         </Readout>
       </div>
+      <HealthBlock health={v.health} />
       <Block title={t('video.group')}>
         <VideoSourceGroup vehicleId={vehicleId} />
       </Block>

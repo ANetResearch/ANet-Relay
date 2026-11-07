@@ -35,7 +35,10 @@ ANet Relay 是面向局域网 Wi-Fi 小型无人机机群的桌面地面站，�
 | 全量可见 | 姿态、高度、电池、GPS 与本地位置、模式、着陆状态、状态文本、原始 MAVLink 查看器、可检索可编辑的完整参数表、单机日志 | 可用 |
 | 附身 | 用 DualSense 或标准手柄、键盘或屏幕摇杆接管任意一架；多个手柄可同时飞多架 | 可用 |
 | 接力给智能体 | 附身始终优先，智能体的认领被挂起；松手后认领恢复，智能体收到 `relay_handback` | 可用 |
-| 智能体接口 | 本机 REST 与 WebSocket 接口：会话、认领、杆量、技能（起飞、降落、悬停、返航、前往）与事件；Python SDK；面向大语言模型的 MCP 服务器 | 可用 |
+| 飞行动作与动作序列 | 在检查器中起飞、悬停、前后左右与升降平移、转向、降落，或编排成动作序列逐步执行；无定位源时在定高模式下也可使用（平移距离为开环估算） | 可用 |
+| 智能体接口 | 本机 REST 与 WebSocket 接口：会话、认领、杆量、技能（起飞、降落、悬停、平移、转向、返航、前往）、动作序列与事件；Python SDK；面向大语言模型的 MCP 服务器 | 可用 |
+| Copilot | 基于 [pi](https://github.com/earendil-works/pi) 的内置对话智能体：用自然语言查询状态、起飞、平移、执行与规划动作序列；可配置任意 OpenAI 或 Anthropic 兼容的端点与 Key；真机的每个运动指令都需操作员批准 | 可用 |
+| 飞行健康 | 飞行中滚动诊断：姿态振荡、松杆倾斜、航向漂移、定高稳定性、悬停油门、电机均衡、振动、电池压降、链路与摇杆数据流，并给出可能原因与处理方法 | 可用 |
 | 模拟器 | 最多 8 架模拟机，行为与 ArduPilot 飞机一致，含动力学与电池模型；通过接口看与真机完全相同 | 可用 |
 | 穿环航线 | 虚拟环序列（围网环线、绕桩、爬升），含计时、分段与追尾视角；模拟机可飞，具备本地位置估计的真机也可飞 | 可用 |
 | 数传配网 | 四步向导，把新的 ESP8266 MAVLink 数传从自身热点迁移到团队网络 | 可用 |
@@ -95,6 +98,10 @@ SDK 与 MCP 服务器只依赖 Python 标准库。[智能体接口指南](docs/a
 | 穿环航线 | `G` | 方块 |
 | 命令面板 | `⌘K` / `Ctrl+K` | — |
 
+**飞行动作与动作序列。** 附身飞机后打开检查器的 **控制** 页。**飞行动作** 可起飞到设定高度、悬停、按步长向任意方向平移、转向和降落。**动作序列** 保存一组可编辑的步骤，例如起飞 1 米、悬停 3 秒、前进 1 米、后退 1 米、右转 45°、降落，并一次执行完；拨动任意摇杆即接管并结束序列。对真机，两者在解锁前都要求输入 `ARM`。没有本地定位源（光流、动捕、UWB）时，飞机在定高模式下飞行，按气压计保持高度，水平方向会缓慢漂移；此时平移是定时倾斜，距离为估算值。同一序列也可用脚本执行：`python3 sdk/python/examples/bench_routine.py --vehicle <id> --arm-real`。
+
+**起飞后不稳？** 悬停时查看检查器 **概览 → 飞行健康**，并按 [飞行调参指南](docs/flight-tuning.zh-CN.md) 处理。最常见的原因是在自稳模式（STABILIZE）下飞行：油门直接给到电机。Relay 在地面接管带气压计的飞机时，会把自稳模式切换为定高模式。
+
 **急停语义。** 急停把油门置零 50 毫秒，然后申请上锁；它从不改变由谁控制飞机。释放附身即停止杆量输入：在 PX4 上 Relay 停止发送手动控制，而不是发送零油门。
 
 ## 面向智能体
@@ -112,6 +119,8 @@ with RelayClient() as relay:                         # http://127.0.0.1:8765
     relay.land("sim-1")
 ```
 
+**Copilot。** 桌面应用内置一个智能体：点击 **Copilot** 按钮或按 `⌘J` / `Ctrl+J` 打开，在 **设置 → Copilot** 中填写端点、模型与 API Key，然后直接提出要求，例如“起飞到 1 米，悬停，前进 1 米再退回，右转 45° 后降落”。Copilot 与其他智能体一样通过会话、认领和技能接口操作，从不发送原始杆量；对真机的每个运动指令都会先显示审批卡片。Key 使用系统钥匙串加密保存。
+
 大语言模型通过 MCP 接入：
 
 ```sh
@@ -123,8 +132,8 @@ claude mcp add anet-relay -- python3 /path/to/ANet-Relay/mcp/anet_relay_mcp.py -
 | REST | `http://127.0.0.1:8765/api/v1`（取 8765 到 8775 中第一个空闲端口） |
 | WebSocket | `ws://127.0.0.1:8765/api/v1/stream` |
 | OpenAPI | `http://127.0.0.1:8765/openapi.json`，交互式文档在 `/docs` |
-| MCP | `mcp/anet_relay_mcp.py`，stdio，15 个工具 |
-| Python SDK | `sdk/python/anet_relay_client.py` 与四个示例 |
+| MCP | `mcp/anet_relay_mcp.py`，stdio，18 个工具 |
+| Python SDK | `sdk/python/anet_relay_client.py` 与五个示例 |
 
 接口只监听本机回环地址。智能体用同一组调用控制模拟机和真机；真机另需操作员完成起飞前步骤，并传入 `confirm: "ARM"`。
 
@@ -195,13 +204,13 @@ npm run dist:mac            # 或 dist:linux；安装包输出到 release/
 
 | 路径 | 内容 |
 |---|---|
-| `electron/` | 桌面外壳：窗口、`app://relay` 协议、原生菜单、后端守护 |
+| `electron/` | 桌面外壳：窗口、`app://relay` 协议、原生菜单、后端守护、Copilot 智能体（`electron/copilot/`） |
 | `backend/relay/` | MAVLink 链路与驱动、控制权、会话与技能、模拟器、穿环航线、起飞前检查、历史记录、REST 与 WebSocket 接口 |
 | `web/` | 界面：React、three.js 舞台、ANet Graphite 主题、中英文 |
 | `sdk/python/`、`mcp/` | Python SDK 与示例；MCP 服务器 |
 | `tools/fakes/` | 无硬件联调用的假数传与假飞控 |
 | `e2e/` | Playwright 测试，以及三种窗口尺寸、两种语言的逐屏走查 |
-| `docs/design/` | 产品、体验与系统设计 |
+| `docs/` | 智能体接口指南、硬件接入指南、飞行调参指南；`docs/design/` 为产品、体验与系统设计 |
 
 <details>
 <summary><b>与 ANet 的关系</b></summary>

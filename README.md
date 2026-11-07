@@ -35,7 +35,10 @@ ANet Relay is the desktop ground control station for small drone fleets on a loc
 | Everything visible | Attitude, altitude, battery, GPS and local position, mode, landed state, status text, raw MAVLink inspector, full parameter table with search and editing, per-aircraft log | Available |
 | Possession | Take over any aircraft with a DualSense or standard gamepad, the keyboard or on-screen sticks; several gamepads fly several aircraft at once | Available |
 | Relay to agents | Possession always wins and suspends the agent's claim; on release the claim resumes and the agent receives `relay_handback` | Available |
-| Agent API | Local REST and WebSocket API with sessions, claims, sticks, skills (take off, land, hold, return, go to) and events; Python SDK; MCP server for language models | Available |
+| Flight actions and sequences | Take off, hover, move forward, back, sideways and vertically, turn and land from the inspector, or as an editable sequence flown step by step; works in altitude hold without a position source (moves are then open-loop estimates) | Available |
+| Agent API | Local REST and WebSocket API with sessions, claims, sticks, skills (take off, land, hold, move, yaw, return, go to), sequences and events; Python SDK; MCP server for language models | Available |
+| Copilot | Built-in chat agent on [pi](https://github.com/earendil-works/pi): status, take-off, moves, sequences and planning in plain language, with any OpenAI- or Anthropic-compatible endpoint and key; every motion on a real aircraft waits for the operator's approval | Available |
+| Flight health | Rolling diagnostics while flying: attitude oscillation, hands-off lean, yaw drift, altitude hold, hover throttle, motor balance, vibration, battery sag, link and stick stream, each with its likely cause and fix | Available |
 | Simulator | Up to 8 simulated aircraft that behave like ArduPilot vehicles, with dynamics and a battery model; identical to real aircraft through the API | Available |
 | Ring course | Virtual ring sequences (cage loop, slalom, climb) with timing, splits and a chase camera, for simulators and for real aircraft with a local position estimate | Available |
 | Bridge setup | Four-step wizard that moves a new ESP8266 MAVLink bridge from its hotspot onto the team network | Available |
@@ -95,6 +98,10 @@ The SDK and the MCP server use the Python standard library only. The [Agent API 
 | Ring course | `G` | Square |
 | Command palette | `⌘K` / `Ctrl+K` | — |
 
+**Flight actions and sequences.** Possess the aircraft and open the inspector's **Control** tab. **Flight actions** takes off to a set height, hovers, moves by a step in any direction, turns and lands. **Sequence** holds an editable list of steps, for example take off 1 m, hover 3 s, forward 1 m, back 1 m, turn 45°, land, and flies it in one go; any stick movement takes over and ends it. On a real aircraft both ask for `ARM` to be typed before arming. Without a local position source (optical flow, motion capture, UWB) the aircraft flies in altitude hold, holds height on the barometer and drifts slowly; moves are then timed tilts whose distance is an estimate. The same sequence runs from a script: `python3 sdk/python/examples/bench_routine.py --vehicle <id> --arm-real`.
+
+**Unsteady after take-off?** Check the inspector's **Overview → Flight health** while hovering and follow the [flight tuning guide](docs/flight-tuning.zh-CN.md) (Chinese). The most common cause is flying in STABILIZE, where the throttle goes straight to the motors: Relay moves an aircraft it possesses on the ground from STABILIZE to altitude hold when it has a barometer.
+
 **Stop semantics.** Stop sets throttle to zero for 50 ms and then requests a disarm; it never changes who controls the aircraft. Releasing possession stops stick input: on PX4 Relay stops sending manual control instead of sending zero throttle.
 
 ## For agents
@@ -112,6 +119,8 @@ with RelayClient() as relay:                         # http://127.0.0.1:8765
     relay.land("sim-1")
 ```
 
+**Copilot.** The desktop app has a built-in agent: open it with the **Copilot** button or `⌘J` / `Ctrl+J`, set the endpoint, model and API key in **Settings → Copilot**, and ask, for example, "take off to 1 m, hover, go forward 1 m and back, turn 45° and land". Copilot works through the same session, claim and skill API as any agent, never sends raw sticks, and on a real aircraft shows an approval card before every motion command. The key is stored encrypted with the system keychain.
+
 Language models connect through MCP:
 
 ```sh
@@ -123,8 +132,8 @@ claude mcp add anet-relay -- python3 /path/to/ANet-Relay/mcp/anet_relay_mcp.py -
 | REST | `http://127.0.0.1:8765/api/v1` (first free port from 8765 to 8775) |
 | WebSocket | `ws://127.0.0.1:8765/api/v1/stream` |
 | OpenAPI | `http://127.0.0.1:8765/openapi.json`, interactive at `/docs` |
-| MCP | `mcp/anet_relay_mcp.py`, 15 tools over stdio |
-| Python SDK | `sdk/python/anet_relay_client.py` and four examples |
+| MCP | `mcp/anet_relay_mcp.py`, 18 tools over stdio |
+| Python SDK | `sdk/python/anet_relay_client.py` and five examples |
 
 The API listens on the loopback interface only. Agents control simulators and real aircraft through the same calls; real aircraft additionally require the operator's preflight steps and `confirm: "ARM"`.
 
@@ -195,13 +204,13 @@ The backend runs on its own with `.venv/bin/python -m relay --dev`. Pushing a `v
 
 | Path | Contents |
 |---|---|
-| `electron/` | Desktop shell: window, `app://relay` protocol, native menus, backend supervisor |
+| `electron/` | Desktop shell: window, `app://relay` protocol, native menus, backend supervisor, Copilot agent (`electron/copilot/`) |
 | `backend/relay/` | MAVLink links and drivers, control authority, sessions and skills, simulator, ring courses, preflight, history, REST and WebSocket API |
 | `web/` | Interface: React, three.js stage, ANet Graphite theme, English and Chinese |
 | `sdk/python/`, `mcp/` | Python SDK with examples; MCP server |
 | `tools/fakes/` | Fake bridge and flight controller for testing without hardware |
 | `e2e/` | Playwright tests and the screen walkthrough at three window sizes in two languages |
-| `docs/design/` | Product, experience and system design (Chinese) |
+| `docs/` | Agent API guide, hardware guide and flight tuning guide (Chinese); `docs/design/` holds the product, experience and system design (Chinese) |
 
 <details>
 <summary><b>Relation to ANet</b></summary>

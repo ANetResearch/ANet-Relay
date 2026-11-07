@@ -55,6 +55,8 @@ function base(over: Partial<V> & Pick<V, 'id' | 'label' | 'kind'>): V {
     controller: 'none',
     sticks: null,
     skill: null,
+    plan: null,
+    health: { state: 'idle', window_s: 5, airborne_samples: 0, items: [] },
     calibration: { signs: { roll: 1, pitch: 1, yaw: 1 }, hover: sim ? 0.5 : 0.35 },
     confirmed: { signs: sim, props: sim },
     preflight: { ok: sim, blocking: sim ? [] : ['signs', 'props'] },

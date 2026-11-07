@@ -479,6 +479,7 @@ export const en = {
   'set.safety': 'Safety',
   'set.controllers': 'Controllers',
   'set.network': 'Network',
+  'set.copilot': 'Copilot',
   'set.data': 'Data',
   'set.about': 'About',
   'set.language': 'Language',

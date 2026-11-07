@@ -84,7 +84,7 @@ STREAM_GROUPS = {
     M.MAV_DATA_STREAM_POSITION: ("LOCAL_POSITION_NED", "GLOBAL_POSITION_INT"),
     M.MAV_DATA_STREAM_EXTRA1: ("ATTITUDE",),
     M.MAV_DATA_STREAM_EXTRA2: ("VFR_HUD",),
-    M.MAV_DATA_STREAM_EXTRA3: ("BATTERY_STATUS", "EKF_STATUS_REPORT", "EXTENDED_SYS_STATE"),
+    M.MAV_DATA_STREAM_EXTRA3: ("BATTERY_STATUS", "EKF_STATUS_REPORT", "EXTENDED_SYS_STATE", "VIBRATION"),
     M.MAV_DATA_STREAM_RC_CHANNELS: ("RC_CHANNELS", "SERVO_OUTPUT_RAW"),
     M.MAV_DATA_STREAM_RAW_SENSORS: (),
     M.MAV_DATA_STREAM_RAW_CONTROLLER: (),
@@ -100,6 +100,7 @@ EMITTABLE = {
     "RC_CHANNELS",
     "SERVO_OUTPUT_RAW",
     "EKF_STATUS_REPORT",
+    "VIBRATION",
     "AUTOPILOT_VERSION",
     "HOME_POSITION",
 }
@@ -807,6 +808,17 @@ class SimAutopilot:
                 servo6_raw=0,
                 servo7_raw=0,
                 servo8_raw=0,
+            )
+        if name == "VIBRATION":
+            level = 4.0 + 3.0 * s.motor if self.armed else 0.3
+            return M.MAVLink_vibration_message(
+                time_usec=int(boot_ms * 1000),
+                vibration_x=level,
+                vibration_y=level * 0.9,
+                vibration_z=level * 1.4,
+                clipping_0=0,
+                clipping_1=0,
+                clipping_2=0,
             )
         if name == "EKF_STATUS_REPORT":
             if self.flavour != ARDUPILOT:

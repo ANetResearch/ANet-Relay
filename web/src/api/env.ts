@@ -30,6 +30,45 @@ export interface MenuEvent {
   shellIssued?: boolean
 }
 
+/** Built-in agent (03 §16); the API key never leaves the main process. */
+export type CopilotApi = 'openai-completions' | 'anthropic-messages' | 'openai-responses'
+
+export interface CopilotConfig {
+  api: CopilotApi
+  baseUrl: string
+  model: string
+  hasKey: boolean
+  keyHint: string | null
+  secureStorage: boolean
+  configured: boolean
+}
+
+export type CopilotConfigInput = Partial<Pick<CopilotConfig, 'api' | 'baseUrl' | 'model'>> & { apiKey?: string | null }
+
+export type CopilotEvent =
+  | { type: 'busy'; busy: boolean }
+  | { type: 'assistant_start' }
+  | { type: 'text'; delta: string }
+  | { type: 'assistant_end'; error: string | null; aborted: boolean }
+  | { type: 'tool_start'; id: string; tool: string; args: Record<string, unknown> }
+  | { type: 'tool_update'; id: string; text: string }
+  | { type: 'tool_end'; id: string; tool: string; error: boolean; text: string }
+  | { type: 'approval'; id: string; toolCallId: string; tool: string; vehicle: string; label: string; request: Record<string, unknown> }
+  | { type: 'approval_closed'; id: string; approved: boolean; reason?: string }
+  | { type: 'error'; error: string }
+
+export interface RelayCopilotBridge {
+  getConfig(): Promise<CopilotConfig>
+  saveConfig(cfg: CopilotConfigInput): Promise<CopilotConfig>
+  test(): Promise<{ ok: boolean; ms?: number; reply?: string; error?: string }>
+  prompt(text: string, vehicle?: string | null): Promise<{ ok: boolean; error?: string }>
+  abort(): Promise<boolean>
+  reset(): Promise<boolean>
+  approve(id: string, ok: boolean): Promise<boolean>
+  getState(): Promise<{ busy: boolean }>
+  onEvent(cb: (e: CopilotEvent) => void): () => void
+}
+
 export interface RelayBridge {
   readonly apiBase: string | null
   readonly operatorToken: string
@@ -45,6 +84,8 @@ export interface RelayBridge {
   quit(): Promise<boolean>
   onBackendState(cb: (s: BackendState) => void): () => void
   onMenu(cb: (e: MenuEvent) => void): () => void
+  /** absent in shells older than 0.2 */
+  copilot?: RelayCopilotBridge
 }
 
 declare global {
