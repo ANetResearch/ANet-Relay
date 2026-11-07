@@ -13,11 +13,12 @@ import { useUi } from '@/store/ui'
 import { setHold } from '@/fleet/holds'
 import { usePrefs } from '@/settings/prefs'
 import { isWindowSource, sourceOf } from './bindings'
-import { engineActions, PAD_BOUND_EVENT, possessWith, releaseVehicle, sourceLabel } from './actions'
+import { engineActions, PAD_BOUND_EVENT, possessWith, releaseVehicle, setFireHandler, sourceLabel } from './actions'
 import { InputEngine, type EngineOutput } from './engine'
 import { FLIGHT_KEYS, type FlightKey, type GamepadLike } from './mapping'
 import { liveWriter, publishDevices, useInputUi, type HintCard } from './store'
 import { ct } from './strings'
+import { sendFire } from '@/arena/store'
 
 const TICK_MS = 20
 const MAX_HINTS = 2
@@ -143,6 +144,8 @@ function handleEvent(e: RelayEvent, aircraft: string, modeWatch: Map<string, num
 
 export function InputLayer() {
   useEventToasts()
+  // hold-to-fire goes to the arena over the stream (05 §7.4; WP-C hook, WP-D transport)
+  React.useEffect(() => setFireHandler((vehicle, on) => void sendFire(vehicle, on)), [])
   React.useEffect(() => {
     // sticks flow only while the window has focus (H2); an interaction proves focus even if no focus event came
     let focused = typeof document === 'undefined' ? true : document.hasFocus()

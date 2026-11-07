@@ -147,6 +147,7 @@ export const en = {
   'stage.layer.course': 'Course',
   'stage.layer.labels': 'Labels',
   'stage.layer.trails': 'Trails',
+  'stage.layer.arena': 'Arena',
   'stage.hud.roll': 'ROLL',
   'stage.hud.pitch': 'PITCH',
   'stage.hud.yaw': 'YAW',

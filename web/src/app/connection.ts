@@ -4,6 +4,7 @@
 import { api, env, installStream, RelayStream, type BackendState, type RelayEvent } from '@/api'
 import { handleUiCommand, reportNow } from '@/appctl'
 import { useRelay } from '@/store/relay'
+import { useArena } from '@/arena/store'
 import { useBoot } from './boot'
 
 export interface BackendWatch {
@@ -89,6 +90,7 @@ export function startConnection(): () => void {
       },
       onEvent: (ev) => useRelay.getState().applyEvents([ev]),
       onUiCommand: (cmd) => void handleUiCommand(cmd),
+      onArena: (a) => useArena.getState().applyArena(a),
       onState: (state, info) => {
         useRelay.getState().setConn(state, info)
         if (state === 'open') {

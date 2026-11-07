@@ -64,6 +64,8 @@ import type { AwaitReason, HintCard, HoldKind, HoldState } from './store'
 /** Axis change that counts as "moved a stick" after a pause (raw units). */
 export const RESUME_THRESHOLD = 0.2
 const PENDING_MS = 1500
+/** A held fire input is refreshed this often; the backend releases it 300 ms after the last (05 §7.4). */
+export { FIRE_REFRESH_MS } from './fire'
 
 export type EngineNotice =
   | { kind: 'realArm' }
@@ -452,7 +454,8 @@ export class InputEngine {
       }
       const slot = this.slots.find((s) => s.index === Number(f.source.slice(4)))
       if (!slot || !slot.connected || slot.learning) continue
-      if ((slot.kind !== 'transmitter' && slot.reading?.pressed.r1) || slot.mapped?.switches.fire) wanted.add(v.id)
+      // R1 alone: L1 + R1 stays the arm chord and never fires (WP-D binding)
+      if ((slot.kind !== 'transmitter' && slot.reading?.pressed.r1 && !slot.reading.pressed.l1) || slot.mapped?.switches.fire) wanted.add(v.id)
     }
     this.fire.tick(wanted, now, (id, on) => d.act.fire(id, on))
 

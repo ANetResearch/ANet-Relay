@@ -41,6 +41,12 @@
     "SessionOpened": {
       "$ref": "#/$defs/SessionOpened"
     },
+    "ArenaView": {
+      "$ref": "#/$defs/ArenaView"
+    },
+    "ArenaMessage": {
+      "$ref": "#/$defs/ArenaMessage"
+    },
     "UiState": {
       "$ref": "#/$defs/UiState"
     },
@@ -76,6 +82,8 @@
     "EventMessage",
     "ErrorMessage",
     "SessionOpened",
+    "ArenaView",
+    "ArenaMessage",
     "UiState",
     "UiCommandMessage",
     "UiStateMessage",
@@ -136,6 +144,336 @@
         "acked"
       ],
       "title": "Alert",
+      "type": "object"
+    },
+    "ArenaLocal": {
+      "properties": {
+        "ammo": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "hp": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "reloading": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "type": "object"
+        },
+        "reload": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "reload progress, 0..1",
+          "type": "object"
+        },
+        "down": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "type": "object"
+        },
+        "max_ammo": {
+          "type": "integer"
+        },
+        "max_hp": {
+          "type": "integer"
+        },
+        "score": {
+          "$ref": "#/$defs/ArenaScore"
+        }
+      },
+      "required": [
+        "ammo",
+        "hp",
+        "reloading",
+        "reload",
+        "down",
+        "max_ammo",
+        "max_hp",
+        "score"
+      ],
+      "title": "ArenaLocal",
+      "type": "object"
+    },
+    "ArenaMessage": {
+      "properties": {
+        "type": {
+          "const": "arena",
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/ArenaView"
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ],
+      "title": "ArenaMessage",
+      "type": "object"
+    },
+    "ArenaPeer": {
+      "properties": {
+        "id": {
+          "description": "the peer's install id, 16 hex digits",
+          "type": "string"
+        },
+        "callsign": {
+          "type": "string"
+        },
+        "seat": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rtt_ms": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "age_s": {
+          "type": "number"
+        },
+        "score": {
+          "$ref": "#/$defs/ArenaScore"
+        },
+        "vehicles": {
+          "items": {
+            "$ref": "#/$defs/ArenaVehicle"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "callsign",
+        "seat",
+        "rtt_ms",
+        "stale",
+        "age_s",
+        "score",
+        "vehicles"
+      ],
+      "title": "ArenaPeer",
+      "type": "object"
+    },
+    "ArenaScore": {
+      "properties": {
+        "hits": {
+          "type": "integer"
+        },
+        "downs": {
+          "type": "integer"
+        },
+        "deaths": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "hits",
+        "downs",
+        "deaths"
+      ],
+      "title": "ArenaScore",
+      "type": "object"
+    },
+    "ArenaShot": {
+      "description": "A bullet in flight: integrate from (p, v) at t0 with the shared 1/240 s integrator.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "mine": {
+          "type": "boolean"
+        },
+        "t0": {
+          "description": "backend wall clock at which p and v hold (same clock as Fleet.t)",
+          "type": "number"
+        },
+        "p": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "v": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "mine",
+        "t0",
+        "p",
+        "v"
+      ],
+      "title": "ArenaShot",
+      "type": "object"
+    },
+    "ArenaVehicle": {
+      "description": "A remote simulator, converted into this terminal's local frame (ENU m, radians).",
+      "properties": {
+        "key": {
+          "description": "<peer id>/sim-N",
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "z": {
+          "type": "number"
+        },
+        "vx": {
+          "type": "number"
+        },
+        "vy": {
+          "type": "number"
+        },
+        "vz": {
+          "type": "number"
+        },
+        "roll": {
+          "type": "number"
+        },
+        "pitch": {
+          "type": "number"
+        },
+        "yaw": {
+          "description": "rad, compass heading in the local frame",
+          "type": "number"
+        },
+        "throttle": {
+          "type": "number"
+        },
+        "armed": {
+          "type": "boolean"
+        },
+        "down": {
+          "type": "boolean"
+        },
+        "hp": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "x",
+        "y",
+        "z",
+        "vx",
+        "vy",
+        "vz",
+        "roll",
+        "pitch",
+        "yaw",
+        "throttle",
+        "armed",
+        "down",
+        "hp"
+      ],
+      "title": "ArenaVehicle",
+      "type": "object"
+    },
+    "ArenaView": {
+      "properties": {
+        "t": {
+          "type": "number"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "instance": {
+          "type": "string"
+        },
+        "seat": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "callsign": {
+          "type": "string"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "peers": {
+          "items": {
+            "$ref": "#/$defs/ArenaPeer"
+          },
+          "type": "array"
+        },
+        "shots": {
+          "items": {
+            "$ref": "#/$defs/ArenaShot"
+          },
+          "type": "array"
+        },
+        "local": {
+          "$ref": "#/$defs/ArenaLocal"
+        }
+      },
+      "required": [
+        "t",
+        "enabled",
+        "instance",
+        "seat",
+        "callsign",
+        "error",
+        "peers",
+        "shots",
+        "local"
+      ],
+      "title": "ArenaView",
       "type": "object"
     },
     "Attitude": {
@@ -598,7 +936,11 @@
             "procedure_step",
             "procedure_waiting",
             "procedure_finished",
-            "procedure_aborted"
+            "procedure_aborted",
+            "peer_joined",
+            "peer_left",
+            "arena_hit",
+            "arena_down"
           ],
           "type": "string"
         },

@@ -13,6 +13,8 @@ export interface StageLayers {
   course: boolean
   labels: boolean
   trails: boolean
+  /** LAN arena: remote aircraft, bullets and the scoreboard (05 §7.5, WP-D) */
+  arena: boolean
 }
 
 export interface StageState {
@@ -37,7 +39,7 @@ export interface StageState {
 }
 
 const KEY = 'relay.stage'
-const DEFAULT_LAYERS: StageLayers = { grid: true, safety: 'auto', course: true, labels: true, trails: true }
+const DEFAULT_LAYERS: StageLayers = { grid: true, safety: 'auto', course: true, labels: true, trails: true, arena: true }
 
 function load(): { view?: ViewMode; layers?: Partial<StageLayers> } {
   try {

@@ -93,6 +93,11 @@ class Settings:
     listen_port: int = 14550
     bridge_port: int = 14555
     last_network_ssid: str = ""
+    # LAN arena (05 §7, WP-D): off until the operator joins; the callsign defaults to the host name
+    peer_enabled: bool = False
+    peer_port: int = 47114
+    peer_callsign: str = ""
+    arena_auto_respawn: bool = True
     ui: dict[str, Any] = field(default_factory=dict)
     # WP-C simulator flight model (05 §5): the hover-assist default for new simulators and turbulence 0..1.
     sim_hover_assist: bool = True
@@ -163,6 +168,11 @@ class Settings:
         for name in ("listen_port", "bridge_port"):
             if not 1 <= getattr(self, name) <= 65535:
                 return name
+        # LAN arena (05 §7.3, WP-D): its own port, never one of the MAVLink ports
+        if not 1024 <= self.peer_port <= 65535 or self.peer_port in (self.listen_port, self.bridge_port):
+            return "peer_port"
+        if len(self.peer_callsign) > 16:
+            return "peer_callsign"
         return None
 
     @classmethod

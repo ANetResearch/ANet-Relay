@@ -5,6 +5,8 @@ export type { ProcedureCatalogue, ProcedureEntry, ProcedureRun, ProcedureStep, P
 export type { ProcedureOptions } from './rest'
 export type { RelayEvent, EventKind } from './events'
 export { PROCEDURE_EVENTS, isProcedureEvent } from './events'
+// LAN arena (05 §7.5, WP-D)
+export type { ArenaView } from './types'
 export { api, request, setTransport, httpTransport, RelayApiError, toApiError } from './rest'
 export type { RestTransport, Method, Auth, StickFrame, PossessInput, Ok, SkillName, PlanAction, PlanStep } from './rest'
 export { env, readEnv, setEnv, normalizeApiBase, streamUrlFor } from './env'

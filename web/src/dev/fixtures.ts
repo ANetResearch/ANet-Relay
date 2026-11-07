@@ -6,6 +6,8 @@ import type { Alert, Fleet, FixtureName, RelayEvent, Vehicle } from '@/api'
 import { installStream, setTransport, type RestTransport } from '@/api'
 import { useRelay } from '@/store/relay'
 import { useBoot } from '@/app/boot'
+// WP-D: LAN arena stand-in (&arena=1 starts it enabled)
+import { startArenaFixture } from './arenaFixture'
 
 type V = Vehicle
 
@@ -192,8 +194,16 @@ export function startFixture(name: FixtureName): () => void {
     useRelay.getState().applyFleet({ ...fleet, t: now })
   }
 
+  // WP-D: arena stand-in
+  const arena = startArenaFixture()
+
   const transport: RestTransport = {
     async request(method, path, body) {
+      // WP-D: the arena toggle and settings
+      if (path === '/settings' && method === 'PUT') {
+        arena.settings(body)
+        return { ok: true }
+      }
       const m = path.match(/^\/vehicles\/([^/]+)\/(\w+)/)
       if (path === '/health') return { ok: true, version: '0.1.0-fixture', uptime_s: 1 }
       if (path === '/fleet') return fleet
@@ -288,5 +298,6 @@ export function startFixture(name: FixtureName): () => void {
   return () => {
     timers.forEach(clearTimeout)
     clearInterval(tick)
+    arena.stop() // WP-D
   }
 }

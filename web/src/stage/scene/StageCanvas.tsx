@@ -25,7 +25,7 @@ const EXPOSURE = 1.35
  * The window's CSP allows blob: images but not blob: fetches, and GLTFLoader's default ImageBitmapLoader fetches
  * embedded textures; the image-element TextureLoader (the Safari / Firefox path of GLTFLoader) loads them instead.
  */
-const imageTextures: NonNullable<Parameters<typeof useGLTF>[3]> = (loader) => {
+export const imageTextures: NonNullable<Parameters<typeof useGLTF>[3]> = (loader) => {
   loader.register((parser) => {
     const p = parser as unknown as { textureLoader: THREE.Loader; options: { manager: THREE.LoadingManager; crossOrigin?: string } }
     const tl = new THREE.TextureLoader(p.options.manager)

@@ -11,7 +11,7 @@ import {
   PanelRightOpen, Pause, Play, Plus, Radar, RefreshCw, RotateCcw, Route, Scan, ScanSearch, Search, Server, Settings,
   SignalHigh, SignalZero, SlidersHorizontal, Square, SquareDashed, Target, Terminal, Timer, Trash, TriangleAlert, Video,
   VideoOff, Wifi, WifiOff, X, BatteryFull, BatteryMedium, BatteryLow, BatteryWarning, Drone, ArrowDownUp, Ellipsis,
-  Plane, PlaneTakeoff, PlaneLanding, Crosshair, Network, Power, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
+  Plane, PlaneTakeoff, PlaneLanding, Crosshair, Network, Link2Off, Power, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
   ArrowUpToLine, ArrowDownToLine, RotateCw, ListOrdered, Sparkles, SendHorizontal, Hourglass, KeyRound, Stethoscope,
 } from 'lucide'
 import type { IconNode } from './types'
@@ -108,6 +108,8 @@ export const ICONS = {
   'power': Power,
   'video': Video,
   'square': Square,
+  // LAN arena (05 §7.1, WP-D): in the arena / not in the arena
+  'arena': Network,
 } as const satisfies Record<string, IconNode>
 
 export type IconKey = keyof typeof ICONS
@@ -129,4 +131,5 @@ export const PARTNERS: Partial<Record<IconKey, IconNode>> = {
   'wifi': WifiOff,
   'video': VideoOff,
   'notify': BellRing,
+  'arena': Link2Off,
 }

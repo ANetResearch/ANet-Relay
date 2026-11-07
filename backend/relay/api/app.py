@@ -19,6 +19,7 @@ from ..fleet import FleetService
 from . import (
     routes_agents,
     routes_app,
+    routes_arena,
     routes_control,
     routes_device,
     routes_fleet,
@@ -120,5 +121,6 @@ def create_app(
     for module in (routes_fleet, routes_control, routes_device, routes_agents, routes_records, routes_app):
         app.include_router(module.router, prefix=API_PREFIX)
     app.include_router(routes_procedures.router, prefix=API_PREFIX)  # bench procedures (WP-B)
+    app.include_router(routes_arena.router, prefix=API_PREFIX)  # WP-D: LAN arena
     app.include_router(stream.router, prefix=API_PREFIX)
     return app

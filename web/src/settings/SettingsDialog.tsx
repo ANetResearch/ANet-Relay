@@ -22,6 +22,7 @@ import { applyBackendUi, setPrefs, usePrefs, type StartView, type Units } from '
 import type { BootMode } from '@/app/bootFilm'
 import { CopilotSettings } from '@/copilot/CopilotSettings'
 import { ControllerSettings, SimSettings } from '@/control/ControllerSettings'
+import { ArenaSettings } from '@/arena/ArenaSettings'
 import './settings.css'
 
 export interface SettingsDialogProps {
@@ -42,6 +43,10 @@ interface BackendSettings {
   listen_port: number
   bridge_port: number
   stick_timeout_s: number
+  // LAN arena (05 §7, WP-D)
+  peer_callsign?: string
+  peer_port?: number
+  arena_auto_respawn?: boolean
   restart_fields?: string[]
   data_dir?: string | null
   ui?: Record<string, unknown>
@@ -304,6 +309,7 @@ function Network({ s, save }: { s: BackendSettings; save(p: Partial<BackendSetti
       <Row label={t('set.autoParams')}>
         <Switch checked={s.auto_params} onCheckedChange={(v) => void save({ auto_params: v })} aria-label={t('set.autoParams')} />
       </Row>
+      <ArenaSettings s={s} save={save} />
     </>
   )
 }

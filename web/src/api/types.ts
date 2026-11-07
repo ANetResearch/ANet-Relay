@@ -18,6 +18,8 @@ export interface RelaySchema {
   EventMessage: EventMessage
   ErrorMessage: ErrorMessage
   SessionOpened: SessionOpened
+  ArenaView: ArenaView
+  ArenaMessage: ArenaMessage
   UiState: UiState
   UiCommandMessage: UiCommandMessage
   UiStateMessage: UiStateMessage
@@ -553,6 +555,10 @@ export interface Event {
     | 'procedure_waiting'
     | 'procedure_finished'
     | 'procedure_aborted'
+    | 'peer_joined'
+    | 'peer_left'
+    | 'arena_hit'
+    | 'arena_down'
   vehicle: string | null
   session: string | null
   text_en: string
@@ -636,6 +642,136 @@ export interface SessionOpened {
   name: string
   token: string
   lease_s: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ArenaView".
+ */
+export interface ArenaView {
+  t: number
+  enabled: boolean
+  instance: string
+  seat: number | null
+  callsign: string
+  error: string | null
+  peers: ArenaPeer[]
+  shots: ArenaShot[]
+  local: ArenaLocal
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ArenaPeer".
+ */
+export interface ArenaPeer {
+  /**
+   * the peer's install id, 16 hex digits
+   */
+  id: string
+  callsign: string
+  seat: number | null
+  rtt_ms: number | null
+  stale: boolean
+  age_s: number
+  score: ArenaScore
+  vehicles: ArenaVehicle[]
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ArenaScore".
+ */
+export interface ArenaScore {
+  hits: number
+  downs: number
+  deaths: number
+}
+/**
+ * A remote simulator, converted into this terminal's local frame (ENU m, radians).
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ArenaVehicle".
+ */
+export interface ArenaVehicle {
+  /**
+   * <peer id>/sim-N
+   */
+  key: string
+  label: string
+  x: number
+  y: number
+  z: number
+  vx: number
+  vy: number
+  vz: number
+  roll: number
+  pitch: number
+  /**
+   * rad, compass heading in the local frame
+   */
+  yaw: number
+  throttle: number
+  armed: boolean
+  down: boolean
+  hp: number
+}
+/**
+ * A bullet in flight: integrate from (p, v) at t0 with the shared 1/240 s integrator.
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ArenaShot".
+ */
+export interface ArenaShot {
+  id: string
+  owner: string
+  mine: boolean
+  /**
+   * backend wall clock at which p and v hold (same clock as Fleet.t)
+   */
+  t0: number
+  /**
+   * @minItems 3
+   * @maxItems 3
+   */
+  p: [number, number, number]
+  /**
+   * @minItems 3
+   * @maxItems 3
+   */
+  v: [number, number, number]
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ArenaLocal".
+ */
+export interface ArenaLocal {
+  ammo: {
+    [k: string]: number | undefined
+  }
+  hp: {
+    [k: string]: number | undefined
+  }
+  reloading: {
+    [k: string]: boolean | undefined
+  }
+  /**
+   * reload progress, 0..1
+   */
+  reload: {
+    [k: string]: number | undefined
+  }
+  down: {
+    [k: string]: boolean | undefined
+  }
+  max_ammo: number
+  max_hp: number
+  score: ArenaScore
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ArenaMessage".
+ */
+export interface ArenaMessage {
+  type: 'arena'
+  data: ArenaView
 }
 /**
  * What the Relay window currently shows (04 §3.1).
