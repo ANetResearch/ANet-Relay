@@ -18,6 +18,7 @@ files:
   - "!electron/copilot/agent.mjs"
   - "!electron/copilot/tools-*.mjs"
   - "!electron/copilot/test/**"
+  - "!electron/test/**"
   - web/dist/**/*
   - brand/icon.png
 extraResources:
@@ -45,6 +46,16 @@ mac:
     NSCameraUsageDescription: ANet Relay shows the video feed from a connected capture device.
     NSLocalNetworkUsageDescription: ANet Relay discovers and controls aircraft on the local network over MAVLink.
 
+# DMG window (05 §3): brand/dmg-background.png (660 x 420) with its @2x twin, app on the left, Applications on the
+# right. The art keeps the label band (y 290-320) dark enough for the white icon labels.
+dmg:
+  background: brand/dmg-background.png
+  iconSize: 112
+  window: { width: 660, height: 420 }
+  contents:
+    - { x: 180, y: 236, type: file }
+    - { x: 480, y: 236, type: link, path: /Applications }
+
 linux:
   target:
     - target: tar.gz
@@ -67,3 +78,7 @@ nsis:
   perMachine: false
   allowToChangeInstallationDirectory: true
   artifactName: ANet-Relay-${version}-${os}-${arch}.${ext}
+  # wizard art (05 §3): 164 x 314 sidebar on the welcome and finish pages, 150 x 57 header, 24-bit BMP
+  installerSidebar: brand/installer-sidebar.bmp
+  uninstallerSidebar: brand/installer-sidebar.bmp
+  installerHeader: brand/installer-header.bmp
