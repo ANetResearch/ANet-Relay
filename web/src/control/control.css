@@ -1,0 +1,51 @@
+/* WP7 surfaces (02 §5, §7, §9). Colours only through theme.css tokens; motion through the motion tokens and degraded
+   under html[data-motion="reduced" | "off"]. */
+@layer components {
+  /* controller hint card (02 §7.2): opacity + translateY 12 -> 0 in, translateY 8 + opacity out, fast */
+  .pad-hint { animation: pad-hint-in var(--duration-fast) var(--ease-smooth-out) backwards; }
+  .pad-hint[data-leaving] { opacity: 0; translate: 0 8px; transition: opacity var(--duration-fast) var(--ease-smooth-out), translate var(--duration-fast) var(--ease-smooth-out); }
+  @keyframes pad-hint-in { from { opacity: 0; translate: 0 12px; } }
+
+  /* line-drawn DualSense: strokes draw in (very slow 500 ms), then the two stick dots light up 80 ms apart */
+  .pad-glyph path, .pad-glyph rect, .pad-glyph circle.pad-glyph-line { stroke-dasharray: 1; stroke-dashoffset: 0; }
+  .pad-glyph[data-draw] path, .pad-glyph[data-draw] rect, .pad-glyph[data-draw] circle.pad-glyph-line {
+    animation: pad-glyph-draw var(--duration-very-slow) var(--ease-smooth-out) backwards;
+  }
+  .pad-glyph[data-draw] .pad-glyph-dot { animation: pad-glyph-dot var(--duration-quick) var(--ease-smooth-out) backwards; animation-delay: var(--duration-very-slow); }
+  .pad-glyph[data-draw] .pad-glyph-dot + .pad-glyph-dot { animation-delay: calc(var(--duration-very-slow) + 80ms); }
+  @keyframes pad-glyph-draw { from { stroke-dashoffset: 1; } }
+  @keyframes pad-glyph-dot { from { opacity: 0; } }
+
+  /* on-screen sticks (02 §5.3): 96 x 96 boxes, 1 px g700 frame, g800 crosshair, 8 px g50 dot, throttle bar 8 x 96 */
+  .stick-box { position: relative; width: 96px; height: 96px; flex: none; border: 1px solid var(--g700); border-radius: 4px; background: var(--g900); touch-action: none; }
+  .stick-box::before, .stick-box::after { content: ""; position: absolute; background: var(--g800); pointer-events: none; }
+  .stick-box::before { left: 50%; top: 0; bottom: 0; width: 1px; translate: -0.5px 0; }
+  .stick-box::after { top: 50%; left: 0; right: 0; height: 1px; translate: 0 -0.5px; }
+  .stick-box[data-interactive] { cursor: grab; }
+  .stick-box[data-dragging] { cursor: grabbing; border-color: var(--g500); }
+  [data-sticks][data-idle] .stick-dot { background: var(--g500); }
+  .stick-dot { position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 999px; background: var(--g50); z-index: 1; will-change: transform; }
+  .throttle-bar { position: relative; width: 8px; height: 96px; flex: none; border: 1px solid var(--g700); border-radius: 2px; background: var(--g900); overflow: hidden; }
+  .throttle-bar > i { position: absolute; left: 0; right: 0; bottom: 0; background: var(--g300); transform-origin: bottom; will-change: transform; height: 100%; }
+  .throttle-bar > b { position: absolute; left: -1px; right: -1px; height: 1px; background: var(--g400); z-index: 1; }
+
+  /* pads popover live preview: two 24 x 24 stick dots */
+  .pad-mini { position: relative; width: 24px; height: 24px; flex: none; border: 1px solid var(--g700); border-radius: 999px; }
+  .pad-mini > i { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 999px; background: var(--g200); will-change: transform; }
+
+  /* video picture-in-picture (02 §4.4, §9) */
+  .video-pip { position: absolute; z-index: 5; overflow: hidden; border-radius: var(--radius); background: var(--g950); }
+  .video-pip video, .video-thumb video { display: block; width: 100%; height: 100%; object-fit: contain; background: var(--g950); }
+  .video-pip-resize { position: absolute; width: 14px; height: 14px; z-index: 2; touch-action: none; }
+  .video-pip-resize::after { content: ""; position: absolute; inset: 3px; border: 1px solid var(--g500); border-width: 0 1px 1px 0; }
+  .video-pip[data-corner="br"] .video-pip-resize { left: 0; top: 0; cursor: nwse-resize; rotate: 180deg; }
+  .video-pip[data-corner="bl"] .video-pip-resize { right: 0; top: 0; cursor: nesw-resize; rotate: -90deg; }
+  .video-pip[data-corner="tr"] .video-pip-resize { left: 0; bottom: 0; cursor: nesw-resize; rotate: 90deg; }
+  .video-pip[data-corner="tl"] .video-pip-resize { right: 0; bottom: 0; cursor: nwse-resize; }
+  .video-pip[data-snapping] { transition: left var(--duration-fast) var(--ease-smooth-out), top var(--duration-fast) var(--ease-smooth-out); }
+}
+
+html:is([data-motion="reduced"], [data-motion="off"]) .pad-hint,
+html:is([data-motion="reduced"], [data-motion="off"]) .pad-glyph[data-draw] *,
+html:is([data-motion="reduced"], [data-motion="off"]) .pad-hint[data-leaving] { animation: none; transition: none; translate: none; }
+html:is([data-motion="reduced"], [data-motion="off"]) .video-pip[data-snapping] { transition: none; }

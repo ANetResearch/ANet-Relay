@@ -1,0 +1,29 @@
+/* Ring course surfaces (02 §10). Colours only through Graphite tokens. */
+@layer components {
+  .course-ring-no { display: block; transform: translate(-50%, 2px); font: 450 10px/12px var(--font-mono); color: var(--g500); user-select: none; }
+  .course-ring-no[data-featured] { color: var(--g400); }
+  .course-split { display: block; font: 500 13px/16px var(--font-mono); color: var(--g50); white-space: nowrap; user-select: none;
+    transition: opacity var(--duration-fast) var(--ease-smooth-out); }
+  .course-split[data-phase="out"] { opacity: 0; }
+
+  /* timing HUD (02 §10.4): 480 x 56 on the HUD surface, top centre of the stage */
+  .course-hud { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: max-content; min-width: 480px; max-width: min(560px, calc(100vw - 32px)); height: 56px; padding: 0 14px;
+    background: var(--hud); border: 1px solid var(--border); border-radius: var(--radius); white-space: nowrap; }
+  .course-hud-cell { display: flex; flex: none; align-items: baseline; gap: 6px; }
+  .course-hud-time { flex: none; }
+  .course-hud-name { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; color: var(--g300); }
+  .course-hud-val { font: 450 13px/18px var(--font-mono); font-variant-numeric: tabular-nums; color: var(--g100); }
+  .course-hud-time { font: 500 var(--text-hud-kpi)/var(--text-hud-kpi--line-height) var(--font-mono); font-variant-numeric: tabular-nums; color: var(--g50); }
+  .course-hud-msg { flex: 1; text-align: center; font-size: 12px; line-height: 16px; color: var(--g200); }
+  .course-hud[data-aborted] .course-hud-msg { color: var(--g50); }
+
+  /* completion card (02 §10.5): L3, 360 wide, stage centre */
+  .course-card { width: 360px; max-width: calc(100vw - 32px); padding: 16px; border-radius: calc(var(--radius) * 1.4); display: flex; flex-direction: column; gap: 12px; }
+  .course-card[data-enter] { animation: course-card-in var(--duration-fast) var(--ease-smooth-out) both; }
+  @keyframes course-card-in { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
+  html:is([data-motion="reduced"], [data-motion="off"]) .course-card[data-enter] { animation-name: course-card-fade; }
+  @keyframes course-card-fade { from { opacity: 0; } to { opacity: 1; } }
+  html[data-motion="off"] .course-card[data-enter] { animation: none; }
+  .course-card-total { font: 500 33px/40px var(--font-mono); font-variant-numeric: tabular-nums; color: var(--g50); letter-spacing: -0.02em; }
+  .course-best { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--g300); font-size: 10px; line-height: 12px; font-weight: 560; color: var(--g50); }
+}

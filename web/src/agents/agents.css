@@ -1,0 +1,26 @@
+/* Agents workspace (02 §12). Colours only through theme.css tokens. */
+@layer components {
+  .agent-row { display: flex; flex-direction: column; gap: 6px; padding: 10px 10px 10px 12px; border-radius: var(--radius); border: 1px solid transparent;
+    text-align: left; outline: none; transition: background-color var(--duration-quick) var(--ease-smooth-out); }
+  .agent-row:hover { background: oklch(from var(--g850) l c h / 0.55); }
+  .agent-row[data-selected] { background: var(--g850); border-color: var(--border); }
+  .agent-row:focus-visible { box-shadow: 0 0 0 2px oklch(from var(--g50) l c h / 0.25); }
+  html:is([data-motion="reduced"], [data-motion="off"]) .agent-row { transition: none; }
+
+  .lease-line { position: relative; display: block; height: 1px; overflow: hidden; background: var(--lf-track); }
+  .lease-line > i { position: absolute; inset: 0; background: var(--g400); transform-origin: left center; transition: transform 1s linear; }
+  html:is([data-motion="reduced"], [data-motion="off"]) .lease-line > i { transition: none; }
+
+  .code-block { margin: 0; padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--g950);
+    font: 450 11px/18px var(--font-mono); color: var(--g200); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+  .matrix tbody tr { border-bottom: 1px dotted var(--border); }
+  .matrix thead tr { border-bottom: 1px solid var(--foreground); }
+  /* state marks: claimed = solid g500, suspended = dashed ring g500, possessed = solid g50 */
+  .matrix-mark { display: inline-flex; width: 12px; height: 12px; align-items: center; justify-content: center; vertical-align: middle; }
+  .matrix-mark > i { display: block; width: 8px; height: 8px; border-radius: 999px; }
+  .matrix-mark[data-cell="claimed"] > i { background: var(--g500); }
+  .matrix-mark[data-cell="suspended"] > i { border: 1px dashed var(--g500); }
+  .matrix-mark[data-cell="possessed"] > i { background: var(--g50); }
+  .matrix-empty { display: inline-block; width: 4px; height: 1px; background: var(--g700); vertical-align: middle; }
+}

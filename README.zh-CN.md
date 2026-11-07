@@ -1,0 +1,233 @@
+<div align="center">
+
+<img src="brand/icon.png" alt="ANet Relay 图标" width="112" />
+
+<h3>ANet Relay</h3>
+
+ANet Relay 是面向局域网 Wi-Fi 小型无人机机群的桌面地面站，为人与智能体协同飞行的团队而建。它对标 QGroundControl，面向智能体机群：发现并连接网络内的每一架 MAVLink 飞机，展示每架飞机上报的全部信息；操作员可以用手柄或键盘附身任意一架，外部智能体和大语言模型通过本机 API 飞其余各架。操作员松手后，控制权接力交还给原先持有它的智能体。内置模拟器和虚拟穿环航线让整个闭环无需硬件即可运行；具备位置估计的真机也可以穿越同一组虚拟环。
+
+[![Release](https://img.shields.io/github/v/release/ANetResearch/ANet-Relay?label=release&color=1f1f1f)](https://github.com/ANetResearch/ANet-Relay/releases/latest)
+[![CI](https://github.com/ANetResearch/ANet-Relay/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ANetResearch/ANet-Relay/actions/workflows/ci.yml)
+[![Platforms](https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Linux-1f1f1f)](https://github.com/ANetResearch/ANet-Relay/releases/latest)
+[![Agent API](https://img.shields.io/badge/agent%20API-REST%20%C2%B7%20WS%20%C2%B7%20MCP-e0322d)](docs/agent-api.zh-CN.md)
+[![License](https://img.shields.io/badge/license-modified%20Apache--2.0-1f1f1f)](LICENSE)
+
+**[下载](https://github.com/ANetResearch/ANet-Relay/releases/latest)** · **[智能体接口](docs/agent-api.zh-CN.md)** ·
+[硬件配置](docs/hardware.zh-CN.md) ·
+[设计文档](docs/design/) ·
+[更新日志](CHANGELOG.md) · [ANet4D](https://github.com/ANetResearch/ANet4D) · [ANet](https://github.com/ANetResearch/ANet)
+
+[English](README.md) · **简体中文**
+
+</div>
+
+<br/>
+
+<img src="docs/media/hero.png" alt="ANet Relay 同时飞四架模拟机：操作员用键盘驾驶 SIM-1 穿越围网环线，智能体 harness-a 与 harness-b 控制其余三架" width="100%" />
+
+<sub>**截图。** 四架模拟机。操作员用键盘驾驶 SIM-1 穿越围网环线第 3 环，智能体 `harness-a` 与 `harness-b` 控制其余三架。底部的控制权时间线显示过去一分钟内每架飞机由谁控制。</sub>
+
+## 能力
+
+| 能力 | 说明 | 状态 |
+|---|---|---|
+| 机群链路 | 基于 UDP 的 MAVLink 2：监听 14550，扫描本地子网，按地址连接；每架飞机一条链路，分在线、降级、丢失三种状态 | 可用 |
+| 全量可见 | 姿态、高度、电池、GPS 与本地位置、模式、着陆状态、状态文本、原始 MAVLink 查看器、可检索可编辑的完整参数表、单机日志 | 可用 |
+| 附身 | 用 DualSense 或标准手柄、键盘或屏幕摇杆接管任意一架；多个手柄可同时飞多架 | 可用 |
+| 接力给智能体 | 附身始终优先，智能体的认领被挂起；松手后认领恢复，智能体收到 `relay_handback` | 可用 |
+| 智能体接口 | 本机 REST 与 WebSocket 接口：会话、认领、杆量、技能（起飞、降落、悬停、返航、前往）与事件；Python SDK；面向大语言模型的 MCP 服务器 | 可用 |
+| 模拟器 | 最多 8 架模拟机，行为与 ArduPilot 飞机一致，含动力学与电池模型；通过接口看与真机完全相同 | 可用 |
+| 穿环航线 | 虚拟环序列（围网环线、绕桩、爬升），含计时、分段与追尾视角；模拟机可飞，具备本地位置估计的真机也可飞 | 可用 |
+| 数传配网 | 四步向导，把新的 ESP8266 MAVLink 数传从自身热点迁移到团队网络 | 可用 |
+| 起飞前检查 | 链路、飞控、电池、prearm、地面站输入参数、杆向核对、桨叶、模式、失控保护与定位；真机解锁需输入 `ARM` | 可用 |
+| 飞行记录 | 每次飞行本地留存；曲线、控制轨、事件轨、三维回放，导出 CSV 与 JSON | 可用 |
+| 图传 | 每架飞机一路 UVC 采集卡画中画 | 可用 |
+| 语言 | 默认英文，一键切换简体中文，原生菜单同步切换 | 可用 |
+
+## 下载
+
+每个版本的安装包在 [Releases](https://github.com/ANetResearch/ANet-Relay/releases/latest) 页面。
+
+| 平台 | 文件 |
+|---|---|
+| macOS，Apple 芯片 | `ANet-Relay-<版本>-mac-arm64.zip` |
+| macOS，Intel | `ANet-Relay-<版本>-mac-x64.zip` |
+| Linux x64 | `ANet-Relay-<版本>-linux-x64.AppImage` 或 `.tar.gz` |
+
+请用 `SHA256SUMS.txt` 校验下载文件。macOS 版本为 ad-hoc 签名，不是 Developer ID 签名：首次启动前把应用移到“应用程序”，并移除隔离属性。
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/ANet Relay.app"
+```
+
+应用自带后端，运行时无需安装 Python 或 Node。
+
+## 快速开始
+
+1. 启动 ANet Relay。后端启动期间点亮 ANet 标识。
+2. 点击机群栏底部的 **Add sim** 添加模拟机；或直接插上手柄，它会绑定第一架空闲的模拟机，并提示进入穿环练习。
+3. 按 **P**（或在手柄上按住 **Options**）附身所选飞机。解锁、起飞、飞行；再按 **P** 释放。
+4. 让智能体来飞：在应用运行时执行示例。
+
+```sh
+git clone https://github.com/ANetResearch/ANet-Relay.git && cd ANet-Relay
+python3 sdk/python/examples/hover_sim.py         # 认领 sim-1，起飞、悬停、降落
+python3 sdk/python/examples/watch_handback.py    # 在应用里附身 sim-1，然后松手
+```
+
+SDK 与 MCP 服务器只依赖 Python 标准库。[智能体接口指南](docs/agent-api.zh-CN.md)介绍控制模型、全部端点、事件，以及从模拟机迁移到真机的步骤。
+
+## 飞行
+
+**真机。** ANet Relay 面向 Pixracer 级飞控（PX4 或 ArduPilot）加 ESP8266 `mavesp8266` Wi-Fi 数传的小型四旋翼，不使用遥控器：所有手动输入都通过 MAVLink 杆量模拟。用 **Connect… → Set up a new bridge** 把数传接入团队网络；网络内的飞机会自动出现在机群中。[硬件配置指南](docs/hardware.zh-CN.md)介绍接线、数传参数与飞控参数。
+
+**操作。**
+
+| 操作 | 键盘 | DualSense |
+|---|---|---|
+| 附身或释放 | `P` | Options 按住 1 秒 |
+| 油门与偏航 | `R` `F` / `Q` `E` | 左摇杆 |
+| 俯仰与横滚 | `W` `S` / `A` `D` | 右摇杆 |
+| 解锁或上锁（模拟机） | — | L1 + R1 按住 1 秒 |
+| 急停本机 | `Esc` | L2 + R2 同时按到底 |
+| 全部急停 | `⌘.` / `Ctrl+.` | — |
+| 飞行模式 | 检查器 | 三角 |
+| 穿环航线 | `G` | 方块 |
+| 命令面板 | `⌘K` / `Ctrl+K` | — |
+
+**急停语义。** 急停把油门置零 50 毫秒，然后申请上锁；它从不改变由谁控制飞机。释放附身即停止杆量输入：在 PX4 上 Relay 停止发送手动控制，而不是发送零油门。
+
+## 面向智能体
+
+每架飞机同一时刻至多一个控制者。智能体打开**会话**，**认领**飞机，用杆量或技能飞行。人一旦**附身**，始终优先；认领被挂起，所有控制调用返回 `possessed_by_human`，直到人松手，智能体收到 `relay_handback`，自行决定下一步。
+
+```python
+from anet_relay_client import RelayClient          # sdk/python，只依赖标准库
+
+with RelayClient() as relay:                         # http://127.0.0.1:8765
+    relay.open_session("my-agent")
+    relay.claim("sim-1")
+    relay.takeoff("sim-1", alt=1.2)
+    relay.course_start("sim-1", "cage-loop")
+    relay.land("sim-1")
+```
+
+大语言模型通过 MCP 接入：
+
+```sh
+claude mcp add anet-relay -- python3 /path/to/ANet-Relay/mcp/anet_relay_mcp.py --name claude-code
+```
+
+| 接口 | 地址 |
+|---|---|
+| REST | `http://127.0.0.1:8765/api/v1`（取 8765 到 8775 中第一个空闲端口） |
+| WebSocket | `ws://127.0.0.1:8765/api/v1/stream` |
+| OpenAPI | `http://127.0.0.1:8765/openapi.json`，交互式文档在 `/docs` |
+| MCP | `mcp/anet_relay_mcp.py`，stdio，15 个工具 |
+| Python SDK | `sdk/python/anet_relay_client.py` 与四个示例 |
+
+接口只监听本机回环地址。智能体用同一组调用控制模拟机和真机；真机另需操作员完成起飞前步骤，并传入 `confirm: "ARM"`。
+
+## 功能导览
+
+### 附身与接力
+
+<img src="docs/media/relay.png" alt="SIM-2 交还给 harness-a：交还提示、检查器中的智能体标签与控制权时间线" width="100%" />
+
+底部的控制权时间线为每架飞机一条泳道：白色为操作员，灰色为智能体，空白为无人控制。从智能体手中接管飞机无需确认，因为操作员必须能立即接管。松手后控制权交还给认领被挂起的智能体，控制者标签从 **You** 形变为智能体名称。飞机在空中却无人控制时，会出现常驻告警。
+
+<sub>**截图。** 操作员刚刚释放 SIM-2，控制权交还给 `harness-a`。</sub>
+
+### 手柄
+
+<img src="docs/media/gamepad.png" alt="DualSense 接入卡片：线描手柄、Controller 1 正在飞 SIM-1，以及进入穿环练习的按钮" width="100%" />
+
+插上手柄时，提示卡片逐笔描出一只 DualSense，两个摇杆依次点亮，被绑定飞机脚下的圆环扩散一次。手柄只会自动绑定模拟机；绑定真机始终需要明确操作。最多四个手柄同时飞四架飞机。手柄断开时，Relay 立即停止其杆量流，空中的模拟机转入悬停，并等待同一手柄三秒，超时再释放飞机。
+
+### 穿环航线
+
+<img src="docs/media/course.png" alt="追尾视角跟随 SIM-1 接近围网环线第 3 环，带计时" width="100%" />
+
+环分为下一个、之后、已通过三种状态，以形状和亮度区分，从不用红色。每次过环，环体闪亮，环心弹出分段时间；HUD 显示环数、用时、上一分段与最佳成绩，完成卡列出全部分段。追尾视角像 FPV 模拟器一样跟随飞机。智能体可以通过接口飞同一条航线（`course_sim.py`）。真机在以 5 Hz 及以上上报本地位置时可以穿越虚拟环；否则航线不可用，Relay 会说明原因。
+
+<img src="docs/media/course-finish-zh.png" alt="中文界面的完成卡：新纪录与四个分段" width="100%" />
+
+<sub>**截图。** 中文界面下的完成卡，刷新了最佳成绩。</sub>
+
+### 智能体工作区
+
+<img src="docs/media/agents.png" alt="智能体工作区：会话、认领矩阵、最近调用，以及接口地址和 MCP 命令" width="100%" />
+
+智能体工作区列出在线会话及其租约、飞机与控制者的认领矩阵、每个会话最近的调用（状态与耗时），以及智能体需要的各个地址，包括可直接复制的 MCP 命令。
+
+### 记录与回放
+
+<img src="docs/media/records.png" alt="记录工作区：电压、高度、横滚俯仰、油门曲线，事件轨与控制轨，以及三维回放" width="100%" />
+
+每次飞行存入本地 SQLite 数据库：遥测、事件、控制权变化与穿环成绩。打开一条记录即可看到同步的曲线以及事件轨、控制轨；可按 1×、4×、16× 三维回放，或导出 CSV 与 JSON。
+
+### 数传配网
+
+<img src="docs/media/bridge.png" alt="添加飞机对话框，数传向导第 1 步：连接飞机热点" width="100%" />
+
+出厂的数传以热点模式启动。向导读取其设置，通过数传自带的设置接口写入团队网络的名称、密码与端口，重启数传，并等待飞机在团队网络上重新出现。
+
+## 安全
+
+ANet Relay 会驱动真机。只在带软垫地面的围网区域内、装好桨叶保护罩后飞行；Relay 窗口前始终有操作员；每架飞机首飞前拆下桨叶核对杆向。附身、**Stop** 与 **Stop all** 随时覆盖任何智能体。起飞前检查在链路、电池、prearm 检查与地面站输入参数（ArduPilot 的 `MAV_GCS_SYSID`、`RC_OVERRIDE_TIME`，PX4 的 `COM_RC_IN_MODE`）就绪之前阻止解锁。STABILIZE 模式下没有定高定点：无人控制的飞机会保持最后的油门，直到飞控的失控保护介入。
+
+## 从源码构建
+
+需要 Python 3.12 与 Node 22.12 及以上。
+
+```sh
+git clone https://github.com/ANetResearch/ANet-Relay.git && cd ANet-Relay
+python3.12 -m venv .venv && .venv/bin/pip install -e "./backend[dev]"
+npm ci && npm ci --prefix web
+npm run dev                 # Vite、Electron 与后端，共用一个操作员令牌
+npm test                    # 后端 pytest、前端单测与构建、端到端测试
+npm run dist:mac            # 或 dist:linux；安装包输出到 release/
+```
+
+后端可单独运行：`.venv/bin/python -m relay --dev`。推送 `v*` 标签后，GitHub Actions 构建 macOS（arm64、x64）与 Linux 安装包，并以 [CHANGELOG](CHANGELOG.md) 中对应章节为说明发布。
+
+## 仓库结构
+
+| 路径 | 内容 |
+|---|---|
+| `electron/` | 桌面外壳：窗口、`app://relay` 协议、原生菜单、后端守护 |
+| `backend/relay/` | MAVLink 链路与驱动、控制权、会话与技能、模拟器、穿环航线、起飞前检查、历史记录、REST 与 WebSocket 接口 |
+| `web/` | 界面：React、three.js 舞台、ANet Graphite 主题、中英文 |
+| `sdk/python/`、`mcp/` | Python SDK 与示例；MCP 服务器 |
+| `tools/fakes/` | 无硬件联调用的假数传与假飞控 |
+| `e2e/` | Playwright 测试，以及三种窗口尺寸、两种语言的逐屏走查 |
+| `docs/design/` | 产品、体验与系统设计 |
+
+<details>
+<summary><b>与 ANet 的关系</b></summary>
+
+<br/>
+
+ANet Relay 属于 Agent Network Research 的 ANet 生态，与 [ANet](https://github.com/ANetResearch/ANet)、[ANet4D](https://github.com/ANetResearch/ANet4D) 并列。ANet4D 在城市尺度上仿真协同具身智能体；ANet Relay 让同一理念落到台架上的真机：智能体飞行，人随时接管，控制权在两者之间按同一套规则接力。
+
+</details>
+
+## 许可与署名
+
+- **代码。** 以 **ANet Open Source License** 发布，这是一份修改版 Apache License 2.0。须保留全部 ANet 标识与版权声明。完整条款见 [LICENSE](LICENSE)。
+- **飞机模型。** 三维飞机为 Caddx GoFilm20 机架模型，仅用于可视化。
+
+## 致谢
+
+ANet Relay 构建于 [Electron](https://www.electronjs.org)、[pymavlink](https://github.com/ArduPilot/pymavlink)、[FastAPI](https://fastapi.tiangolo.com)、[three.js](https://threejs.org)、[React Three Fiber](https://github.com/pmndrs/react-three-fiber)、[ArduPilot](https://ardupilot.org)、[PX4](https://px4.io) 与 [mavesp8266](https://github.com/dogmaphobic/mavesp8266) 之上。QGroundControl 为地面站应展示什么树立了标准。
+
+## 参与贡献
+
+欢迎用中文或英文提交 issue 与 pull request。涉及控制模型、智能体接口或急停语义的改动须先开 issue；`npm test` 是合并门槛。
+
+<div align="center">
+<br/>
+<img src="docs/media/anet-avatar.png" alt="Agent Network Research" width="48" />
+<br/>
+<sub>Agent Network Research</sub>
+</div>

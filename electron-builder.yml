@@ -1,0 +1,62 @@
+# electron-builder 26.18.0 configuration (03 §13).
+# Build through the npm scripts (dist:mac / dist:linux / dist:win), which build the
+# web interface and the PyInstaller backend first and select the host architecture.
+appId: org.agentnetwork.relay
+productName: ANet Relay
+copyright: Copyright © 2026 Agent Network
+artifactName: ANet-Relay-${version}-${os}-${arch}.${ext}
+asar: true
+npmRebuild: false
+directories:
+  output: release
+  buildResources: brand
+files:
+  - package.json
+  - electron/**/*
+  - "!electron/**/*.d.ts"
+  - web/dist/**/*
+  - brand/icon.png
+extraResources:
+  # PyInstaller onedir output of backend/relay-backend.spec (npm run build:backend).
+  - from: pyi-dist/anet-relay-backend
+    to: backend
+# No auto-update feed: releases are downloaded from GitHub by hand.
+publish: null
+# Ad-hoc signature for macOS. With identity null electron-builder skips signing and
+# never calls afterSign, so this runs as afterPack (before the zip is made).
+afterPack: scripts/after-pack.cjs
+
+mac:
+  target:
+    - target: zip
+  icon: brand/icon.icns
+  category: public.app-category.developer-tools
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  extendInfo:
+    NSCameraUsageDescription: ANet Relay shows the video feed from a connected capture device.
+    NSLocalNetworkUsageDescription: ANet Relay discovers and controls aircraft on the local network over MAVLink.
+
+linux:
+  target:
+    - target: tar.gz
+    - target: AppImage
+  icon: brand/icon.png
+  category: Utility
+  executableName: anet-relay
+  syncDesktopName: true
+  synopsis: Ground control for agent swarms
+  description: Desktop ground control for small MAVLink aircraft on a local network, with human possession and agent handback.
+
+win:
+  target:
+    - target: nsis
+  icon: brand/icon.ico
+  executableName: ANet Relay
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ANet-Relay-${version}-${os}-${arch}.${ext}

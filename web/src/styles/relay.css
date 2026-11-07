@@ -1,0 +1,114 @@
+/* ANet Relay shell and primitive styles (02 §2, §4, §15, §18). Colours only through theme.css tokens. */
+@layer base {
+  html, body, #root { height: 100%; }
+  body { background: var(--g950); overflow: hidden; user-select: none; -webkit-user-select: none; }
+  input, textarea, [data-selectable] { user-select: text; -webkit-user-select: text; }
+  ::selection { background: oklch(from var(--g50) l c h / 0.18); }
+  /* 02 §2.2: Chinese small labels are not upper-cased and carry no tracking */
+  html[data-lang="zh"] .cap { text-transform: none; letter-spacing: 0; }
+}
+
+@layer components {
+  /* type roles (02 §2.2) */
+  .cap { font-size: var(--text-hud-cap); line-height: var(--text-hud-cap--line-height); letter-spacing: 0.08em; font-weight: 560; text-transform: uppercase; color: var(--g500); }
+  .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums lining-nums; font-feature-settings: "zero" 1; }
+  .addr { font: 450 11px/16px var(--font-mono); color: var(--g300); }
+
+  /* surfaces (02 §2.1) */
+  .l1 { background: var(--g900); border: 1px solid var(--border); }
+  .l2 { background: var(--g850); border: 1px solid var(--border); }
+  .l3 { background: var(--popover); border: 1px solid var(--l3-border); box-shadow: var(--l3-shadow); }
+  .hud-surface { background: var(--hud); border: 1px solid var(--border); }
+
+  /* window drag region (Electron hiddenInset title bar) */
+  .drag { -webkit-app-region: drag; app-region: drag; }
+  .no-drag, .drag button, .drag a, .drag input, .drag [role="button"], .drag [role="radio"], .drag [role="group"] { -webkit-app-region: no-drag; app-region: no-drag; }
+
+  /* shell grid (02 §4.1) */
+  .shell { position: fixed; inset: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--topbar-h) auto minmax(0, 1fr) auto; background: var(--g950); }
+  .shell-main { position: relative; grid-row: 3; min-height: 0; padding: 0 var(--shell-gap); }
+  .shell > header { grid-row: 1; }
+  .shell > .alert-bar { grid-row: 2; }
+  .shell > .shell-timeline { grid-row: 4; }
+  .shell-timeline { height: var(--timeline-h); transition: height var(--duration-fast) var(--ease-smooth-out); }
+  .shell-timeline[data-collapsed] { height: var(--timeline-h-collapsed); }
+  html:is([data-motion="reduced"], [data-motion="off"]) .shell-timeline { transition: none; }
+
+  /* resizable separators: an 8 px gutter with a hairline on hover / drag */
+  .gutter { position: relative; width: var(--shell-gap); flex: none; outline: none; background: transparent; }
+  .gutter::after { content: ""; position: absolute; inset: 12px auto 12px 50%; width: 1px; translate: -50% 0; background: transparent; transition: background-color var(--duration-quick) var(--ease-smooth-out); }
+  .gutter:hover::after, .gutter[data-separator="active"]::after, .gutter:focus-visible::after { background: var(--g600); }
+  .gutter[data-disabled]::after { display: none; }
+
+  /* collapsed panel strip (02 §4.1: a 28 px vertical strip that opens the panel) */
+  .strip { display: flex; height: 100%; width: 100%; flex-direction: column; align-items: center; gap: 12px; padding-top: 10px; border-radius: var(--radius); color: var(--g400); background: var(--g900); border: 1px solid var(--border); }
+  .strip:hover { color: var(--g100); background: var(--g850); }
+  .strip-label { writing-mode: vertical-rl; font-size: var(--text-hud-cap); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 560; }
+  /* CJK: one character per line in horizontal mode (vertical-rl glyph metrics are unreliable in the CJK fallback font) */
+  html[data-lang="zh"] .strip-label { writing-mode: horizontal-tb; width: 1em; word-break: break-all; line-height: 1.25; text-align: center; text-transform: none; letter-spacing: 0; }
+
+  /* panel entrance after boot (02 §15: translateY 6 -> 0 + opacity, fast, stagger 40) */
+  .enter { animation: relay-enter var(--duration-fast) var(--ease-smooth-out) backwards; animation-delay: calc(var(--enter-i, 0) * var(--duration-stagger)); }
+  @keyframes relay-enter { from { opacity: 0; translate: 0 var(--distance-small); } }
+  html:is([data-motion="reduced"], [data-motion="off"]) .enter { animation: none; }
+
+  /* link dot (02 §2.3) */
+  .link-dot { flex: none; width: 8px; height: 8px; overflow: visible; }
+
+  /* battery bar (02 §4.3): 5 cells 6 x 8, gap 2 */
+  .battery { display: inline-flex; gap: 2px; align-items: center; }
+  .battery > i { display: block; width: 6px; height: 8px; border-radius: 1px; background: var(--g700); }
+  .battery > i[data-on] { background: var(--g200); }
+  .battery[data-level="critical"][data-tone="red"] > i[data-on] { background: var(--r500); }
+  .battery[data-level="critical"][data-tone="strong"] > i[data-on] { background: var(--g50); }
+  .battery[data-level="warn"] > i[data-last] { animation: relay-blink 1000ms var(--ease-in-out) infinite; }
+  @keyframes relay-blink { 50% { opacity: 0.4; } }
+  html:is([data-motion="reduced"], [data-motion="off"]) .battery > i[data-last] { animation: none; }
+  @media (prefers-reduced-motion: reduce) { .battery > i[data-last] { animation: none; } }
+
+  /* controller pill (02 §2.3, §5.4): width morph + cross-fade */
+  .pill { position: relative; display: inline-grid; height: 18px; align-items: center; overflow: hidden; border-radius: 999px; border: 1px solid transparent;
+    font: 560 10px/16px var(--font-mono); letter-spacing: 0.02em; white-space: nowrap; vertical-align: middle;
+    transition: width var(--duration-fast) var(--ease-smooth-out), background-color var(--duration-fast) var(--ease-smooth-out),
+      border-color var(--duration-fast) var(--ease-smooth-out), color var(--duration-fast) var(--ease-smooth-out); }
+  .pill > span { grid-area: 1 / 1; display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; transition: opacity var(--duration-fast) var(--ease-smooth-out); }
+  .pill > span[data-leaving] { opacity: 0; }
+  .pill > span[data-entering] { animation: relay-fade-in var(--duration-fast) var(--ease-smooth-out) backwards; }
+  @keyframes relay-fade-in { from { opacity: 0; } }
+  .pill[data-variant="human"] { background: var(--g50); color: var(--g950); border-color: var(--g50); }
+  .pill[data-variant="agent"] { background: var(--g800); color: var(--g200); border: 1px dashed var(--g500); }
+  .pill[data-variant="waiting"] { background: var(--g800); color: var(--g500); border: 1px dashed var(--g500); }
+  .pill[data-variant="disconnected"] { background: var(--g850); color: var(--g300); border-color: var(--g500); }
+  .pill [data-icon] { width: 10px; height: 10px; }
+  html:is([data-motion="reduced"], [data-motion="off"]) .pill, html:is([data-motion="reduced"], [data-motion="off"]) .pill > span { transition: none; }
+
+  /* SIM tag (02 §2.3) */
+  .sim-tag { display: inline-flex; height: 14px; align-items: center; padding: 0 3px; border: 1px solid var(--g600); border-radius: 2px; font: 560 10px/12px var(--font-mono); color: var(--g300); letter-spacing: 0.04em; }
+
+  /* hold-to-confirm line (02 §7.5): 1 px g50 from left to right, no residue on release */
+  .hold-line { position: relative; height: 1px; width: 100%; overflow: hidden; }
+  .hold-line > i { position: absolute; inset: 0; background: var(--g50); transform-origin: left center; transform: scaleX(0); }
+  .hold-line[data-active] > i { animation: relay-hold var(--hold-ms, 1000ms) linear forwards; }
+  @keyframes relay-hold { to { transform: scaleX(1); } }
+
+  /* placeholder boxes for work packages still to come */
+  .placeholder { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 56px;
+    border: 1px dashed var(--g700); border-radius: var(--radius); color: var(--g500); background: oklch(from var(--g900) l c h / 0.4); text-align: center; padding: 12px; }
+  .placeholder-name { font: 500 11px/16px var(--font-mono); color: var(--g300); }
+
+  /* alert bar (02 §14) */
+  .alert-bar { position: relative; display: flex; align-items: center; gap: 12px; height: var(--alertbar-h); margin: 0 var(--shell-gap) var(--shell-gap); padding: 0 8px 0 14px;
+    background: var(--g900); border: 1px solid var(--border); border-radius: var(--radius); color: var(--g50); overflow: hidden; }
+  .alert-bar::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 2px; background: var(--g50); }
+  .alert-bar[data-tone="red"]::before { background: var(--r500); }
+
+  /* relay timeline (02 §4.5) */
+  .tl-canvas { display: block; width: 100%; height: 100%; contain: strict; }
+}
+
+/* Boot mask (02 §15). index.html inlines the critical subset so the first frame is g950 + logo before any script;
+   app/boot.ts takes over the same node. */
+@layer components {
+  #boot-mask[data-state="revealed"] { opacity: 0; pointer-events: none; }
+  #boot-mask .boot-actions:empty { display: none; }
+}

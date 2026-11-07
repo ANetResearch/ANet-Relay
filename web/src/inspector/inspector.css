@@ -1,0 +1,19 @@
+/* Inspector (02 §11). Colours only through theme.css tokens. */
+@layer components {
+  .kv-list { display: flex; flex-direction: column; }
+  .kv-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 24px;
+    border-bottom: 1px dotted var(--border); font-size: 12px; line-height: 16px; }
+  .kv-row:last-child { border-bottom: 0; }
+  .kv-row > dt { color: var(--g400); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kv-row > dd { font-family: var(--font-mono); font-variant-numeric: tabular-nums lining-nums; color: var(--g100); text-align: right; font-size: 11px; }
+
+  /* RC / servo channel bar: 1000..2000 us, centre tick at 1500 */
+  .ch-bar { position: relative; display: block; height: 6px; overflow: hidden; border-radius: 1px; background: var(--lf-track); }
+  .ch-bar > i { position: absolute; inset: 0; background: var(--g300); transform-origin: left center; }
+  .ch-bar > b { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: var(--g950); }
+
+  .param-row { border-bottom: 1px dotted var(--border); }
+  .param-scroll, .insp-scroll [data-slot="scroll-area-viewport"] { scrollbar-width: thin; scrollbar-color: var(--g700) transparent; }
+  .insp-scroll [data-slot="scroll-area-scrollbar"][data-orientation="vertical"] { width: 6px; padding: 1px; }
+  .raw-row:hover { background: oklch(from var(--g850) l c h / 0.6); }
+}

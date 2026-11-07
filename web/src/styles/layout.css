@@ -1,0 +1,16 @@
+/* ANet Relay layer and shell tokens (02 §2.1, §4.1). No colour values here: every colour comes from theme.css. */
+@layer theme {
+  :root {
+    --z-canvas: 0; --z-labels: 10; --z-viewport-ui: 20; --z-rails: 30; --z-header: 40; --z-banner: 50;
+    --z-overlay-page: 60; --z-dialog: 70; --z-popover: 80; --z-toast: 90; --z-mask: 100;
+    --topbar-h: 44px;
+    --alertbar-h: 32px;
+    --timeline-h: 104px;
+    --timeline-h-collapsed: 28px;
+    --shell-gap: 8px;
+    --strip-w: 28px;
+    --traffic-light-w: 76px;
+    --l3-shadow: 0 8px 24px oklch(0 0 0 / 0.35);
+    --l3-border: oklch(1 0 0 / 12%);
+  }
+}

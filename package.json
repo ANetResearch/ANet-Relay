@@ -1,0 +1,42 @@
+{
+  "name": "anet-relay",
+  "productName": "ANet Relay",
+  "version": "0.1.0",
+  "description": "ANet Relay - Ground control for agent swarms.",
+  "author": {
+    "name": "Agent Network",
+    "url": "https://agentnetwork.org.cn"
+  },
+  "homepage": "https://github.com/ANetResearch/ANet-Relay",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ANetResearch/ANet-Relay.git"
+  },
+  "license": "SEE LICENSE IN LICENSE",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.mjs",
+  "desktopName": "anet-relay.desktop",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "start": "npm run build:web && electron .",
+    "build:web": "node scripts/build-web.mjs",
+    "build:backend": "node scripts/build-backend.mjs",
+    "dist:mac": "node scripts/dist.mjs mac",
+    "dist:linux": "node scripts/dist.mjs linux",
+    "dist:win": "node scripts/dist.mjs win",
+    "icons": "node scripts/icons.mjs",
+    "test": "node scripts/test.mjs",
+    "test:e2e": "node scripts/test.mjs e2e",
+    "test:walkthrough": "node scripts/test.mjs walkthrough",
+    "media": "node scripts/test.mjs media"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "electron": "44.9.3",
+    "electron-builder": "26.18.0"
+  }
+}

@@ -1,0 +1,231 @@
+# ANet Relay 硬件接入指南
+
+本文说明如何把配套的小型四旋翼接入 ANet Relay：平台组成、Wi-Fi 数传配网、首飞流程、PX4 与 ArduPilot 的关键参数、失控保护，以及常见问题排查。文中以产品负责人的实际网络为例逐步演示，读者替换为自己的网络名称与地址即可。
+
+> **安全要求**：本平台没有配套遥控器，全部飞行指令经 Wi-Fi 数传以 MAVLink 发送。真机只能在四周设有阻拦网、地面铺有缓冲垫的场地内飞行；上述防护未落实前不得解锁。首次飞行前的所有检查都在无桨状态下完成。
+
+## 1. 平台组成
+
+| 部件 | 说明 |
+|---|---|
+| 飞控 | Pixracer 级飞控，运行 ArduPilot Copter 或 PX4（Relay 按心跳自动识别：`autopilot=3` 为 ArduPilot，`autopilot=12` 为 PX4） |
+| Wi-Fi 数传 | 板载 ESP8266，运行 mavesp8266 固件（设置页标题 "MAVLink WiFi Bridge"）；一侧经串口连接飞控，另一侧以 UDP 收发 MAVLink |
+| 电池 | 3S LiPo 850 mAh，XT30 接口；满电 12.6 V，正常使用范围 11.1–12.6 V；推荐以 0.8 A 平衡充电 |
+| 桨叶 | 两正两反，对角同向、相邻反向：左上 CW、右上 CCW、左下 CCW、右下 CW |
+| 图传 | 独立链路；地面端经 HDMI 转 USB 采集后在电脑上显示为视频设备（例如 "USB Video"），Relay 可将其绑定到对应飞机 |
+
+数据链路：
+
+```
+电脑 UDP 14550  ⇄  数传 UDP 14555（ESP8266）  ⇄  串口 921600  ⇄  飞控
+```
+
+- **Host Port 14550**：数传把 MAVLink 发往地面站的端口，即 Relay 在本机监听的 UDP 端口（设置项 `listen_port`，缺省 14550）。
+- **Client Port 14555**：数传自身接收 MAVLink 的端口，Relay 向 `<数传 IP>:14555` 发送心跳与指令。
+- **Baudrate 921600**：数传与飞控之间的串口速率，必须与飞控对应串口的设置一致。
+
+Relay 以 sysid 255、compid 190 的地面站身份发送全部报文，这一身份不可更改（原因见第 5 节）。
+
+## 2. 网络规划（示例）
+
+| 项目 | 示例值 | 说明 |
+|---|---|---|
+| 局域网名称（SSID） | `anet4d` | 路由器 WPA-PSK / WPA2-PSK，AES；必须开放 2.4 GHz 频段（ESP8266 不支持 5 GHz） |
+| 局域网网段 | `10.7.7.0/24` | 地面站电脑与数传位于同一网段 |
+| 飞机地址 | `10.7.7.36` | 建议在路由器中按 MAC 地址做 DHCP 保留 |
+| 数传 MAC | 见数传底部标签或 `/getstatus` | 用于 DHCP 保留与在路由器客户端列表中识别 |
+| 数传热点（AP） | `anet4d-a01`，信道 11 | 数传未接入局域网时自身发射的热点，地址固定为 `192.168.4.1` |
+| 出厂热点 | `Pixracer`，密码与名称相同 | 出厂状态；连接后电脑获得 `192.168.4.2` |
+| 端口与波特率 | Host 14550 · Client 14555 · 921600 | 与第 1 节一致 |
+
+本文档不记录任何 Wi-Fi 密码；以下步骤中以 `<局域网密码>` 与 `<热点密码>` 表示，请在操作时输入实际值。Relay 同样不保存密码：配网时只在本次写入中使用，界面只记住最近一次输入的网络名称。
+
+## 3. 数传配网
+
+mavesp8266 有两种工作模式：
+
+- **AccessPoint（AP）**：数传自身发射热点，电脑连接热点后与飞机通信。适合单机调试。
+- **Station（STA）**：数传加入现有局域网，多架飞机与地面站同处一个网络。Relay 的机群功能以此模式为前提。若在超时时间内未能接入指定网络，数传会自动回落到 AP 模式，因此配置错误不会导致飞机失联。
+
+### 3.1 连接数传热点
+
+1. 给飞机上电（无桨），等待约 10 s。
+2. 在电脑上连接数传热点：出厂为 `Pixracer`，示例飞机已改名为 `anet4d-a01`。
+3. 电脑应获得 `192.168.4.x` 地址；数传地址为 `192.168.4.1`。
+
+### 3.2 方式 A：Relay 配网向导（推荐）
+
+在 Relay 中打开 **+ > Set up a new bridge**，按四步完成：
+
+1. **Connect to the bridge**：Relay 检测到本机位于 `192.168.4.0/24` 时显示 `Connected to 192.168.4.1` 并自动进入下一步。
+2. **Read**：读取数传当前设置（固件版本、模式、AP 与 Station 名称、端口、波特率），以只读表格展示。
+3. **Configure**：填写以下内容后点击 `Write and restart bridge`：
+
+   | 字段 | 示例值 |
+   |---|---|
+   | Wi-Fi mode | `Station` |
+   | Network name | `anet4d` |
+   | Password | `<局域网密码>` |
+   | IP | `DHCP`（IP、网关、子网均为 `0.0.0.0`） |
+   | Host port / Client port | `14550` / `14555` |
+   | Baud | 保持读到的值（`921600`） |
+   | AP 热点名称与密码 | 保持 `anet4d-a01` 与原密码，作为回落 |
+
+   写入前 Relay 列出全部将要写入的值（密码以掩码显示）。数传保存后约 100 ms 自动重启。
+4. **Rejoin**：把电脑切回 `anet4d`。Relay 持续扫描，发现飞机后显示 `Found 10.7.7.36`。60 s 内未发现时，界面给出排查清单（见第 7 节）。
+
+对无法识别的数传固件，第 2 步会提示 `This bridge does not expose a known setup interface.`，并提供 `Open its setup page`，在 Relay 内打开数传自带的设置页，按方式 B 手工填写。
+
+### 3.3 方式 B：浏览器设置页
+
+在浏览器中打开 `http://192.168.4.1/`，进入 **Setup** 页，按下表填写后保存并重启：
+
+| 设置页字段 | 填写 | 说明 |
+|---|---|---|
+| WiFi Mode | `Station` | |
+| AP SSID | `anet4d-a01` | 回落热点名称，最长 16 个字符 |
+| AP Password | `<热点密码>` | 8–16 个字符 |
+| WiFi Channel | `11` | 仅影响 AP 模式；Station 模式跟随路由器信道 |
+| Station SSID | `anet4d` | 局域网名称，最长 16 个字符，区分大小写 |
+| Station Password | `<局域网密码>` | 8–16 个字符 |
+| Station IP / Gateway / Subnet | `0.0.0.0` / `0.0.0.0` / `0.0.0.0` | 全为 0 表示使用 DHCP |
+| Host Port | `14550` | |
+| Client Port | `14555` | |
+| Baudrate | `921600` | 与飞控串口一致 |
+
+等价的写入请求（Relay 向导内部即发送此请求，密码经 URL 编码）：
+
+```
+http://192.168.4.1/setparameters?mode=1&ssidsta=anet4d&pwdsta=<局域网密码>&ipsta=0.0.0.0&gatewaysta=0.0.0.0&subnetsta=0.0.0.0&hport=14550&cport=14555&reboot=1
+```
+
+### 3.4 回到局域网并接入机群
+
+1. 电脑切回 `anet4d`，确认本机地址位于 `10.7.7.0/24`。
+2. 在路由器的客户端列表中按数传的 MAC 地址找到它，记录其地址（示例为 `10.7.7.36`），并建议设置 DHCP 保留，使地址保持不变。
+3. 在 Relay 中打开 **+ > Scan** 扫描本网段，或在 **+ > Address** 中直接输入 `10.7.7.36`、端口 `14555`。飞机以 `real-10-7-7-36` 出现在机群中，缺省名称为 `Quad 36`。
+
+Station 模式下，数传在收到地面站报文之前把 MAVLink 广播到网段的 14550 端口；Relay 扫描时向子网广播地面站心跳，数传随后改为单播回 Relay 所在主机。这也解释了另一台电脑上的 QGroundControl 为何能在未配置的情况下显示 "communication engaged"：它收到的是数传的广播。
+
+### 3.5 数传为什么回落到 AP 模式
+
+数传在 Station 模式下未能接入网络时会回落到 AP 模式。常见原因：
+
+- 路由器只开放了 5 GHz，或 2.4 GHz 频段使用了不同的网络名称。ESP8266 只支持 2.4 GHz。
+- 加密方式为 WPA3 专用模式。请使用 WPA2-PSK（AES）或 WPA/WPA2 混合模式。
+- 网络名称或密码输入错误（区分大小写），或长度超出 16 个字符的限制。
+- 路由器启用了 MAC 过滤、DHCP 地址池已满，或信号过弱。
+- 路由器启用了 AP 隔离（客户端隔离），此时数传能接入但电脑收不到报文，现象是"能连上 Wi-Fi，扫描不到飞机"。
+
+回落后重新连接 AP 热点，在设置页核对 Station 配置即可。
+
+## 4. 首飞流程
+
+首飞分为无桨检查与带桨飞行两个阶段。Relay 的起飞前检查逐项通过后才允许解锁；真机解锁必须在确认框中输入 `ARM`。
+
+### 4.1 无桨检查
+
+1. **电池**：电压在 11.1–12.6 V 之间。Relay 按单节 3.60 V 告警、3.45 V 判定为严重。
+2. **心跳与固件**：飞机卡片显示链路 `ok`，检查器中可见飞控类型、固件版本与 sysid。
+3. **参数**：Relay 在首次心跳后约 2 s 自动拉取参数表，并据此判定 `gcs_input` 与 `failsafe` 两项检查（参数要求见第 5 节）。
+4. **杆量方向标定**：在检查器 **Control** 页的 **Calibration** 组中逐轴推杆，观察飞控报告的姿态目标或 RC 输入方向是否与预期一致（roll 向右、pitch 向前、yaw 顺时针为正）；方向相反时在标定中翻转符号并确认。本次运行内未完成确认时，`signs` 检查阻断解锁。
+5. **电机测试**：在 **Control** 页的 **Motor test** 组中逐个电机以低油门短时转动（需输入 `MOTOR` 确认，仅限未解锁状态），核对转向：左上 CW、右上 CCW、左下 CCW、右下 CW。
+6. **断电装桨**：断开电池后按转向安装正反桨，两指按压桨叶两端卡紧。
+
+### 4.2 带桨飞行
+
+1. 确认阻拦网与缓冲垫就位，人员位于网外；在 Relay 中确认 `props` 检查项。
+2. 上电，等待链路 `ok` 与全部阻断类检查通过。
+3. 用手柄、键盘或屏幕摇杆附身该机。附身时若当前模式不接受杆量，Relay 自动切换到定高模式（ALT_HOLD / ALTCTL，无气压计时为 STABILIZE / STABILIZED）。
+4. 点击解锁，在确认框输入 `ARM`。
+5. 缓慢推油门离地，在 0.5–1.0 m 高度悬停，观察姿态与电压。定高模式下油门 0.5 保持高度；自稳模式不保持高度，需要持续修正。
+6. 在 **Calibration** 组中调整悬停点（摇杆居中时的油门），供之后的手动飞行使用。
+7. 降落：收油门至落地，或使用 `Land` 技能。落地后上锁。
+8. 任何异常立即使用急停（油门归零并请求上锁）。空中上锁可能被飞控拒绝，Relay 不提供强制上锁，以免空中断电坠落。
+
+## 5. 飞控参数
+
+Relay v0.1 不自动修改飞控参数。下列参数请在 Mission Planner / QGroundControl 中设置，或在 Relay 检查器的 **Parameters** 页中逐项写入（需输入参数名确认，Relay 回读核对）。
+
+### 5.1 ArduPilot 与 PX4 对照
+
+| 用途 | ArduPilot Copter | PX4 | Relay 起飞前检查 |
+|---|---|---|---|
+| 接受地面站杆量 | `MAV_GCS_SYSID` = 255（4.6 起的名称；4.5 及以前为 `SYSID_MYGCS`，缺省即 255）。ArduPilot 只接受来自该 sysid 的 `RC_CHANNELS_OVERRIDE` | `COM_RC_IN_MODE` = 1（仅 MAVLink；本平台无遥控器时推荐）。2、3 也可；0（仅遥控器）与 4（禁用杆量）会使 Relay 的杆量无效 | `gcs_input`（阻断） |
+| 杆量有效期 | `RC_OVERRIDE_TIME` = 1–3 s（缺省 3）。0 表示禁用 RC 覆盖；−1 表示永不超时，会在地面站失联后保持最后一帧杆量，禁止使用 | `COM_RC_LOSS_T`（手动控制丢失判定时间，缺省 0.5 s） | `gcs_input`（ArduPilot 检查 ≠ 0） |
+| 遥控丢失保护 | `FS_THR_ENABLE` = 3（始终降落）。室内无 GPS 时 RTL 无法执行，不建议选 1 | `NAV_RCL_ACT` = 3（降落）。2（返航）需要位置估计 | `failsafe`（警告） |
+| 地面站丢失保护 | `FS_GCS_ENABLE` = 5（降落），`FS_GCS_TIMEOUT` 缺省 5 s。以来自 `MAV_GCS_SYSID` 的心跳判定 | `NAV_DLL_ACT` = 3（降落），`COM_DL_LOSS_T` 缺省 10 s | `failsafe`（警告，两类保护至少一项） |
+| 失控保护例外 | `FS_OPTIONS` 保持 0（见 6.3） | `COM_RCL_EXCEPT` 保持 0 | – |
+| 串口 | 数传所接串口 `SERIALn_PROTOCOL` = 2（MAVLink 2），`SERIALn_BAUD` = 921（921600） | `MAV_n_CONFIG` 指向数传所接串口，对应 `SER_*_BAUD` = 921600 | 链路无心跳时首先核对 |
+| 本机身份 | `SYSID_THISMAV`，多机时建议各不相同 | `MAV_SYS_ID`，多机时建议各不相同 | Relay 按 IP 区分飞机，sysid 相同也可工作 |
+| 低电量保护 | `BATT_LOW_VOLT` 约 10.5 V，`BATT_FS_LOW_ACT` = 1（降落） | `BAT_LOW_THR`、`COM_LOW_BAT_ACT` = 2 或 3 | `battery`（阻断 / 警告） |
+
+说明：
+
+- 地面站 sysid 必须是 255。Relay 固定使用 sysid 255 发送杆量；ArduPilot 若把 `MAV_GCS_SYSID` 改为其他值，会静默忽略全部 RC 覆盖，表现为"解锁后推杆无反应"。
+- PX4 的 `MANUAL_CONTROL` 不返回命令应答，杆量是否生效只能从飞控的输入与姿态反馈判断；`COM_RC_IN_MODE` 是首要排查项。
+- 位置类技能（`goto`、`rtl`、穿环航线）要求飞控提供本地位置估计。室内需要光流、动作捕捉或 UWB 等定位源；没有定位源时只在定高模式下飞行。PX4 的 takeoff 技能同样要求位置估计。
+
+### 5.2 Relay 发送的数据流请求
+
+首个有效飞控心跳后，Relay 立即请求遥测：ArduPilot 使用 `REQUEST_DATA_STREAM`（EXTRA1 20 Hz、EXTRA2 4、EXTRA3 2、EXTENDED_STATUS 2、POSITION 10、RC_CHANNELS 4、RAW_CONTROLLER 0）；PX4 使用 `MAV_CMD_SET_MESSAGE_INTERVAL` 按消息设置频率；两者都请求一次 `AUTOPILOT_VERSION`。每 10 s 检查缺失的关键消息并重新请求。无需在飞控中修改 `SRn_*` 等流速率参数。
+
+## 6. 失控保护与遥控保活
+
+### 6.1 Relay 自身的保护
+
+| 情形 | Relay 的处理 |
+|---|---|
+| 杆量超过 0.8 s 未刷新（窗口卡顿、网络抖动） | 停止发送杆量 |
+| 心跳超过 3 s | 链路标记为 `delayed`，继续发送 |
+| 心跳超过 5 s | 链路标记为 `lost`，停止杆量与技能，继续发送地面站心跳探测；恢复后不自动续发 |
+| 智能体会话租约到期 | 释放认领，其杆量在租约到期后 0.2 s 内停止 |
+| 释放控制（交还给无人） | 只发送释放帧，不发送其他指令；飞机在空中且无控制者时界面常驻告警 |
+| 急停 | 油门归零 50 ms，然后请求上锁（不强制） |
+
+### 6.2 释放与飞控失控保护的衔接
+
+- **ArduPilot**：释放时 Relay 连续发送 4 帧通道 1–8 全为 0 的 `RC_CHANNELS_OVERRIDE`，把通道交还给遥控输入。本平台没有遥控接收机，因此经过 `RC_OVERRIDE_TIME` 后飞控进入遥控丢失保护，按 `FS_THR_ENABLE` 执行（推荐降落）。这是预期行为：控制权交还给飞控自身的失控策略。
+- **PX4**：释放时 Relay 直接停止发送 `MANUAL_CONTROL`，不会发送 z = 0 的帧（那等于主动给最低油门）。经过 `COM_RC_LOSS_T` 后 PX4 按 `NAV_RCL_ACT` 处理（推荐降落）。
+
+### 6.3 技能运行期间的遥控保活
+
+技能（takeoff、hold、goto、land、rtl）运行或保持期间，Relay 以 50 Hz 持续发送中位杆量（roll、pitch、yaw 居中，油门 0.5）作为遥控保活；PX4 的 goto 另以 10 Hz 发送 OFFBOARD 位置设定点。因此：
+
+- Relay 正常工作时，飞控在 GUIDED / OFFBOARD 等自动模式下不会因"没有遥控输入"而触发遥控丢失保护。
+- Relay 进程退出、电脑休眠或 Wi-Fi 中断时，保活随之停止，飞控在超时后执行失控保护。这正是期望的兜底行为。
+
+基于这一设计，`FS_OPTIONS` 应保持 0，尤其不要设置以下位：
+
+- 位 2（值 4）"Continue if in Guided on RC failsafe"：设置后，Relay 失联时飞机会在 GUIDED 模式下继续执行最后的目标，而不是降落。
+- 位 4（值 16）"Continue if in pilot controlled modes on GCS failsafe"：设置后，地面站丢失保护在手动模式下不再生效。
+
+PX4 的 `COM_RCL_EXCEPT` 同理保持 0，使 OFFBOARD 与 Hold 模式下的手动控制丢失仍会触发保护。
+
+## 7. 故障排查
+
+| 现象 | 按顺序检查 |
+|---|---|
+| 扫描不到飞机 | 电脑与数传是否在同一网段（示例 `10.7.7.0/24`）；路由器是否启用 AP 隔离；数传是否已回落到 AP 模式（搜索热点 `anet4d-a01`）；改用 **+ > Address** 直连 `10.7.7.36:14555` |
+| Relay 提示 `UDP 14550 is in use by another program` | QGroundControl、Mission Planner 或其他地面站占用了 14550。关闭它们后 Relay 每 5 s 自动重试监听；也可在设置中更换监听端口（同时修改数传的 Host Port） |
+| 能 ping 通，但没有心跳 | 系统防火墙是否允许 UDP 14550 入站；数传 Host Port 是否为 14550；数传与飞控的波特率是否一致；飞控对应串口是否启用 MAVLink |
+| 能 ping 通但无法 SSH | 正常现象：ESP8266 数传不提供 SSH，只提供 `http://<IP>/` 设置页与 MAVLink UDP |
+| 有遥测，链路状态却一直是 `waiting` | 收到的心跳来自数传或相机等非飞控组件；确认飞控心跳的 `autopilot` 为 3 或 12 |
+| 解锁被拒 | 查看检查器 **Log** 页的状态文本与命令应答（PreArm 原因）；核对起飞前检查中的阻断项；电池电压是否足够 |
+| 解锁后推杆无反应（ArduPilot） | `MAV_GCS_SYSID` / `SYSID_MYGCS` 是否为 255；`RC_OVERRIDE_TIME` 是否为 0；`RCMAP_*` 通道映射是否为默认 1–4 |
+| 推杆无反应（PX4） | `COM_RC_IN_MODE` 是否为 0 或 4 |
+| 方向相反 | 在 **Control > Calibration** 中翻转对应轴的符号，无桨复核 |
+| 切换到自稳后掉高 | 自稳模式不保持高度，改用 ALT_HOLD / ALTCTL；重新标定悬停油门 |
+| 一解锁就丢链路 | 电池压降导致数传欠压复位；电池老化或电量不足；串口误码 |
+| 延迟大、丢包多 | 检查器 **Telemetry > Link** 中的丢包率与往返时延；2.4 GHz 信道拥挤时调整路由器信道，或让飞机靠近路由器 |
+| 数传配网后 60 s 未发现飞机 | 见 3.5；同时确认电脑已切回局域网且 DHCP 已分配地址 |
+| 机体发热明显 | 地面长时间通电时飞控与数传缺少气流散热；缩短单次地面调试时间，必要时断电冷却 |
+
+需要技术支持时请一并提供：Relay 版本、飞控类型与固件版本、电脑与飞机的 IP 与端口、检查器 **Telemetry > Raw MAVLink** 页截图，以及数据目录中的 `backend.log`。
+
+## 8. 参考
+
+- [智能体接口](agent-api.zh-CN.md)：在模拟机上开发、迁移到真机的步骤。
+- MAVLink 消息定义：<https://mavlink.io/en/messages/common.html>
+- ArduPilot 失控保护：<https://ardupilot.org/copter/docs/failsafe-landing-page.html>
+- PX4 安全设置：<https://docs.px4.io/main/en/config/safety.html>

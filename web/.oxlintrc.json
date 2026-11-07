@@ -1,0 +1,34 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "react", "import"],
+  "categories": { "correctness": "error" },
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "no-restricted-imports": [
+      "error",
+      {
+        "paths": [{ "name": "lucide-react", "message": "Icons go through @/ui/icons (StateIcon / Icon); lucide-react is not used." }],
+        "patterns": [
+          { "group": ["lucide-react/*"], "message": "Icons go through @/ui/icons." },
+          { "group": ["@base-ui/react", "@base-ui/react/*"], "message": "Only ui/components/ui/** imports @base-ui/react; use the shadcn components." },
+          { "group": ["lucide", "lucide/*"], "message": "Only ui/icons/** imports lucide geometry; use semantic keys from @/ui/icons." }
+        ]
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["src/ui/components/ui/**"],
+      "rules": {
+        "no-restricted-imports": ["error", { "paths": [{ "name": "lucide-react", "message": "Use @/ui/icons/lucide-compat." }] }]
+      }
+    },
+    {
+      "files": ["src/ui/icons/**"],
+      "rules": {
+        "no-restricted-imports": ["error", { "paths": [{ "name": "lucide-react", "message": "lucide-react is not used." }] }]
+      }
+    }
+  ],
+  "ignorePatterns": ["dist/**", "node_modules/**", "public/**"]
+}

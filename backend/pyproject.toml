@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools==84.2.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anet-relay-backend"
+version = "0.1.0"
+description = "ANet Relay backend: MAVLink fleet link, human/agent control authority, simulator, ring courses and the local agent API."
+requires-python = ">=3.12,<3.13"
+license = { text = "ANet Open Source License (see LICENSE)" }
+authors = [{ name = "Agent Network Research" }]
+dependencies = [
+    "fastapi==0.162.0",
+    "starlette==1.10.0",
+    "pydantic==2.14.3",
+    "pydantic_core==2.50.4",
+    "uvicorn==0.54.0",
+    "websockets==17.4",
+    "h11==0.16.0",
+    "anyio==4.16.0",
+    "pymavlink==2.4.50",
+    "lxml==6.1.3",
+    "fastcrc==0.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.2.0",
+    "httpx==0.28.1",
+    "ruff==0.17.4",
+]
+
+[project.scripts]
+anet-relay-backend = "relay.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["relay*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = ["ignore::DeprecationWarning", "ignore:Using `httpx`"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = ["build", "dist", "data"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003", "SIM105", "B008", "SIM108"]
+
+[tool.ruff.format]
+quote-style = "double"

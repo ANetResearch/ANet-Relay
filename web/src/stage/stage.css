@@ -1,0 +1,63 @@
+/* Stage and course surfaces (02 §4.4, §6, §10). Colours only through Graphite tokens. */
+@layer components {
+  [data-stage] { isolation: isolate; }
+  /* own stacking context: drei Html labels (z 4..14) stay under the WP7 notices (z 4) and the video PiP (z 5) */
+  .stage-canvas { position: absolute; inset: 0; z-index: 0; isolation: isolate; }
+  .stage-canvas canvas { display: block; outline: none; }
+  .stage-nogl { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 0 24px; text-align: center; }
+  .stage-overlay { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+  .stage-overlay > * { pointer-events: auto; }
+  .stage-overlay > [data-passive] { pointer-events: none; }
+
+  /* screen-space aircraft label (02 §6.2): Mono 11 g100 on the HUD surface, controller in small text below */
+  .stage-label { transform: translate(-50%, calc(-100% - 4px)); display: flex; flex-direction: column; align-items: center; gap: 1px;
+    padding: 2px 6px 3px; border-radius: 4px; background: var(--hud); border: 1px solid var(--border); white-space: nowrap; user-select: none; }
+  .stage-label-name { display: flex; align-items: center; gap: 5px; font: 450 11px/14px var(--font-mono); color: var(--g100); }
+  .stage-label-sub { font: 450 10px/12px var(--font-sans); color: var(--g400); }
+  .stage-label-sim { font: 560 9px/10px var(--font-mono); color: var(--g300); padding: 0 2px; border: 1px solid var(--g600); border-radius: 2px; }
+  .stage-label[data-lost] .stage-label-name, .stage-label[data-lost] .stage-label-sub { color: var(--g500); }
+  .stage-armed-red { font-weight: 560; color: var(--r500); }
+  .stage-armed-strong { font-weight: 700; color: var(--g50); }
+  .stage-crit-red { color: var(--r500); }
+  .stage-crit-strong { font-weight: 700; color: var(--g50); }
+  .stage-label-hold { width: 100%; margin-top: 2px; }
+  .stage-alt { display: block; transform: translate(6px, -50%); font: 450 10px/12px var(--font-mono); color: var(--g400); white-space: nowrap; user-select: none; }
+  .stage-alt:empty { display: none; }
+  .stage-tag { display: block; font: 450 9px/11px var(--font-mono); color: var(--g500); white-space: nowrap; user-select: none; }
+  .stage-tag-corner { transform: translate(3px, -100%); }
+  .stage-tag-below { transform: translate(-50%, 3px); }
+
+  /* HUD blocks: always on the hud surface so text never sits on a model (02 §2.1) */
+  .stage-hud { background: var(--hud); border: 1px solid var(--border); border-radius: var(--radius); }
+  .stage-identity { position: absolute; left: 16px; top: 16px; max-width: min(320px, calc(100% - 200px)); padding: 8px 10px; display: flex; flex-direction: column; gap: 4px;
+    transition: top var(--duration-fast) var(--ease-smooth-out); }
+  .stage-identity-name { display: flex; align-items: center; gap: 6px; font-size: var(--text-hud-title); line-height: var(--text-hud-title--line-height); font-weight: 560; color: var(--g100); min-width: 0; }
+  .stage-identity-name > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stage-identity-sub { font: 450 11px/16px var(--font-mono); color: var(--g300); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stage-tools { position: absolute; right: 16px; top: 16px; display: flex; align-items: center; gap: 6px; padding: 2px;
+    transition: top var(--duration-fast) var(--ease-smooth-out); }
+  .stage-strip { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); height: 64px; display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 0 16px; transition: bottom var(--duration-fast) var(--ease-smooth-out); }
+  .stage-strip-item { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+  .stage-strip-value { font: 500 var(--text-hud-kpi)/var(--text-hud-kpi--line-height) var(--font-mono); font-variant-numeric: tabular-nums; color: var(--g50); white-space: nowrap; }
+  .stage-strip[data-compact] .stage-strip-value { font-size: 17px; line-height: 22px; }
+
+  .stage-sticks { position: absolute; left: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; padding: 8px; transition: bottom var(--duration-fast) var(--ease-smooth-out); }
+  .stage-sticks-row { display: flex; align-items: flex-end; gap: 8px; }
+  .stage-stick { position: relative; width: 72px; height: 72px; border: 1px solid var(--g700); border-radius: 4px; }
+  .stage-stick::before, .stage-stick::after { content: ""; position: absolute; background: var(--g800); }
+  .stage-stick::before { left: 50%; top: 0; bottom: 0; width: 1px; }
+  .stage-stick::after { top: 50%; left: 0; right: 0; height: 1px; }
+  .stage-stick-dot { position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 999px; background: var(--g50); z-index: 1;
+    transition: transform 100ms linear; }
+  .stage-throttle { position: relative; width: 8px; height: 72px; border: 1px solid var(--g700); border-radius: 2px; overflow: hidden; }
+  .stage-throttle-fill { position: absolute; left: 0; right: 0; bottom: 0; height: 100%; background: var(--g300); transform-origin: bottom; transform: scaleY(0); transition: transform 100ms linear; }
+  .stage-throttle-hover { position: absolute; left: -1px; right: -1px; height: 1px; background: var(--g400); z-index: 1; }
+  html:is([data-motion="reduced"], [data-motion="off"]) .stage-stick-dot,
+  html:is([data-motion="reduced"], [data-motion="off"]) .stage-throttle-fill { transition: none; }
+
+  .stage-notice { position: absolute; left: 50%; top: 16px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px;
+    font-size: 12px; line-height: 16px; color: var(--g100); white-space: nowrap; transition: top var(--duration-fast) var(--ease-smooth-out); }
+  .stage-card { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 360px; max-width: calc(100% - 32px); padding: 14px 16px; border-radius: calc(var(--radius) * 1.4); }
+  .stage-replay { position: absolute; left: 16px; top: 16px; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 6px 0 10px; }
+}

@@ -1,0 +1,68 @@
+# -*- mode: python ; coding: utf-8 -*-
+# PyInstaller 6.22.3 spec for the ANet Relay backend (03 §13): onedir build at
+# pyi-dist/anet-relay-backend, launched by the Electron shell from resources/backend.
+#
+#   .venv/bin/python -m PyInstaller backend/relay-backend.spec --noconfirm --clean \
+#       --distpath pyi-dist --workpath pyi-build        (npm run build:backend)
+#
+# Entry: scripts/relay_entry.py, i.e. `python -m relay` plus the stdin lifeline.
+import sys
+from pathlib import Path
+
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+
+BACKEND = Path(SPECPATH).resolve()
+ROOT = BACKEND.parent
+# Make `relay` importable for collect_submodules() and the analysis.
+sys.path.insert(0, str(BACKEND))
+
+hiddenimports = [
+    *collect_submodules("relay"),
+    # uvicorn picks its loop, protocol and lifespan implementations at run time.
+    *collect_submodules("uvicorn"),
+    # pymavlink imports dialects by name (mavutil.set_dialect).
+    "pymavlink.dialects.v20.ardupilotmega",
+    "pymavlink.dialects.v20.common",
+    "pymavlink.dialects.v10.ardupilotmega",
+    "pymavlink.dialects.v10.common",
+]
+
+a = Analysis(
+    [str(ROOT / "scripts" / "relay_entry.py")],
+    pathex=[str(BACKEND)],
+    binaries=[],
+    datas=collect_data_files("relay"),
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    runtime_hooks=[],
+    excludes=["tkinter", "_tkinter", "turtle", "idlelib", "pytest", "ruff"],
+    noarchive=False,
+    optimize=0,
+)
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="anet-relay-backend",
+    debug=False,
+    strip=False,
+    upx=False,
+    console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name="anet-relay-backend",
+)

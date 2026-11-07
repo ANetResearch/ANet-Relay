@@ -1,0 +1,24 @@
+/* Records workspace (02 §13). Colours only through theme.css tokens; charts use the lieflat roles of lf.css. */
+@layer components {
+  .record-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: var(--radius); border: 1px solid transparent;
+    text-align: left; outline: none; transition: background-color var(--duration-quick) var(--ease-smooth-out); }
+  .record-row:hover { background: oklch(from var(--g850) l c h / 0.55); }
+  .record-row[data-selected] { background: var(--g850); border-color: var(--border); }
+  .record-row:focus-visible { box-shadow: 0 0 0 2px oklch(from var(--g50) l c h / 0.25); }
+  html:is([data-motion="reduced"], [data-motion="off"]) .record-row { transition: none; }
+  .rec-live { display: inline-flex; height: 16px; align-items: center; padding: 0 6px; border-radius: 999px; border: 1px solid var(--g600);
+    font: 560 10px/12px var(--font-mono); color: var(--g200); }
+
+  .rec-svg { cursor: crosshair; touch-action: none; }
+  .rec-line2 { fill: none; stroke: var(--lf-data2); stroke-width: 1.25; stroke-dasharray: 3 2; stroke-linejoin: round; }
+  .rec-cursor { stroke: var(--g50); stroke-width: 1; }
+  .rec-seg-agent { fill: var(--g500); }
+  .rec-seg-human { fill: var(--g50); }
+  .rec-seg-label-agent { fill: var(--g950); font-family: var(--font-mono); }
+  .rec-seg-label-human { fill: var(--g950); font-family: var(--font-mono); }
+  .rec-tick { stroke: var(--g600); stroke-width: 1; }
+  .rec-mark { fill: var(--g50); }
+  .rec-mark-stroke { fill: none; stroke: var(--g50); stroke-width: 1.25; }
+  .rec-armed { fill: var(--g50); }
+  .rec-armed-red { fill: var(--r500); }
+}

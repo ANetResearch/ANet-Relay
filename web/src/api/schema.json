@@ -1,0 +1,1664 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentnetwork.org.cn/schemas/anet-relay/v1.json",
+  "title": "RelaySchema",
+  "description": "ANet Relay API v1 models (backend/tools/export_schema.py; do not edit).",
+  "type": "object",
+  "properties": {
+    "Fleet": {
+      "$ref": "#/$defs/Fleet"
+    },
+    "Vehicle": {
+      "$ref": "#/$defs/Vehicle"
+    },
+    "Alert": {
+      "$ref": "#/$defs/Alert"
+    },
+    "Event": {
+      "$ref": "#/$defs/Event"
+    },
+    "Events": {
+      "$ref": "#/$defs/Events"
+    },
+    "ErrorBody": {
+      "$ref": "#/$defs/ErrorBody"
+    },
+    "Health": {
+      "$ref": "#/$defs/Health"
+    },
+    "Hello": {
+      "$ref": "#/$defs/Hello"
+    },
+    "FleetMessage": {
+      "$ref": "#/$defs/FleetMessage"
+    },
+    "EventMessage": {
+      "$ref": "#/$defs/EventMessage"
+    },
+    "ErrorMessage": {
+      "$ref": "#/$defs/ErrorMessage"
+    },
+    "SessionOpened": {
+      "$ref": "#/$defs/SessionOpened"
+    }
+  },
+  "required": [
+    "Fleet",
+    "Vehicle",
+    "Alert",
+    "Event",
+    "Events",
+    "ErrorBody",
+    "Health",
+    "Hello",
+    "FleetMessage",
+    "EventMessage",
+    "ErrorMessage",
+    "SessionOpened"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "Alert": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "vehicle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "level": {
+          "enum": [
+            "info",
+            "warn",
+            "critical"
+          ],
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        },
+        "text_en": {
+          "type": "string"
+        },
+        "text_zh": {
+          "type": "string"
+        },
+        "since": {
+          "type": "number"
+        },
+        "acked": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "vehicle",
+        "level",
+        "code",
+        "text_en",
+        "text_zh",
+        "since",
+        "acked"
+      ],
+      "title": "Alert",
+      "type": "object"
+    },
+    "Attitude": {
+      "properties": {
+        "roll": {
+          "description": "rad, right wing down positive",
+          "type": "number"
+        },
+        "pitch": {
+          "description": "rad, nose up positive",
+          "type": "number"
+        },
+        "yaw": {
+          "description": "rad, NED heading: 0 north, clockwise positive",
+          "type": "number"
+        }
+      },
+      "required": [
+        "roll",
+        "pitch",
+        "yaw"
+      ],
+      "title": "Attitude",
+      "type": "object"
+    },
+    "Battery": {
+      "properties": {
+        "voltage": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "current": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "remaining_pct": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cells": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "level": {
+          "enum": [
+            "ok",
+            "warn",
+            "critical",
+            "unknown"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "voltage",
+        "current",
+        "remaining_pct",
+        "cells",
+        "level"
+      ],
+      "title": "Battery",
+      "type": "object"
+    },
+    "Bridge": {
+      "properties": {
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "enum": [
+            "udp",
+            "http",
+            "manual"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "source"
+      ],
+      "title": "Bridge",
+      "type": "object"
+    },
+    "CalibrationView": {
+      "properties": {
+        "signs": {
+          "$ref": "#/$defs/Signs"
+        },
+        "hover": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "signs",
+        "hover"
+      ],
+      "title": "CalibrationView",
+      "type": "object"
+    },
+    "Capabilities": {
+      "properties": {
+        "manual": {
+          "type": "boolean"
+        },
+        "althold": {
+          "type": "boolean"
+        },
+        "position": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "manual",
+        "althold",
+        "position"
+      ],
+      "title": "Capabilities",
+      "type": "object"
+    },
+    "ClaimView": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "since": {
+          "type": "number"
+        },
+        "suspended": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "session_id",
+        "name",
+        "since",
+        "suspended"
+      ],
+      "title": "ClaimView",
+      "type": "object"
+    },
+    "ConfirmedView": {
+      "properties": {
+        "signs": {
+          "type": "boolean"
+        },
+        "props": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "signs",
+        "props"
+      ],
+      "title": "ConfirmedView",
+      "type": "object"
+    },
+    "CourseRunView": {
+      "properties": {
+        "course_id": {
+          "type": "string"
+        },
+        "name_en": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name_zh": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "state": {
+          "enum": [
+            "waiting_takeoff",
+            "running",
+            "finished",
+            "aborted"
+          ],
+          "type": "string"
+        },
+        "next": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "elapsed_s": {
+          "type": "number"
+        },
+        "splits": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "best_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "origin": {
+          "description": "[x, y, z, heading_deg] of the course origin",
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "type": "array"
+        },
+        "rings": {
+          "description": "rings placed in the vehicle's position frame",
+          "items": {
+            "$ref": "#/$defs/Ring"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "course_id",
+        "name_en",
+        "name_zh",
+        "state",
+        "next",
+        "total",
+        "started_at",
+        "elapsed_s",
+        "splits",
+        "best_s",
+        "reason",
+        "origin",
+        "rings"
+      ],
+      "title": "CourseRunView",
+      "type": "object"
+    },
+    "ErrorBody": {
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/ErrorDetail"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "title": "ErrorBody",
+      "type": "object"
+    },
+    "ErrorDetail": {
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message_en": {
+          "type": "string"
+        },
+        "message_zh": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "message_en",
+        "message_zh",
+        "detail"
+      ],
+      "title": "ErrorDetail",
+      "type": "object"
+    },
+    "ErrorMessage": {
+      "properties": {
+        "type": {
+          "const": "error",
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/$defs/ErrorDetail"
+        }
+      },
+      "required": [
+        "type",
+        "error"
+      ],
+      "title": "ErrorMessage",
+      "type": "object"
+    },
+    "Event": {
+      "properties": {
+        "seq": {
+          "type": "integer"
+        },
+        "t": {
+          "type": "number"
+        },
+        "kind": {
+          "enum": [
+            "vehicle_discovered",
+            "vehicle_online",
+            "vehicle_offline",
+            "link_delayed",
+            "link_lost",
+            "link_restored",
+            "armed",
+            "disarmed",
+            "mode_changed",
+            "statustext",
+            "command_ack",
+            "possession_started",
+            "possession_released",
+            "relay_handback",
+            "claim_started",
+            "claim_released",
+            "agent_session_started",
+            "agent_session_closed",
+            "agent_session_expired",
+            "skill_started",
+            "skill_finished",
+            "skill_failed",
+            "stop",
+            "stop_all",
+            "battery_warn",
+            "battery_critical",
+            "crashed",
+            "airborne_no_controller",
+            "param_set",
+            "sim_added",
+            "sim_removed",
+            "bridge_configured",
+            "course_started",
+            "ring_passed",
+            "course_finished",
+            "course_aborted",
+            "listen_error"
+          ],
+          "type": "string"
+        },
+        "vehicle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text_en": {
+          "type": "string"
+        },
+        "text_zh": {
+          "type": "string"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "seq",
+        "t",
+        "kind",
+        "vehicle",
+        "session",
+        "text_en",
+        "text_zh",
+        "data"
+      ],
+      "title": "Event",
+      "type": "object"
+    },
+    "EventMessage": {
+      "properties": {
+        "type": {
+          "const": "event",
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/Event"
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ],
+      "title": "EventMessage",
+      "type": "object"
+    },
+    "Events": {
+      "properties": {
+        "events": {
+          "items": {
+            "$ref": "#/$defs/Event"
+          },
+          "type": "array"
+        },
+        "last_seq": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "events",
+        "last_seq"
+      ],
+      "title": "Events",
+      "type": "object"
+    },
+    "Fleet": {
+      "properties": {
+        "t": {
+          "type": "number"
+        },
+        "version": {
+          "type": "string"
+        },
+        "listen": {
+          "$ref": "#/$defs/Listen"
+        },
+        "scan": {
+          "$ref": "#/$defs/Scan"
+        },
+        "sessions": {
+          "items": {
+            "$ref": "#/$defs/SessionSummary"
+          },
+          "type": "array"
+        },
+        "safety_volume": {
+          "$ref": "#/$defs/SafetyVolume"
+        },
+        "vehicles": {
+          "items": {
+            "$ref": "#/$defs/Vehicle"
+          },
+          "type": "array"
+        },
+        "alerts": {
+          "items": {
+            "$ref": "#/$defs/Alert"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "t",
+        "version",
+        "listen",
+        "scan",
+        "sessions",
+        "safety_volume",
+        "vehicles",
+        "alerts"
+      ],
+      "title": "Fleet",
+      "type": "object"
+    },
+    "FleetMessage": {
+      "properties": {
+        "type": {
+          "const": "fleet",
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/Fleet"
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ],
+      "title": "FleetMessage",
+      "type": "object"
+    },
+    "GlobalPosition": {
+      "properties": {
+        "lat": {
+          "type": "number"
+        },
+        "lon": {
+          "type": "number"
+        },
+        "alt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "lat",
+        "lon",
+        "alt"
+      ],
+      "title": "GlobalPosition",
+      "type": "object"
+    },
+    "Gps": {
+      "properties": {
+        "fix": {
+          "type": "integer"
+        },
+        "sats": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hdop": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "fix",
+        "sats",
+        "hdop"
+      ],
+      "title": "Gps",
+      "type": "object"
+    },
+    "Health": {
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "string"
+        },
+        "uptime_s": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "ok",
+        "version",
+        "uptime_s"
+      ],
+      "title": "Health",
+      "type": "object"
+    },
+    "Hello": {
+      "properties": {
+        "type": {
+          "const": "hello",
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "operator": {
+          "type": "boolean"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "version",
+        "operator",
+        "session"
+      ],
+      "title": "Hello",
+      "type": "object"
+    },
+    "Link": {
+      "properties": {
+        "state": {
+          "enum": [
+            "waiting",
+            "ok",
+            "delayed",
+            "lost",
+            "offline"
+          ],
+          "type": "string"
+        },
+        "heartbeat_age_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rx_hz": {
+          "type": "number"
+        },
+        "tx_hz": {
+          "type": "number"
+        },
+        "loss_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rtt_ms": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "heartbeat_age_s",
+        "rx_hz",
+        "tx_hz",
+        "loss_pct",
+        "rtt_ms"
+      ],
+      "title": "Link",
+      "type": "object"
+    },
+    "Listen": {
+      "properties": {
+        "port": {
+          "type": "integer"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "port",
+        "ok",
+        "error"
+      ],
+      "title": "Listen",
+      "type": "object"
+    },
+    "Position": {
+      "properties": {
+        "frame": {
+          "enum": [
+            "local",
+            "sim"
+          ],
+          "type": "string"
+        },
+        "x": {
+          "description": "east, m",
+          "type": "number"
+        },
+        "y": {
+          "description": "north, m",
+          "type": "number"
+        },
+        "z": {
+          "description": "up, m",
+          "type": "number"
+        },
+        "vx": {
+          "type": "number"
+        },
+        "vy": {
+          "type": "number"
+        },
+        "vz": {
+          "type": "number"
+        },
+        "age_s": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "frame",
+        "x",
+        "y",
+        "z",
+        "vx",
+        "vy",
+        "vz",
+        "age_s"
+      ],
+      "title": "Position",
+      "type": "object"
+    },
+    "PossessionView": {
+      "properties": {
+        "input": {
+          "enum": [
+            "keyboard",
+            "screen",
+            "gamepad"
+          ],
+          "type": "string"
+        },
+        "pad": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "since": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "input",
+        "pad",
+        "since"
+      ],
+      "title": "PossessionView",
+      "type": "object"
+    },
+    "PreflightSummary": {
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "blocking": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok",
+        "blocking"
+      ],
+      "title": "PreflightSummary",
+      "type": "object"
+    },
+    "Rates": {
+      "properties": {
+        "roll": {
+          "type": "number"
+        },
+        "pitch": {
+          "type": "number"
+        },
+        "yaw": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "roll",
+        "pitch",
+        "yaw"
+      ],
+      "title": "Rates",
+      "type": "object"
+    },
+    "Ring": {
+      "properties": {
+        "c": {
+          "description": "centre [x east, y north, z up], m",
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "yaw_deg": {
+          "description": "compass heading of the ring normal",
+          "type": "number"
+        },
+        "r": {
+          "description": "radius, m",
+          "type": "number"
+        }
+      },
+      "required": [
+        "c",
+        "yaw_deg",
+        "r"
+      ],
+      "title": "Ring",
+      "type": "object"
+    },
+    "SafetyVolume": {
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "z": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "title": "SafetyVolume",
+      "type": "object"
+    },
+    "Scan": {
+      "properties": {
+        "running": {
+          "type": "boolean"
+        },
+        "done": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "networks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "found": {
+          "type": "integer"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "running",
+        "done",
+        "total",
+        "networks",
+        "found",
+        "error"
+      ],
+      "title": "Scan",
+      "type": "object"
+    },
+    "Sensor": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "present": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "healthy": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "present",
+        "enabled",
+        "healthy"
+      ],
+      "title": "Sensor",
+      "type": "object"
+    },
+    "SessionOpened": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "lease_s": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "session_id",
+        "name",
+        "token",
+        "lease_s"
+      ],
+      "title": "SessionOpened",
+      "type": "object"
+    },
+    "SessionSummary": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "expires_in_s": {
+          "type": "number"
+        },
+        "vehicles": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "session_id",
+        "name",
+        "expires_in_s",
+        "vehicles"
+      ],
+      "title": "SessionSummary",
+      "type": "object"
+    },
+    "Signs": {
+      "properties": {
+        "roll": {
+          "enum": [
+            1,
+            -1
+          ],
+          "type": "integer"
+        },
+        "pitch": {
+          "enum": [
+            1,
+            -1
+          ],
+          "type": "integer"
+        },
+        "yaw": {
+          "enum": [
+            1,
+            -1
+          ],
+          "type": "integer"
+        }
+      },
+      "required": [
+        "roll",
+        "pitch",
+        "yaw"
+      ],
+      "title": "Signs",
+      "type": "object"
+    },
+    "SkillView": {
+      "properties": {
+        "id": {
+          "description": "increments with every skill started on this backend",
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "running",
+            "done",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "state",
+        "detail"
+      ],
+      "title": "SkillView",
+      "type": "object"
+    },
+    "StatusText": {
+      "properties": {
+        "t": {
+          "type": "number"
+        },
+        "severity": {
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "t",
+        "severity",
+        "text"
+      ],
+      "title": "StatusText",
+      "type": "object"
+    },
+    "SticksView": {
+      "properties": {
+        "roll": {
+          "type": "number"
+        },
+        "pitch": {
+          "type": "number"
+        },
+        "yaw": {
+          "type": "number"
+        },
+        "throttle": {
+          "type": "number"
+        },
+        "age_s": {
+          "type": "number"
+        },
+        "source": {
+          "enum": [
+            "human",
+            "agent"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "roll",
+        "pitch",
+        "yaw",
+        "throttle",
+        "age_s",
+        "source"
+      ],
+      "title": "SticksView",
+      "type": "object"
+    },
+    "Vehicle": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "real",
+            "sim"
+          ],
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "host": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "autopilot": {
+          "anyOf": [
+            {
+              "enum": [
+                "PX4",
+                "ArduPilot"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "firmware": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sysid": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bridge": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Bridge"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "link": {
+          "$ref": "#/$defs/Link"
+        },
+        "armed": {
+          "type": "boolean"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode_class": {
+          "anyOf": [
+            {
+              "enum": [
+                "manual",
+                "althold",
+                "position",
+                "auto"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "modes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "landed": {
+          "enum": [
+            "unknown",
+            "ground",
+            "air",
+            "takeoff",
+            "landing"
+          ],
+          "type": "string"
+        },
+        "crashed": {
+          "type": "boolean"
+        },
+        "attitude": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Attitude"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rates": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rates"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Position"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "global": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GlobalPosition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "altitude_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "climb_ms": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "groundspeed_ms": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "heading_deg": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "throttle_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "battery": {
+          "$ref": "#/$defs/Battery"
+        },
+        "gps": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Gps"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sensors": {
+          "items": {
+            "$ref": "#/$defs/Sensor"
+          },
+          "type": "array"
+        },
+        "statustext": {
+          "items": {
+            "$ref": "#/$defs/StatusText"
+          },
+          "type": "array"
+        },
+        "rc": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "servo": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "flight_time_s": {
+          "type": "number"
+        },
+        "armed_time_s": {
+          "type": "number"
+        },
+        "capabilities": {
+          "$ref": "#/$defs/Capabilities"
+        },
+        "claim": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClaimView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "possession": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PossessionView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "controller": {
+          "enum": [
+            "none",
+            "human",
+            "agent"
+          ],
+          "type": "string"
+        },
+        "sticks": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SticksView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "skill": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SkillView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "calibration": {
+          "$ref": "#/$defs/CalibrationView"
+        },
+        "confirmed": {
+          "$ref": "#/$defs/ConfirmedView"
+        },
+        "preflight": {
+          "$ref": "#/$defs/PreflightSummary"
+        },
+        "course": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CourseRunView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "record_session": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "host",
+        "autopilot",
+        "firmware",
+        "sysid",
+        "bridge",
+        "link",
+        "armed",
+        "mode",
+        "mode_class",
+        "modes",
+        "landed",
+        "crashed",
+        "attitude",
+        "rates",
+        "position",
+        "global",
+        "altitude_m",
+        "climb_ms",
+        "groundspeed_ms",
+        "heading_deg",
+        "throttle_pct",
+        "battery",
+        "gps",
+        "sensors",
+        "statustext",
+        "rc",
+        "servo",
+        "flight_time_s",
+        "armed_time_s",
+        "capabilities",
+        "claim",
+        "possession",
+        "controller",
+        "sticks",
+        "skill",
+        "calibration",
+        "confirmed",
+        "preflight",
+        "course",
+        "record_session"
+      ],
+      "title": "Vehicle",
+      "type": "object"
+    }
+  }
+}

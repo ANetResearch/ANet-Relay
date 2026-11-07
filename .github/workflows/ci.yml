@@ -1,0 +1,98 @@
+# CI (03 §13): backend ruff + pytest; web tsc + oxlint + vitest + build; snapshot
+# type consistency; desktop shell syntax and release metadata.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22.12.0"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --disable-pip-version-check -e "./backend[dev]"
+      - name: Ruff
+        working-directory: backend
+        run: ../.venv/bin/ruff check .
+      - name: Pytest
+        working-directory: backend
+        run: ../.venv/bin/python -m pytest -q
+
+  web:
+    name: Web
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --prefix web
+      - name: Type check (tsc)
+        run: npm run typecheck --prefix web
+      - name: Lint (oxlint)
+        run: npm run lint --prefix web
+      - name: Unit tests (vitest)
+        run: npm test --prefix web
+      - name: Build
+        run: npm run build --prefix web
+
+  types:
+    name: Snapshot types
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --disable-pip-version-check -e "./backend[dev]"
+          npm ci --prefix web
+      - name: Regenerate web/src/api/types.ts from the backend models
+        run: npm run types --prefix web
+      - name: Check that the committed types are current
+        run: git diff --exit-code -- web/src/api/types.ts
+
+  shell:
+    name: Desktop shell
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Syntax
+        run: for f in electron/*.mjs electron/*.cjs scripts/*.mjs scripts/*.cjs; do node --check "$f"; done
+      - name: Release notes section exists for package.json version
+        run: node scripts/release-assets.mjs notes "$(node -p "require('./package.json').version")" "$RUNNER_TEMP/notes.md"

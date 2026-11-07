@@ -1,0 +1,13 @@
+/* Settings dialog (02 §16). Colours only through theme.css tokens. */
+@layer components {
+  .set-nav { display: flex; height: 30px; align-items: center; gap: 8px; padding: 0 10px; border-radius: var(--radius); font-size: 12px; color: var(--g400);
+    text-align: left; outline: none; transition: background-color var(--duration-quick) var(--ease-smooth-out), color var(--duration-quick) var(--ease-smooth-out); }
+  .set-nav:hover { color: var(--g100); background: oklch(from var(--g800) l c h / 0.5); }
+  .set-nav[data-active] { color: var(--g50); background: var(--g800); }
+  .set-nav:focus-visible { box-shadow: 0 0 0 2px oklch(from var(--g50) l c h / 0.25); }
+  html:is([data-motion="reduced"], [data-motion="off"]) .set-nav { transition: none; }
+
+  .set-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; min-height: 44px; padding: 8px 0;
+    border-bottom: 1px dotted var(--border); }
+  .set-row-wide { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+}

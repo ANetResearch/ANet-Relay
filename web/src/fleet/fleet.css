@@ -1,0 +1,33 @@
+/* Fleet panel (02 §4.3). Colours only through theme.css tokens. */
+@layer components {
+  .fleet-card {
+    position: relative; display: flex; flex-direction: column; justify-content: center; gap: 6px; height: 76px;
+    padding: 8px 10px 8px 12px; border-radius: var(--radius); border: 1px solid transparent; background: transparent;
+    outline: 1px solid transparent; outline-offset: -1px; cursor: default; text-align: left;
+    transition: background-color var(--duration-quick) var(--ease-smooth-out), border-color var(--duration-quick) var(--ease-smooth-out),
+      outline-color var(--duration-quick) var(--ease-smooth-out);
+  }
+  .fleet-card:hover { background: oklch(from var(--g850) l c h / 0.55); }
+  .fleet-card[data-selected] { background: var(--g850); border-color: var(--border); }
+  .fleet-card[data-kind="sim"] { border: 1px dashed var(--g700); }
+  .fleet-card[data-kind="sim"][data-selected] { border-color: var(--g600); }
+  /* human possession: 1 px g50 solid frame (02 §2.3), drawn above the dashed sim border */
+  .fleet-card[data-possessed] { outline-color: var(--g50); }
+  .fleet-card:focus-visible { box-shadow: 0 0 0 2px oklch(from var(--g50) l c h / 0.25); }
+  html:is([data-motion="reduced"], [data-motion="off"]) .fleet-card { transition: none; }
+
+  /* left 2 px status bar: idle g700, armed r500 (single-red rule), lost g50 hatched, critical r500 */
+  .fleet-card-bar { position: absolute; top: 10px; bottom: 10px; left: 3px; width: 2px; border-radius: 1px; background: var(--g700); }
+  .fleet-card[data-bar="armed-red"] .fleet-card-bar, .fleet-card[data-bar="critical-red"] .fleet-card-bar { background: var(--r500); }
+  .fleet-card[data-bar="armed-strong"] .fleet-card-bar { background: var(--g50); }
+  .fleet-card[data-bar="lost"] .fleet-card-bar { background: repeating-linear-gradient(180deg, var(--g50) 0 3px, transparent 3px 6px); }
+
+  .fleet-card-hold { position: absolute; left: 10px; right: 10px; bottom: 2px; width: auto; }
+
+  /* scan progress hairline (lf-track base, g50 fill) */
+  .scan-line { position: relative; display: block; height: 1px; overflow: hidden; background: var(--lf-track); }
+  .scan-line > i { position: absolute; inset: 0; background: var(--g50); transform-origin: left center; transition: transform var(--duration-fast) linear; }
+
+  /* thin 4 px scrollbar (02 §4.3) */
+  .fleet-scroll [data-slot="scroll-area-scrollbar"][data-orientation="vertical"] { width: 6px; padding: 1px; }
+}

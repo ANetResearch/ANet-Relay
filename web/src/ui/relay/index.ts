@@ -1,0 +1,10 @@
+// Shared Relay primitives. Feature modules compose these; they never restyle status semantics themselves.
+export { LinkDot, LinkStatus, ArmedWord, SimTag, useStatusBar, type LinkState } from './status'
+export { BatteryBar, BatteryReadout } from './BatteryBar'
+export { ControllerPill, MorphPill, usePillSpec, useWaitingSpec, useInputLabel, type PillSpec, type PillVariant } from './ControllerPill'
+export { Value, Readout, type ValueProps } from './Value'
+export { TypeToConfirm, matchesWord, type TypeToConfirmProps } from './TypeToConfirm'
+export { HoldProgress, HoldTimer } from './HoldProgress'
+export { Section, Group } from './Section'
+export { EmptyState, Placeholder } from './EmptyState'
+export { useAgo } from './useAgo'

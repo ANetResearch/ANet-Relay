@@ -1,0 +1,2 @@
+# Icon build dependencies (tools/icons/build_icons.py).
+pillow==12.3.0
