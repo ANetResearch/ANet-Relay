@@ -532,10 +532,22 @@ class Run:
         step.restart()
         self._enter(v)
 
+    def preempted(self, v: Vehicle) -> bool:
+        """A stop, a lost link or a crash processed ahead of this command in the fleet queue wins over it:
+        the run aborts here rather than on the next tick, so nothing it was about to do (spin, take off)
+        happens."""
+        reason = self._abort_reason(v, self.fleet.clock())
+        if reason:
+            self.abort(reason)
+            return True
+        return False
+
     def answer(self, actor: Actor, step_id: str, answer: str, value: Any, confirm: str | None) -> None:
         v = self._vehicle()
         if v is None or not self.active:
             raise err("no_procedure", vehicle=self.vid)
+        if self.preempted(v):
+            return
         step = self.current
         if step is None or step.id != step_id:
             raise err("procedure_step_mismatch", step=step_id, current=step.id if step else "-")
@@ -570,10 +582,8 @@ class Run:
                     step.abort(ctx)
                 except Exception:  # cleanup must not keep the run alive
                     log.exception("procedure abort cleanup failed on %s", self.vid)
-            if reason in ("stopped", "link_lost", "crashed", "control_lost"):
-                v.motor_seq = None
-            else:
-                ctx.stop_motors()
+            # always: a motor test started just before a stop is stopped too (no-op without a link or a test)
+            ctx.stop_motors()
             ctx.restore_rates()
         if step is not None:
             step.state = "aborted"

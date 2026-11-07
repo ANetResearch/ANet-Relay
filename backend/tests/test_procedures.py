@@ -471,6 +471,83 @@ def test_emergency_stop_aborts_a_flight_step(svc, stepper):
     assert any(e["kind"] == "procedure_aborted" for e in svc.events.after(0, 5000))
 
 
+def _at_props_prompt(svc, stepper, vid, actor, renew=None):
+    drive(
+        svc,
+        stepper,
+        vid,
+        actor,
+        budget=30,
+        renew=renew,
+        answer=lambda *a: None,
+        until=lambda w: w["step"] == "S6" and by_id(w, "S6")["state"] == "waiting",
+    )
+
+
+def test_an_answer_queued_behind_a_stop_never_spins_a_motor(svc, stepper):
+    vid, v = boot(svc, stepper)
+    svc.possess(vid, "keyboard")
+    svc.procedure_start(vid, OP, "motor_check")
+    _at_props_prompt(svc, stepper, vid, OP)
+    # the stop and the answer are processed in one fleet step, the stop first (FIFO command queue)
+    svc.stop(vid, OP)
+    view = svc.procedure_answer(vid, OP, "S6", "confirm")
+    assert view["state"] == "aborted" and view["reason"] == "stopped"
+    assert v.motor_seq is None and v.motor_until <= svc.clock()
+    kinds = [e["kind"] for e in svc.events.after(0, 5000) if e["vehicle"] == vid]
+    assert "motor_test" not in kinds and "motor_test_started" not in kinds
+    # a start queued behind a stop is aborted at once as well
+    stepper.run(0.01)
+    svc.stop(vid, OP)
+    view = svc.procedure_start(vid, OP, "motor_check")
+    assert view["state"] == "aborted" and view["reason"] == "stopped"
+
+
+@pytest.mark.parametrize("reason", ["stopped", "control_lost", "crashed"])
+def test_every_abort_stops_a_spinning_motor(svc, stepper, reason):
+    vid, v = boot(svc, stepper)
+    svc.possess(vid, "keyboard")
+    svc.procedure_start(vid, OP, "motor_check")
+    _at_props_prompt(svc, stepper, vid, OP)
+    svc.procedure_answer(vid, OP, "S6", "confirm")
+    stepper.run(0.1)
+    assert svc.clock() < v.motor_until  # motor 1 is spinning
+    v.procedure.abort(reason)
+    assert v.motor_until == 0.0 and v.motor_seq is None
+    assert any(e["kind"] == "motor_test_stopped" for e in svc.events.after(0, 5000) if e["vehicle"] == vid)
+
+
+def test_a_run_is_recorded_complete_from_its_start(svc, stepper):
+    vid, _v = boot(svc, stepper)
+    svc.possess(vid, "keyboard")
+    started = svc.procedure_start(vid, OP, "motor_check")
+    saved = svc.history.test_run(started["run_id"])
+    assert saved["title_en"] == "Motor order and direction" and len(saved["steps"]) == 3
+    assert saved["total"] == 3 and saved["by"] == {"kind": "operator", "name": None}
+
+
+def test_a_run_saved_before_its_first_step_still_serves_after_a_restart(tmp_path):
+    from relay.api.schemas_procedures import ProcedureRun
+
+    path = tmp_path / "history.db"
+    h = History(path)
+    run_id = h.test_run_start({**_record(), "state": "running"})  # no steps or meta written yet
+    h.close()
+    svc = FleetService(listen=False, history=History(path), operator_token="op-token")
+    with TestClient(create_app(svc), base_url="http://127.0.0.1") as c:
+        got = c.get(f"/api/v1/test-runs/{run_id}")
+        assert got.status_code == 200, got.text
+        body = got.json()
+        assert body["state"] == "aborted" and body["title_en"] == "Motor order and direction"
+        assert body["steps"] == [] and body["total"] == 0
+        vid = c.post("/api/v1/sims", headers={"X-Relay-Operator": "op-token"}, json={}).json()["added"][0]
+        assert vid == "sim-1"
+        view = c.get(f"/api/v1/vehicles/{vid}/procedure")
+        assert view.status_code == 200, view.text
+        ProcedureRun.model_validate(view.json())
+        assert c.get(f"/api/v1/test-runs/{run_id}/export", params={"fmt": "md"}).status_code == 200
+
+
 def test_flight_steps_fail_clearly_with_hover_assist_off(svc, stepper):
     # WP-E seam (05 §4.3 x §5.1): a simulator without hover assist has no altitude or position source
     vid, v = boot(svc, stepper)

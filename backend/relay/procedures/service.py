@@ -82,7 +82,9 @@ class ProcedureOps:
             )
             run_ = Run(self, v, run_id, procedure, actor, opts)  # type: ignore[arg-type]
             v.procedure = run_
+            self._save_test_run(run_)  # the record is complete from the start (a restart may come any time)
             run_.begin(v)
+            run_.preempted(v)
             return clean(run_.view())
 
         return self.call(run)  # type: ignore[attr-defined]
@@ -101,7 +103,7 @@ class ProcedureOps:
         if recent:
             full = self.history.test_run(recent[0]["run_id"])  # type: ignore[attr-defined]
             if full is not None:
-                return full
+                return _complete(full)
         raise err("procedure_not_found", vehicle=vid)
 
     def procedure_answer(
@@ -136,7 +138,7 @@ class ProcedureOps:
         found = self.history.test_run(run_id)  # type: ignore[attr-defined]
         if found is None:
             raise err("test_run_not_found", run=run_id)
-        return found
+        return _complete(found)
 
     def test_run_export(self, run_id: int, fmt: str) -> tuple[str, str]:
         found = self.test_run(run_id)
@@ -177,3 +179,32 @@ class ProcedureOps:
                 "meta": meta,
             },
         )
+
+
+def _complete(row: dict[str, Any]) -> dict[str, Any]:
+    """A saved run with every field of the run view: rows written before their first save (an older Relay that
+    stopped in that window) lack the meta fields."""
+    procedure = row.get("procedure", "")
+    title = PROCEDURES.get(procedure, (procedure, procedure))
+    steps = row.get("steps") or []
+    defaults: dict[str, Any] = {
+        "title_en": title[0],
+        "title_zh": title[1],
+        "label": None,
+        "kind": None,
+        "autopilot": None,
+        "firmware": None,
+        "simulated": str(row.get("vehicle", "")).startswith("sim-"),
+        "step": None,
+        "index": 0,
+        "total": len(steps),
+        "reason": None,
+        "reason_en": None,
+        "reason_zh": None,
+        "paused": False,
+        "by": {"kind": "operator", "name": None},
+        "options": {},
+        "steps": steps,
+        "params": {},
+    }
+    return {**defaults, **{k: x for k, x in row.items() if x is not None or k not in defaults}}
