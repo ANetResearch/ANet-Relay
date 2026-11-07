@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { ProcedurePrompt, ProcedureRun, ProcedureStep } from '@/api'
 import { counts, currentStep, formatValue, guardedAnswer, isActive, motorPoint, progress, promptLayout, reportFile, sparkline, spinningMotors, stateTone, stepTone } from './model'
@@ -129,5 +131,18 @@ describe('bench model', () => {
   it('counts verdicts and names the export', () => {
     expect(counts(run())).toEqual({ pass: 1, warn: 0, fail: 0, skipped: 0 })
     expect(reportFile(7, 'md')).toBe('anet-relay-bench-7.md')
+  })
+})
+
+describe('bench colours', () => {
+  it('never paints red for a result: a failure is not an armed aircraft or a critical alert (single-red rule)', () => {
+    const files = readdirSync(import.meta.dirname).filter((f) => /\.(tsx|css)$/.test(f) && !f.includes('.test.'))
+    expect(files).toContain('bench.css')
+    for (const file of files) {
+      const text = readFileSync(resolve(import.meta.dirname, file), 'utf8')
+      // the motor diagram's spinning motor keeps the lieflat hero role (live outputs, not a verdict)
+      const stripped = text.replace(/\.bench-layout [^\n]*lf-hero[^\n]*/g, '')
+      expect(stripped, file).not.toMatch(/--r\d00|data-hot|lf-hero/)
+    }
   })
 })

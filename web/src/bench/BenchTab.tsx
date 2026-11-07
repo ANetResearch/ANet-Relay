@@ -272,8 +272,8 @@ function StepPanel({ v, run, step, onRun }: { v: Vehicle; run: ProcedureRun; ste
         <ul className="flex flex-col gap-1">
           {step.findings.map((f, i) => (
             <li key={`${f.code}-${i}`} className="flex items-start gap-2 text-hud-sub">
-              <Icon icon={f.level === 'info' ? 'info' : 'alert'} className={cn('mt-px size-3.5 flex-none', f.level === 'fail' ? 'text-[var(--r400)]' : 'text-[var(--g400)]')} />
-              <span className={f.level === 'info' ? 'text-[var(--g400)]' : 'text-[var(--g100)]'}>{pickText(lang, f.text_en, f.text_zh)}</span>
+              <Icon icon={f.level === 'info' ? 'info' : 'alert'} className={cn('mt-px size-3.5 flex-none', f.level === 'fail' ? 'text-[var(--g50)]' : 'text-[var(--g400)]')} />
+              <span className={f.level === 'fail' ? 'font-bold text-[var(--g50)]' : f.level === 'info' ? 'text-[var(--g400)]' : 'text-[var(--g100)]'}>{pickText(lang, f.text_en, f.text_zh)}</span>
             </li>
           ))}
         </ul>

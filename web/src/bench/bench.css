@@ -1,5 +1,6 @@
 /* Bench tab, Control entry and Records bench reports (WP-B, 05 §4.5). Colours only through theme.css tokens; the
-   charts and tables use the lieflat roles of lf.css. The inspector panel is 320 to 440 wide: the step list and
+   charts and tables use the lieflat roles of lf.css. No red: a failed step or finding is not an armed aircraft or a
+   critical alert (single-red rule, store/red.ts), so failures take the strong treatment, bold g50. The inspector panel is 320 to 440 wide: the step list and
    the step panel stack below 400 and sit side by side above it (container query on the tab). */
 @layer components {
   .insp-tabs { scrollbar-width: none; }
@@ -18,7 +19,7 @@
   .bench-step:focus-visible { box-shadow: 0 0 0 2px oklch(from var(--g50) l c h / 0.25); }
   .bench-step[data-selected] { background: var(--g850); color: var(--g50); }
   .bench-step[data-tone="active"] { color: var(--g50); }
-  .bench-step[data-tone="bad"] .bench-step-mark { color: var(--r400); }
+  .bench-step[data-tone="bad"] { color: var(--g50); font-weight: 700; }
   .bench-step[data-tone="muted"] { color: var(--g500); }
   @container bench (min-width: 400px) {
     .bench-step { padding: 2px 8px; }
@@ -26,7 +27,7 @@
 
   .bench-tone-ok { color: var(--g300); }
   .bench-tone-warn { color: var(--g50); font-weight: 560; }
-  .bench-tone-bad { color: var(--r400); font-weight: 560; }
+  .bench-tone-bad { color: var(--g50); font-weight: 700; }
   .bench-tone-muted { color: var(--g500); }
   .bench-tone-active { color: var(--g50); }
 

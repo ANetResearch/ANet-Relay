@@ -74,7 +74,7 @@ function StepRows({ step, limitsColumn }: { step: ProcedureStep; limitsColumn: b
             <TableCell className="py-1 align-top text-[var(--g300)]" title={limits ?? undefined}>
               {pickText(lang, m.label_en, m.label_zh)}
             </TableCell>
-            <TableCell data-num="" data-hot={tone === 'bad' ? '' : undefined} className={cn('num py-1 align-top', tone === 'warn' ? 'font-[560] text-[var(--g50)]' : 'text-[var(--g200)]')}>
+            <TableCell data-num="" data-bad={tone === 'bad' ? '' : undefined} className={cn('num py-1 align-top', tone === 'bad' ? 'font-bold text-[var(--g50)]' : tone === 'warn' ? 'font-[560] text-[var(--g50)]' : 'text-[var(--g200)]')}>
               {formatValue(m.value, m.unit)}
               {peak ? <span className="block text-[10px] text-[var(--g500)]">{peak}</span> : null}
             </TableCell>
@@ -168,9 +168,9 @@ export function ReportView({ run, className, compact = false }: { run: Procedure
           <ul className="flex flex-col gap-1" data-report-findings="">
             {findings.map((f, i) => (
               <li key={`${f.step}-${f.code}-${i}`} className="flex items-start gap-2 text-hud-sub">
-                <Icon icon={f.level === 'info' ? 'info' : 'alert'} className={cn('mt-px size-3.5 flex-none', f.level === 'fail' ? 'text-[var(--r400)]' : f.level === 'warn' ? 'text-[var(--g50)]' : 'text-[var(--g500)]')} />
+                <Icon icon={f.level === 'info' ? 'info' : 'alert'} className={cn('mt-px size-3.5 flex-none', f.level === 'info' ? 'text-[var(--g500)]' : 'text-[var(--g50)]')} />
                 <span className="num w-7 flex-none text-[var(--g500)]">{f.step}</span>
-                <span className={f.level === 'info' ? 'text-[var(--g400)]' : 'text-[var(--g100)]'}>{pickText(lang, f.text_en, f.text_zh)}</span>
+                <span className={f.level === 'fail' ? 'font-bold text-[var(--g50)]' : f.level === 'info' ? 'text-[var(--g400)]' : 'text-[var(--g100)]'}>{pickText(lang, f.text_en, f.text_zh)}</span>
               </li>
             ))}
           </ul>
