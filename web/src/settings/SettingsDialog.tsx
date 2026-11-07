@@ -20,6 +20,7 @@ import { Value } from '@/ui/relay'
 import { t8, useT8, type AnyKey } from '@/fleet/copy'
 import { CopyButton, openExternal } from '@/agents/CopyButton'
 import { applyBackendUi, DEADZONE_RANGE, EXPO_RANGE, setPrefs, usePrefs, type StartView, type Units } from './prefs'
+import type { BootMode } from '@/app/bootFilm'
 import { CopilotSettings } from '@/copilot/CopilotSettings'
 import './settings.css'
 
@@ -189,6 +190,7 @@ function General() {
   const units = usePrefs((p) => p.units)
   const startView = usePrefs((p) => p.startView)
   const chase = usePrefs((p) => p.chaseOnCourse)
+  const bootMode = usePrefs((p) => p.bootMode)
   return (
     <>
       <Row label={t('set.language')}>
@@ -211,6 +213,19 @@ function General() {
       </Row>
       <Row label={t('set.chaseOnCourse')}>
         <Switch checked={chase} onCheckedChange={(v) => setPrefs({ chaseOnCourse: v })} aria-label={t('set.chaseOnCourse')} />
+      </Row>
+      {/* WP-A opening sequence (05 §2.1) */}
+      <Row label={t('set.opening')} hint={t('set.openingHint')}>
+        <Segmented<BootMode>
+          value={bootMode}
+          onChange={(v) => setPrefs({ bootMode: v })}
+          label={t('set.opening')}
+          options={[
+            { value: 'full', label: t('set.opening.full') },
+            { value: 'short', label: t('set.opening.short') },
+            { value: 'minimal', label: t('set.opening.minimal') },
+          ]}
+        />
       </Row>
     </>
   )

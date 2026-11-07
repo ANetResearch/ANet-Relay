@@ -96,6 +96,19 @@ export const en = {
   'boot.lost': 'Relay lost its backend.',
   'boot.lostBody': 'Sticks are not being sent. Aircraft follow their own failsafes.',
   'boot.fixture': 'Fixture data · no backend',
+
+  // WP-A boot and voxel loaders (05 §2)
+  'boot.ind.backend': 'Backend',
+  'boot.ind.health': 'Health',
+  'boot.ind.stream': 'Stream',
+  'set.opening': 'Opening sequence',
+  'set.opening.full': 'Full',
+  'set.opening.short': 'Short',
+  'set.opening.minimal': 'Minimal',
+  'set.openingHint': 'The full sequence plays once after every update. Any key or click skips it.',
+  'voxel.loading': 'Loading',
+  'stage.loadingModel': 'Loading aircraft model',
+
   'app.viewFailed': 'This view stopped working.',
   'app.viewFailedBody': 'Stop all and the rest of the window keep working. Reload the view to continue.',
   'app.reloadView': 'Reload view',

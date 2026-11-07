@@ -9,6 +9,8 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 const root = import.meta.dirname
+/** The renderer's version, for the boot's "first launch of this version" outside Electron (app/bootCinema.ts). */
+const version = (JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as { version: string }).version
 
 /** `:root{--g950:#..;...}` from the primitive layer of theme.css */
 export function bootTokens(themeCss: string): string {
@@ -43,6 +45,7 @@ function relayBootPlugin(): Plugin {
 
 export default defineConfig({
   base: './',
+  define: { __RELAY_VERSION__: JSON.stringify(version) },
   plugins: [relayBootPlugin(), react(), tailwindcss()],
   resolve: { alias: { '@': resolve(root, 'src') } },
   server: { host: '127.0.0.1', port: 5173, strictPort: true },

@@ -3,6 +3,7 @@
 // controller input (dead zone, expo); see CONTRACTS.md §5.
 import { create } from 'zustand'
 import { api } from '@/api'
+import { DEFAULT_BOOT_MODE, parseBootMode, writeBootMode, type BootMode } from '@/app/bootFilm'
 
 export type Units = 'm' | 'ft'
 export type StartView = 'overview' | 'chase' | 'top'
@@ -13,9 +14,11 @@ export interface Prefs {
   chaseOnCourse: boolean
   padDeadzone: number
   padExpo: number
+  /** WP-A: Settings > General > Opening sequence (05 §2.1) */
+  bootMode: BootMode
 }
 
-export const DEFAULT_PREFS: Prefs = { units: 'm', startView: 'overview', chaseOnCourse: true, padDeadzone: 0.08, padExpo: 0.3 }
+export const DEFAULT_PREFS: Prefs = { units: 'm', startView: 'overview', chaseOnCourse: true, padDeadzone: 0.08, padExpo: 0.3, bootMode: DEFAULT_BOOT_MODE }
 export const DEADZONE_RANGE = [0.04, 0.15] as const
 export const EXPO_RANGE = [0, 0.6] as const
 
@@ -32,6 +35,7 @@ export function sanitizePrefs(raw: unknown): Prefs {
     chaseOnCourse: typeof r.chaseOnCourse === 'boolean' ? r.chaseOnCourse : DEFAULT_PREFS.chaseOnCourse,
     padDeadzone: clamp(num(r.padDeadzone, DEFAULT_PREFS.padDeadzone), DEADZONE_RANGE),
     padExpo: clamp(num(r.padExpo, DEFAULT_PREFS.padExpo), EXPO_RANGE),
+    bootMode: parseBootMode(r.bootMode) ?? DEFAULT_PREFS.bootMode,
   }
 }
 
@@ -53,6 +57,11 @@ function saveLocal(p: Prefs): void {
 }
 
 export const usePrefs = create<Prefs>()(() => (typeof localStorage === 'undefined' ? { ...DEFAULT_PREFS } : loadLocal()))
+
+// WP-A (05 §2.1): the opening runs before the backend answers, so the setting is mirrored into relay.boot.mode
+usePrefs.subscribe((p, prev) => {
+  if (p.bootMode !== prev.bootMode) writeBootMode(typeof localStorage === 'undefined' ? null : localStorage, p.bootMode)
+})
 
 /** Other keys of the backend `ui` object are kept when the window writes its preferences. */
 let backendUi: Record<string, unknown> = {}

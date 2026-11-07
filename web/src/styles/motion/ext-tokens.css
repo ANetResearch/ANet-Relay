@@ -16,6 +16,32 @@
     --duration-chart-slow: 1200ms;        /* editorial large chart entrance (lieflat enterSlow) */
     --duration-instant: 0s;               /* Base UI parts in reduced, off and data-instant */
     --duration-epsilon: 0.01ms;           /* JS recipes in reduced (transitionend still fires) */
+
+    /* WP-A boot and voxel loaders (05 §2.3, §2.5). app/bootFilm.ts carries the same values as its defaults and
+       bootFilm.test.ts fails when the two drift; at run time the boot reads these through ui/motion/tokens.ts. */
+    --boot-full-dur: 5600ms;              /* director's cut: window visible -> reveal finished */
+    --boot-full-assemble: 1100ms;         /* full: end of act 1 (voxel logo) */
+    --boot-full-cut: 1500ms;              /* full: end of act 2 (diagonal cut into the film) */
+    --boot-full-film: 5000ms;             /* full: end of act 3 (film), start of the reveal */
+    --boot-short-dur: 3200ms;             /* short cut: window visible -> reveal finished */
+    --boot-short-assemble: 700ms;
+    --boot-short-cut: 1000ms;
+    --boot-short-film: 2800ms;
+    --boot-minimal-dur: 1200ms;           /* minimal (the v0.2 opening): earliest reveal after navigation start */
+    --boot-minimal-hold: 160ms;           /* minimal: full hairline held before the mask fades */
+    --boot-reduced-dur: 300ms;            /* reduced motion: mark shown, reveal after 300 ms (total <= 400 ms) */
+    --boot-cold: 80ms;                    /* act 0: g950 only */
+    --boot-voxel-fly: 150ms;              /* act 1: one voxel's flight into the logo (quick) */
+    --boot-flash: 60ms;                   /* act 1: g50 luminance flash when the last voxel lands */
+    --boot-word-hold: 180ms;              /* act 1: crisp mark and RELAY held before act 2 */
+    --boot-cut-flash: 120ms;              /* act 3: white field between two clips */
+    --boot-indicator-flash: 80ms;         /* act 3: voxel flash of a readiness cell */
+    --boot-reveal-wave: 350ms;            /* act 5 (full): spread of the 24 px reveal wave (first to last cell start) */
+    --boot-reveal-wave-short: 150ms;      /* act 5 (short) */
+    --boot-reveal-cell: 250ms;            /* act 5: one cell's flip (fast) */
+    --voxel-cycle: 1200ms;                /* VoxelLoader: build and tear-down loop */
+    --voxel-wipe: 300ms;                  /* VoxelWipe: workspace switch and replay open (250-350 ms) */
+    --voxel-scatter: 350ms;               /* StageLoading: cube scatters out when the model is ready */
   }
   html[data-tier="S"] { --telemetry-text-interval: 250ms; }   /* Tier S text <= 4 Hz (ADR-029) */
 }
