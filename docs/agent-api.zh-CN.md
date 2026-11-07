@@ -248,7 +248,7 @@ POST /api/v1/vehicles/sim-1/plan
 
 等待中的步骤带有 `prompt`：`{id, text_en, text_zh, detail_en, detail_zh, answers, confirm_word, operator_only, data}`。真机上 `confirm_word` 沿用设备级规则：S6、S7 转动电机前为 `MOTOR`（已拆桨、油门不超过 30 %、不超过 5 秒、已上锁；一次确认覆盖该步骤的全部电机），S4 每项校准为 `CALIBRATE`，S9 起飞前为 `ARM`，S11 写入参数前为该参数名（写入后回读校验）。`operator_only: true` 的提示（真机上的 S5、S6、S8 与 S7 拆桨确认）拒绝会话，返回 403 `operator_required`：必须由人在 Relay 窗口确认。模拟机上智能体可以回答全部提示。
 
-流程由机群主循环推进，而不是由调用方推进：轮询 `GET .../procedure`（或订阅事件），在 `state` 为 `waiting` 时回答。以下情况流程中止：急停（急停优先，之后不再由流程降落）、链路丢失、坠毁、失去认领，以及在飞行步骤之外解锁或上锁。会话启动的流程在有人附身期间暂停，控制权交还且飞机上锁后从当前步骤开头继续。飞行步骤起飞至 0.6 m、保持在安全区内并自行降落；S10 在定高模式下对横滚、俯仰、偏航施加短时阶跃杆量。建议的参数修改（S10 速率环增益、S11 悬停油门）从不自动写入：S11 逐项询问。
+流程由机群主循环推进，而不是由调用方推进：轮询 `GET .../procedure`（或订阅事件），在 `state` 为 `waiting` 时回答。以下情况流程中止：急停（急停优先，之后不再由流程降落）、链路丢失、坠毁、失去认领，以及在飞行步骤之外解锁或上锁。会话启动的流程在有人附身期间暂停，控制权交还且飞机上锁后从当前步骤开头继续。飞行步骤起飞至 0.6 m、保持在安全区内并自行降落；S10 在定高模式下对横滚、俯仰、偏航施加短时阶跃杆量。模拟机关闭悬停辅助时（无气压计与定位源），S9 与 S10 立即以发现项 `hover_assist_off` 判定失败；飞行段中模拟机的悬停辅助被关闭时，飞机降落且该步失败。建议的参数修改（S10 速率环增益、S11 悬停油门）从不自动写入：S11 逐项询问。
 
 ### 飞行健康
 
@@ -268,6 +268,17 @@ POST /api/v1/vehicles/sim-1/plan
 
 创建时用 `POST /sims {count, autopilot, position, hover_assist}` 设定；`POST /sims/{id}/assist {on}` 切换（操作员、控制该机的会话，或在无人控制该机且操作员允许应用控制时的任意会话）。快照携带 `vehicle.sim = {hover_assist, turbulence}`（真机为 null）；事件 `sim_assist_changed` 报告变化。MCP：`app_sim_assist`；SDK：`sim_assist(id, on)` 与 `add_sims(count, autopilot, hover_assist)`。
 
+### 局域网联机
+
+联机场地（05 §7）让同一广播域内的 Relay 终端互见彼此的模拟机、发射虚拟子弹并计分。在窗口中加入（顶栏 **联机**，设置 `peer_enabled`），只使用一个独立的 UDP 套接字（设置 `peer_port`，缺省 47114，组播 `239.255.71.14`、TTL 1，另加子网定向广播）。来自网络的任何数据都不会进入控制路径：杆量、解锁、认领、参数、技能、动作序列与设备级接口均不受对端数据包驱动。**真机永不加入联机场地，也永不受虚拟子弹影响**：只有模拟机会被共享、可以射击、可以被命中。
+
+| 方法与路径 | 权限 | 用途 |
+|---|---|---|
+| `GET /arena` | – | `{enabled, instance, seat, callsign, error, peers: [{id, callsign, seat, rtt_ms, stale, score, vehicles}], shots, local: {ammo, hp, reloading, reload, down, max_ammo, max_hp, score}}`；坐标已换算到本终端的局部 ENU |
+| `POST /vehicles/{id}/fire` | 控制者 | `{seconds}`（0–3，缺省 1；0 为松开）：按住已解锁、在空中的模拟机扳机；每秒 8 发，弹匣 24 发，装填 1.5 s；未加入场地时 `arena_off`，被击落后 `arena_down`，真机 `sim_only` |
+
+每发伤害 20（5 发击落），并对机体施加冲量；被击落的模拟机电机停转、坠落、触地后上锁，5 s 后回到座位出生点（设置 `arena_auto_respawn`）或在复位时恢复。命中不是安全事件，不产生告警。设置：`peer_enabled`、`peer_port`、`peer_callsign`（≤ 16 字符，留空使用计算机名）、`arena_auto_respawn`。SDK：`arena()`、`fire(id, seconds)`。
+
 ## 6. WebSocket `/api/v1/stream`
 
 服务端 → 客户端：
@@ -279,7 +290,7 @@ POST /api/v1/vehicles/sim-1/plan
 {"type": "error", "error": {"code": "not_claimed", "message_en": "...", "message_zh": "...", "detail": {}}, "ref": "sim-1"}
 ```
 
-`fleet` 以 10 Hz 推送，`event` 实时推送。客户端 → 服务端：`sticks`（见上）与 `{"type": "ping"}`（回复 `pong`）。令牌无效时以关闭码 4401 断开；浏览器来源不被允许时以 4403 断开。
+`fleet` 以 10 Hz 推送，`arena`（即 `GET /arena` 视图）以 20 Hz 推送，`event` 实时推送。客户端 → 服务端：`sticks`（见上）、`{"type": "fire", "vehicle", "on"}`（控制者的扳机，按住期间每 100 ms 刷新，300 ms 未刷新视为松开）与 `{"type": "ping"}`（回复 `pong`）。令牌无效时以关闭码 4401 断开；浏览器来源不被允许时以 4403 断开。
 
 ## 7. 事件与错误
 
@@ -300,6 +311,7 @@ POST /api/v1/vehicles/sim-1/plan
 | `stop` / `stop_all` | 急停 |
 | `refly_started` / `refly_finished` / `refly_failed` | 再飞 |
 | `sim_assist_changed` | 模拟机悬停辅助已切换（`data.hover_assist`） |
+| `peer_joined` / `peer_left` / `arena_hit` / `arena_down` | 局域网联机：终端加入或离开、我方命中或被命中、模拟机被击落 |
 | `device_command` / `motor_test` / `motor_test_stopped` / `actuator_set` / `rc_override` / `message_interval` / `home_set` / `rebooting` / `calibration_started` / `terminated` | 设备级操作 |
 | `app_command` | 会话或操作员执行的界面动作（`data.action`、`data.by`） |
 | `procedure_started` / `procedure_step` / `procedure_waiting` / `procedure_finished` / `procedure_aborted` | 标定流程，带 `data.run_id`、`data.step`、`data.verdict` 或 `data.reason` |
@@ -316,7 +328,7 @@ POST /api/v1/vehicles/sim-1/plan
 | 401 | `auth_required`、`session_expired`（重新打开会话） |
 | 403 | `operator_required`、`session_required`、`untrusted_host`、`app_control_disabled` |
 | 404 | `vehicle_not_found`、`course_not_found`、`unknown_skill`、`param_not_found`、`record_not_found`、`procedure_unknown`、`procedure_not_found`、`test_run_not_found` |
-| 409 | `not_claimed`、`claimed_by_other`、`possessed_by_human`、`claim_suspended`、`preflight_blocked`、`arm_rejected`、`mode_rejected`、`not_armed`、`crashed`、`capability_missing`、`no_position_estimate`、`not_airborne`、`no_plan`、`must_be_disarmed`、`message_not_seen`、`refly_unavailable`、`ui_action_failed`、`procedure_running`、`no_procedure`、`procedure_step_mismatch`、`procedure_not_waiting` |
+| 409 | `not_claimed`、`claimed_by_other`、`possessed_by_human`、`claim_suspended`、`preflight_blocked`、`arm_rejected`、`mode_rejected`、`not_armed`、`crashed`、`capability_missing`、`no_position_estimate`、`not_airborne`、`no_plan`、`must_be_disarmed`、`message_not_seen`、`refly_unavailable`、`ui_action_failed`、`procedure_running`、`no_procedure`、`procedure_step_mismatch`、`procedure_not_waiting`、`arena_off`、`arena_down` |
 | 429 | `rate_limited` |
 | 503 | `link_not_ready`、`backend_busy`、`ui_unavailable` |
 | 504 | `ui_timeout` |
@@ -401,6 +413,7 @@ Relay 不在 8765 端口运行时，追加 `"--base", "http://127.0.0.1:<port>"`
 | `command(id, command, params, frame, use_int, confirm, timeout_s)` · `motor_test(id, motor, throttle_pct, seconds, confirm)` · `motors_stop(id)` · `actuator(id, index, value, pwm, seconds, confirm)` · `rc(id, channels, axes)` | 原始指令、电机、执行器、遥控覆盖 |
 | `message_interval(id, message, hz)` · `request_message(id, message)` · `reboot(id, confirm)` · `calibrate(id, sensor, confirm)` · `set_home(id, here, lat, lon, alt)` · `terminate(id, confirm)` | 消息频率、重启、校准、home、飞行终止 |
 | `procedures()` · `procedure_start(id, procedure, hover_s, skip, auto_answer)` · `procedure(id)` · `procedure_answer(id, step, answer, confirm)` · `procedure_abort(id)` · `wait_procedure(id, timeout, waiting=True)` · `test_runs(id)` · `test_run(run_id)` · `test_run_export(run_id, fmt)` | 标定流程与报告 |
+| `arena()` · `fire(id, seconds)` | 联机场地视图与模拟机扳机 |
 | `app()` · `ui_state()` · `gamepads()` · `app_actions()` · `ui(action, **args)` | 应用与窗口状态、界面动作 |
 | `scan_network(networks)` · `connect_vehicle(host, port)` · `remove_vehicle(id)` · `add_sims(count, autopilot, hover_assist)` · `remove_sims(ids)` · `sim_assist(id, on)` · `settings()` · `update_settings(**patch)` · `ack_alert(id)` · `stop_all()` | 应用操作：打开会话时以会话身份调用，否则使用操作员令牌 |
 

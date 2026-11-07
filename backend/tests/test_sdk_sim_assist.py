@@ -60,3 +60,24 @@ def test_sdk_add_without_assist_and_switch(base):
         assert agent.sim_assist(vid, False)["hover_assist"] is False  # nobody controls it
     finally:
         agent.close()
+
+
+def test_sdk_arena_view_and_fire(base):
+    # LAN arena (05 §7.4-§7.5): the read-only view and the agents' trigger, which needs the arena
+    op = RelayClient(base, operator_token=OP)
+    view = op.arena()
+    assert view["enabled"] is False and view["local"]["max_ammo"] == 24
+    (vid,) = op.add_sims(1)
+    agent = RelayClient(base)
+    agent.open_session("arena-test")
+    try:
+        end = time.monotonic() + 10
+        while op.vehicle(vid)["link"]["state"] != "ok":
+            assert time.monotonic() < end
+            time.sleep(0.1)
+        agent.claim(vid)
+        with pytest.raises(RelayError) as exc:
+            agent.fire(vid, 1.0)
+        assert exc.value.code == "arena_off"
+    finally:
+        agent.close()

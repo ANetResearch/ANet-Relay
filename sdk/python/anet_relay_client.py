@@ -29,7 +29,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 __all__ = ["DEFAULT_BASE", "RelayClient", "RelayError"]
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 DEFAULT_BASE = os.environ.get("RELAY_API", "http://127.0.0.1:8765")
 API = "/api/v1"
@@ -752,6 +752,19 @@ class RelayClient:
     # names of 05 §4.4 (the same calls as procedures() and procedure())
     procedure_list = procedures
     procedure_status = procedure
+
+    # ------------------------------------------------------------------ LAN arena (05 §7)
+
+    def arena(self) -> dict:
+        """The arena view: this terminal's seat and callsign, peers and their simulators, rounds in flight, and
+        the local ammunition, hit points and score. Real aircraft never take part."""
+        return self._get("/arena")
+
+    def fire(self, vehicle_id: str, seconds: float = 1.0) -> dict:
+        """Hold the trigger of a claimed, armed, airborne simulator for ``seconds`` (at most 3; 0 releases it):
+        8 rounds per second, 24 per magazine. Needs this terminal in the arena (``arena_off``); ``sim_only`` for
+        a real aircraft. Returns ``{id, firing, ammo, max, reloading, hp}``."""
+        return self._post(f"/vehicles/{vehicle_id}/fire", {"seconds": float(seconds)})
 
     # ------------------------------------------------------------------ simulators (app operations)
 
