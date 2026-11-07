@@ -6,11 +6,19 @@ usable interface with loopback enabled and TTL 1, and sends each datagram to the
 interface's directed broadcast address (for access points that drop multicast). Receivers drop their own
 packets by instance id and duplicates by instance and sequence number.
 
-Threads: the receive thread only reads datagrams, checks size, parses them (``wire.decode``), drops duplicates
-and applies the per-source rate limit; it hands structured packets to the fleet thread through a bounded inbox
+Threads: the receive thread only reads datagrams, applies the global and per-address budgets, checks size,
+parses them (``wire.decode``), binds each instance id to the first address it came from, drops duplicates and
+applies the per-source rate limit; it hands structured packets to the fleet thread through a bounded inbox
 that ``tick`` drains. Everything else, the peer table included, changes only on the fleet thread. The inbox
 replaces ``FleetService.post`` because every posted command marks the fleet snapshot dirty, which would lift
 snapshot building to the peer packet rate (05 §7.5: the arena must not raise the snapshot rate).
+
+Admission (05 §7.3 abuse bounds): instance ids are chosen by the sender, so nothing that an id alone decides
+is trusted. Budgets before parsing are per source address and global; an instance id is bound to its first
+address until it has been silent for ``REMOVE_S`` (packets from any other address are dropped), one address
+carries at most ``HOST_INSTANCES`` live ids, and the bound table only evicts expired ids, so forged ids cannot
+push out a live peer's duplicate window. A peer enters the table only with a valid STATE, and only joined
+peers count against ``MAX_PEERS``.
 
 Nothing here touches a vehicle. ``tick`` returns shots and hits for the arena rules and the joins and
 departures for its events; peers live in ``self.peers`` and nowhere else.
@@ -52,6 +60,10 @@ IFACE_REFRESH_S = 5.0
 MAX_IFACES = 8
 RECV_POLL_S = 0.1
 RTT_SAMPLES = 5
+HOST_INSTANCES = 4  # Relays sharing one source address (several instances on one machine)
+# before parsing; the group and the directed broadcast deliver every datagram twice
+IP_RATE_PER_S = RATE_PER_S * HOST_INSTANCES * 2
+GLOBAL_RATE_PER_S = RATE_PER_S * (MAX_PEERS + 1) * 2
 
 Interfaces = Callable[[], list[tuple[str, str]]]
 
@@ -125,19 +137,32 @@ class TickResult:
 
 
 class _Bucket:
-    __slots__ = ("at", "tokens")
+    __slots__ = ("at", "rate", "tokens")
 
-    def __init__(self, now: float) -> None:
-        self.tokens = RATE_PER_S
+    def __init__(self, now: float, rate: float = RATE_PER_S) -> None:
+        self.rate = rate
+        self.tokens = rate
         self.at = now
 
     def take(self, now: float) -> bool:
-        self.tokens = min(RATE_PER_S, self.tokens + (now - self.at) * RATE_PER_S)
+        self.tokens = min(self.rate, self.tokens + max(0.0, now - self.at) * self.rate)
         self.at = now
         if self.tokens < 1.0:
             return False
         self.tokens -= 1.0
         return True
+
+
+class _Source:
+    """One instance id as the receive thread knows it: its bound address, rate bucket and duplicate window."""
+
+    __slots__ = ("bucket", "ip", "last", "seen")
+
+    def __init__(self, ip: str, at: float) -> None:
+        self.ip = ip
+        self.last = at
+        self.bucket = _Bucket(at)
+        self.seen: deque[int] = deque(maxlen=SEEN_SEQS)
 
 
 def _seq_newer(a: int, b: int) -> bool:
@@ -169,8 +194,11 @@ class PeerService:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._inbox: deque[Received] = deque()
-        self._sources: OrderedDict[tuple[str, int], _Bucket] = OrderedDict()
-        self._seen: dict[int, deque[int]] = {}
+        # receive thread only: instance id -> source (oldest activity first), live ids per address, budgets
+        self._sources: OrderedDict[int, _Source] = OrderedDict()
+        self._per_ip: dict[str, int] = {}
+        self._hosts: OrderedDict[str, _Bucket] = OrderedDict()
+        self._global = _Bucket(clock(), GLOBAL_RATE_PER_S)
         self._seq = 0
         self._t0 = clock()
         self.peers: dict[int, Peer] = {}
@@ -189,6 +217,11 @@ class PeerService:
             "rate_limited": 0,
             "peer_cap": 0,
             "inbox_full": 0,
+            "flood": 0,
+            "ip_mismatch": 0,
+            "source_cap": 0,
+            "unknown": 0,
+            "late_shot": 0,
         }
 
     # ------------------------------------------------------------------ lifecycle
@@ -338,8 +371,23 @@ class PeerService:
                 self.receive(data, addr[0], self.clock())
 
     def receive(self, data: bytes, ip: str, at: float) -> None:
-        """Size, parse, self and duplicate drop, rate limit; then queue for the fleet thread. Thread-safe."""
+        """Budgets, size, parse, self drop, address binding, duplicate drop, rate limit; then queue for the
+        fleet thread. Receive thread (tests call it directly)."""
         self.counters["rx"] += 1
+        # the address budget first, so that one flooding host cannot spend the global budget of the others
+        host = self._hosts.get(ip)
+        if host is None:
+            host = self._hosts[ip] = _Bucket(at, IP_RATE_PER_S)
+            if len(self._hosts) > SOURCES_LIMIT:
+                self._hosts.popitem(last=False)
+        else:
+            self._hosts.move_to_end(ip)
+        if not host.take(at):
+            self.counters["rate_limited"] += 1
+            return
+        if not self._global.take(at):
+            self.counters["flood"] += 1
+            return
         if len(data) > wire.MAX_PACKET:
             self.counters["oversize"] += 1
             return
@@ -352,30 +400,54 @@ class PeerService:
         if head.instance == self.instance:
             self.counters["own"] += 1
             return
-        seen = self._seen.get(head.instance)
-        if seen is None:
-            if len(self._seen) >= SOURCES_LIMIT:
-                self._seen.pop(next(iter(self._seen)))
-            seen = self._seen[head.instance] = deque(maxlen=SEEN_SEQS)
-        if head.seq in seen:
-            self.counters["duplicate"] += 1
+        known = self._sources.get(head.instance)
+        if known is not None and head.seq in known.seen:
+            self.counters["duplicate"] += 1  # the second copy may come from the sender's other interface
             return
-        seen.append(head.seq)
-        key = (ip, head.instance)
-        bucket = self._sources.get(key)
-        if bucket is None:
-            bucket = self._sources[key] = _Bucket(at)
-            if len(self._sources) > SOURCES_LIMIT:
-                self._sources.popitem(last=False)
-        else:
-            self._sources.move_to_end(key)
-        if not bucket.take(at):
+        src = self._source(head.instance, ip, at)
+        if src is None:
+            return
+        src.seen.append(head.seq)
+        src.last = at
+        self._sources.move_to_end(head.instance)
+        if not src.bucket.take(at):
             self.counters["rate_limited"] += 1
             return
         if len(self._inbox) >= INBOX_LIMIT:
             self.counters["inbox_full"] += 1
             return
         self._inbox.append(Received(packet, ip, at))
+
+    def _source(self, instance: int, ip: str, at: float) -> _Source | None:
+        """The bound source of ``instance``, binding it to ``ip`` when it is new or its binding expired."""
+        src = self._sources.get(instance)
+        if src is not None:
+            if src.ip == ip:
+                return src
+            if at - src.last <= REMOVE_S:
+                self.counters["ip_mismatch"] += 1
+                return None
+            self._unbind(instance)
+        # expired ids are at the front (oldest activity first); only those are ever evicted
+        while self._sources:
+            first, oldest = next(iter(self._sources.items()))
+            if at - oldest.last <= REMOVE_S:
+                break
+            self._unbind(first)
+        if len(self._sources) >= SOURCES_LIMIT or self._per_ip.get(ip, 0) >= HOST_INSTANCES:
+            self.counters["source_cap"] += 1
+            return None
+        src = self._sources[instance] = _Source(ip, at)
+        self._per_ip[ip] = self._per_ip.get(ip, 0) + 1
+        return src
+
+    def _unbind(self, instance: int) -> None:
+        src = self._sources.pop(instance)
+        left = self._per_ip.get(src.ip, 1) - 1
+        if left > 0:
+            self._per_ip[src.ip] = left
+        else:
+            self._per_ip.pop(src.ip, None)
 
     # ------------------------------------------------------------------ fleet thread
 
@@ -410,6 +482,10 @@ class PeerService:
         packet = item.packet
         head = packet.header
         peer = self.peers.get(head.instance)
+        body = packet.body
+        if peer is not None and peer.ip != item.ip:
+            self.counters["ip_mismatch"] += 1  # an instance id stays with the address it joined from
+            return
         if packet.type == wire.BYE:
             if peer is not None:
                 del self.peers[head.instance]
@@ -417,13 +493,16 @@ class PeerService:
                     out.left.append((peer, "bye"))
             return
         if peer is None:
-            if len(self.peers) >= MAX_PEERS:
+            # only a valid STATE makes a peer; PING, SHOT and HIT of an unknown id are dropped
+            if packet.type != wire.STATE or not isinstance(body, wire.State):
+                self.counters["unknown"] += 1
+                return
+            if sum(1 for p in self.peers.values() if p.joined) >= MAX_PEERS:
                 self.counters["peer_cap"] += 1
                 return
             peer = Peer(head.instance, item.ip, first_seen=item.at, last_seen=item.at)
             self.peers[head.instance] = peer
         peer.last_seen = max(peer.last_seen, item.at)
-        body = packet.body
         if packet.type == wire.STATE and isinstance(body, wire.State):
             if peer.last_state_seq is not None and not _seq_newer(head.seq, peer.last_state_seq):
                 return  # out of order: a newer state is already applied

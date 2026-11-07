@@ -14,7 +14,16 @@ import pytest
 
 from relay.peers import arena, ballistics, wire
 from relay.peers.game import load_instance
-from relay.peers.service import MAX_PEERS, RATE_PER_S, REMOVE_S, STALE_S, PeerService
+from relay.peers.service import (
+    GLOBAL_RATE_PER_S,
+    HOST_INSTANCES,
+    IP_RATE_PER_S,
+    MAX_PEERS,
+    RATE_PER_S,
+    REMOVE_S,
+    STALE_S,
+    PeerService,
+)
 
 REPO = Path(__file__).resolve().parents[2]
 VECTORS = REPO / "docs" / "design" / "vectors"
@@ -333,6 +342,78 @@ def test_state_ordering_shot_dedupe_and_bye():
     assert not svc.peers and out.left[0][1] == "bye"
 
 
+def test_rotating_instance_ids_cannot_bypass_the_rate_limit_or_fill_the_table():
+    clock = Clock()
+    svc = PeerService(0xAA, clock=clock)
+    svc.receive(wire.encode_state(1, 0xBB, 0, state(1, 0)), "10.0.0.2", clock.t)  # a real peer
+    svc.receive(wire.encode_ping(2, 0xBB, 0), "10.0.0.2", clock.t)
+    for i in range(20000):  # one host, a fresh instance id on every packet
+        svc.receive(wire.encode_ping(1, 0x1000 + i, 0), "10.0.0.66", clock.t)
+    c = svc.counters
+    # the address budget stops the flood before parsing; at most HOST_INSTANCES ids bind to it
+    assert c["rate_limited"] == 20000 - IP_RATE_PER_S and c["flood"] == 0
+    assert c["source_cap"] >= IP_RATE_PER_S - 2 - HOST_INSTANCES
+    assert c["inbox_full"] == 0 and len(svc._inbox) <= 2 + HOST_INSTANCES
+    out = svc.tick(clock.t)
+    # PINGs from ids without a STATE create no peer; only the real peer joined
+    assert list(svc.peers) == [0xBB] and [p.instance for p in out.joined] == [0xBB]
+    assert c["unknown"] == HOST_INSTANCES
+    # the real peer's duplicate window survived: a repeated sequence number is still dropped
+    svc.receive(wire.encode_ping(2, 0xBB, 0), "10.0.0.2", clock.t)
+    assert c["duplicate"] == 1
+
+
+def test_forged_ids_never_evict_a_live_peer_or_take_its_slot():
+    clock = Clock()
+    svc = PeerService(0xAA, clock=clock)
+    svc.receive(wire.encode_state(1, 0xBB, 0, state(1, 0)), "10.0.0.2", clock.t)
+    for host in range(64):  # many addresses, each at its own cap of forged ids
+        for k in range(HOST_INSTANCES + 2):
+            svc.receive(wire.encode_ping(1, 0x10000 + host * 16 + k, 0), f"10.1.{host}.1", clock.t)
+    assert 0xBB in svc._sources and svc.counters["source_cap"] > 0
+    svc.receive(wire.encode_ping(1, 0xBB, 0), "10.0.0.2", clock.t)
+    assert svc.counters["duplicate"] == 1  # seq 1 of the real peer is still remembered
+    svc.tick(clock.t)
+    assert list(svc.peers) == [0xBB]
+    # ids silent for REMOVE_S are released and new ones bind again
+    clock.t += REMOVE_S + 0.5
+    svc.receive(wire.encode_state(5, 0x99, 0, state(1, 0)), "10.2.0.1", clock.t)
+    assert 0x99 in svc._sources
+
+
+def test_an_instance_stays_bound_to_its_address():
+    clock = Clock()
+    svc = PeerService(0xAA, clock=clock)
+    svc.receive(wire.encode_state(1, 0xBB, 0, state(1, 0)), "10.0.0.2", clock.t)
+    svc.tick(clock.t)
+    # another host forges a BYE, a HIT and a STATE with the known id: all dropped, the peer stays
+    svc.receive(wire.encode_bye(2, 0xBB, 0), "10.0.0.9", clock.t)
+    svc.receive(wire.encode_hit(3, 0xBB, 0, wire.Hit(0xAA, 1, 1, 20, True, (0, 0, 0))), "10.0.0.9", clock.t)
+    svc.receive(wire.encode_state(4, 0xBB, 0, state(2, 0)), "10.0.0.9", clock.t)
+    out = svc.tick(clock.t)
+    assert 0xBB in svc.peers and not out.left and not out.hits and len(svc.peers[0xBB].aircraft) == 1
+    assert svc.counters["ip_mismatch"] == 3
+    # the real host can still leave
+    svc.receive(wire.encode_bye(5, 0xBB, 0), "10.0.0.2", clock.t)
+    out = svc.tick(clock.t)
+    assert not svc.peers and out.left[0][1] == "bye"
+    # after the id has been silent for REMOVE_S it may come back from a new address
+    clock.t += REMOVE_S + 0.5
+    svc.receive(wire.encode_state(6, 0xBB, 0, state(1, 0)), "10.0.0.9", clock.t)
+    svc.tick(clock.t)
+    assert svc.peers[0xBB].ip == "10.0.0.9"
+
+
+def test_global_budget_drops_a_flood_before_parsing():
+    clock = Clock()
+    svc = PeerService(0xAA, clock=clock)
+    for i in range(5000):
+        svc.receive(b"junk", f"10.{i // 250}.{i % 250}.1", clock.t)
+    c = svc.counters
+    assert c["flood"] > 0 and c["malformed"] + c["flood"] == 5000
+    assert c["malformed"] <= GLOBAL_RATE_PER_S
+
+
 def _free_port() -> int:
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(("127.0.0.1", 0))
@@ -374,8 +455,15 @@ def test_two_instances_on_one_host_see_each_other():
         assert peer.callsign == "Alpha" and peer.aircraft[1].p == pytest.approx((1.0, 2.0, 0.5))
         assert a.counters["own"] > 0  # multicast loopback brings our own packets back; they are dropped
         assert b.counters["duplicate"] > 0  # the group and the directed broadcast both delivered
-        # PING every 2 s, PONG from the other side: both learn the round trip
-        assert _pump([a, b], lambda: 0xB0 in a.peers and a.peers[0xB0].rtt_ms is not None, 6.0)
+        # PING every 2 s, PONG from the other side: both learn the round trip (a peer joins with its STATE)
+        assert _pump(
+            [a, b],
+            lambda: (
+                b.send_state(wire.State("Bravo", 1, None, 0, 0, 0, ())),
+                0xB0 in a.peers and a.peers[0xB0].rtt_ms is not None,
+            )[1],
+            6.0,
+        )
         assert 0 <= a.peers[0xB0].rtt_ms < 500
         a.close()
         assert _pump([b], lambda: 0xA0 not in b.peers, 2.0)
