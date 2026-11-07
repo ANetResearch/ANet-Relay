@@ -286,6 +286,7 @@ class SimAutopilot:
         self.reboot_until: float | None = None
         self.low_batt_warned = False
         self.crash_reported = False
+        self.shot_down = False  # WP-D arena: downed by a virtual bullet; disarm waits for the ground
         self.failsafe = False
 
     def reset(self) -> None:
@@ -293,6 +294,20 @@ class SimAutopilot:
         self.quad.reset()
         self._reset_state()
         self._text(M.MAV_SEVERITY_INFO, "Simulation reset")
+
+    # -- WP-D arena (05 §7.4): minimal version; the physics package (WP-C) owns the final one ------------
+
+    def shoot_down(self, reason: str) -> None:
+        """Arena shoot-down: motors cut at once, free fall, disarm on touchdown, ``crash_reason = reason``."""
+        s = self.quad.s
+        if s.crashed:
+            return
+        s.crashed = True
+        s.crash_reason = reason
+        s.motor = 0.0
+        self.shot_down = True
+
+    # -------------------------------------------------------------------------------------------------------
 
     def param(self, name: str, default: float = 0.0) -> float:
         entry = self.params.get(name)
@@ -1154,10 +1169,12 @@ class SimAutopilot:
         b = self.quad.battery
         if s.crashed and not self.crash_reported:
             self.crash_reported = True
-            if self.armed:
+            if self.armed and not (self.shot_down and not s.on_ground):
                 self.armed = False
             text = "Crash: Disarming" if self.flavour == ARDUPILOT else "Crash detected, disarming"
             self._text(M.MAV_SEVERITY_CRITICAL, f"{text} ({s.crash_reason})")
+        if self.shot_down and s.on_ground and self.armed:
+            self.armed = False  # WP-D arena: a shot-down aircraft disarms on touchdown
         if not self.armed:
             self.ground_t = None
             return

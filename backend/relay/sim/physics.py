@@ -228,7 +228,29 @@ class Quad:
         s.v = [0.0, 0.0, 0.0]
         s.on_ground = True
 
+    # -- WP-D arena (05 §7.4): minimal hit hooks; the physics package (WP-C) owns the final versions -------
+
+    def impulse(self, dv: tuple[float, float, float], kick: tuple[float, float] = (0.0, 0.0)) -> None:
+        """A virtual bullet's hit: an instant velocity change (ENU m/s) and an attitude kick (roll, pitch).
+
+        The attitude loop then pulls the airframe back level, which reads as a shake. An aircraft resting on
+        the ground keeps still unless the push lifts it.
+        """
+        s = self.s
+        if s.crashed and s.on_ground:
+            return
+        if s.on_ground and dv[2] <= 0.0:
+            return
+        s.v = [s.v[i] + float(dv[i]) for i in range(3)]
+        s.roll += float(kick[0])
+        s.pitch += float(kick[1])
+        s.on_ground = False
+
+    # -------------------------------------------------------------------------------------------------------
+
     def _crash(self, reason: str) -> None:
+        if self.s.crashed:
+            return  # keep the first reason (a shot-down aircraft hitting the ground is still "Shot down")
         self.s.crashed = True
         self.s.crash_reason = reason
         self.s.motor = 0.0
