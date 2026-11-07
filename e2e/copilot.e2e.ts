@@ -125,6 +125,9 @@ test('copilot: settings, a sequence on a simulator, approval for a real aircraft
   await until(async () => (await rest<{ link: { state: string } }>(r, 'GET', `/vehicles/${vid}`)).link.state === 'ok', 'fake aircraft link', 30000)
   await page.locator(`[data-fleet-card="${vid}"]`).click()
   await expect(cp.getByText('Selected: ')).toBeVisible({ timeout: 10000 })
+  // Copilot reads the selection from the window's report (GET /app/ui, rate-limited): wait until it carries the aircraft
+  const selected = async () => (await rest<{ state: { selected?: string | null } | null }>(r, 'GET', '/app/ui', undefined, 'none')).state?.selected
+  await until(async () => (await selected()) === vid, 'the window reports the selection', 10000)
   await cp.locator('[data-copilot-input]').fill('Take off')
   await cp.keyboard.press('Enter')
   await expect(cp.locator('[data-approval]')).toBeVisible({ timeout: 15000 })

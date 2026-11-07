@@ -169,6 +169,8 @@ export async function launchApp(o: AppOptions = {}): Promise<RelayApp> {
   if (o.reducedMotion) args.push('--force-prefers-reduced-motion')
   const app = await _electron.launch({ args, cwd: ROOT, env, timeout: 60000 })
   const page = await app.firstWindow({ timeout: 60000 })
+  // the Chromium switch does not always reach Electron's renderer; emulate the media feature as well (later loads)
+  if (o.reducedMotion) await page.emulateMedia({ reducedMotion: 'reduce' })
   if (o.size) await setWindowSize(app, o.size.width, o.size.height)
   const boot = await page.evaluate(() => {
     const r = (window as unknown as { relay?: { apiBase: string | null; operatorToken: string } }).relay
