@@ -25,7 +25,7 @@ from typing import Any, TypeVar
 
 from . import authority as auth
 from . import course as coursemod
-from . import device, plans, preflight, skills
+from . import device, plans, preflight, refly, skills
 from .alerts import AlertBook, Condition
 from .authority import Actor, Authority
 from .config import (
@@ -185,6 +185,7 @@ class Vehicle:
         self.rc_frame: dict[str, Any] | None = None  # channel override resent at the stick rate (04 §2)
         self.motor_seq: dict[str, Any] | None = None  # "all motors" test in progress
         self.deferred: list[tuple[float, Callable[[Any], None]]] = []
+        self.refly: dict[str, Any] | None = None  # the re-fly in progress (04 §4)
         self.health = FlightHealth()
         self.position_lost_since: float | None = None
         self.course_clear_at: float | None = None
@@ -515,6 +516,7 @@ class FleetService(DeviceOps):
                 self._stick_tick(v, now)
                 self._device_tick(v, now)
                 self._plan_tick(v)
+                self._refly_tick(v)
                 self._health_tick(v, now)
         if now >= self._next["heartbeat"]:
             self._next["heartbeat"] = now + HEARTBEAT_PERIOD_S
@@ -990,6 +992,7 @@ class FleetService(DeviceOps):
         p = v.world_enu()
         battery = v.state["battery"]
         hud = v.state["hud"] or {}
+        sent, source = self._sent_sticks(v)
         self.history.sample(
             v.record_session,  # type: ignore[arg-type]
             {
@@ -1009,8 +1012,23 @@ class FleetService(DeviceOps):
                 "remaining": battery["remaining_pct"],
                 "throttle": hud.get("throttle"),
                 "controller": controller,
+                "s_roll": None if sent is None else round(sent.roll, 3),
+                "s_pitch": None if sent is None else round(sent.pitch, 3),
+                "s_yaw": None if sent is None else round(sent.yaw, 3),
+                "s_throttle": None if sent is None else round(sent.throttle, 3),
+                "s_source": source,
             },
         )
+
+    def _sent_sticks(self, v: Vehicle) -> tuple[StickInput | None, str | None]:
+        """The sticks being sent now and where they come from: skill, human, agent or none (04 §4)."""
+        if v.stop_seq is not None:
+            return None, None
+        if v.skill is not None and v.skill.active:
+            return v.skill.out or skills.NEUTRAL, "skill"
+        if v.sticks is not None and self.clock() - v.sticks.t <= STICK_TIMEOUT_S:
+            return v.sticks, v.sticks.source
+        return None, None
 
     def _update_segment(self, v: Vehicle, controller: str, wall: float) -> None:
         who = None
@@ -1655,7 +1673,7 @@ class FleetService(DeviceOps):
         """Check a skill against the vehicle and return its executor parameters (vehicle thread)."""
         params = dict(params)
         sv = self.settings.safety_volume
-        required = skills.REQUIREMENTS[name]
+        required = skills.requirement(name)
         if not v.capabilities.has(required):
             raise err("capability_missing", required=required)
         position = v.capabilities.position
@@ -1755,6 +1773,8 @@ class FleetService(DeviceOps):
             params["_ground"] = v.ground_alt
         elif name == "rtl" and not v.armed:
             raise err("not_armed")
+        elif name == "replay" and not v.armed:
+            self._arm_checks(v, params.get("confirm"))
         return params, target_local
 
     def _start_skill(
@@ -1784,9 +1804,15 @@ class FleetService(DeviceOps):
     # ====================================================================== plans
 
     def run_plan(
-        self, vid: str, actor: Actor, steps: Any, name: str | None = None, confirm: str | None = None
+        self,
+        vid: str,
+        actor: Actor,
+        steps: Any,
+        name: str | None = None,
+        confirm: str | None = None,
+        max_steps: int = plans.MAX_STEPS,
     ) -> dict[str, Any]:
-        normalised = plans.normalise_steps(steps)
+        normalised = plans.normalise_steps(steps, max_steps)
 
         def run() -> dict[str, Any]:
             v = self._vehicle(vid)
@@ -1913,6 +1939,130 @@ class FleetService(DeviceOps):
                 volume={"x": sv.x, "y": sv.y, "z": sv.z},
             )
         return box
+
+    # ====================================================================== re-fly
+
+    def refly_options(self, sid: int) -> dict[str, Any]:
+        detail = self.history.session_detail(sid)
+        if detail is None:
+            raise err("record_not_found", record=sid)
+        return refly.options(detail)
+
+    def refly(
+        self,
+        vid: str,
+        actor: Actor,
+        sid: int,
+        mode: str = "auto",
+        speed: float = 1.0,
+        confirm: str | None = None,
+    ) -> dict[str, Any]:
+        """Fly a record again as a plan, a path or recorded sticks (04 §4)."""
+        detail = self.history.session_detail(sid)
+        if detail is None:
+            raise err("record_not_found", record=sid)
+        found = refly.options(detail)
+        if mode == "auto":
+            mode = found["recommended"] or ""
+        if not mode or found.get(mode) is None:
+            raise err("refly_unavailable", mode=mode or "auto", reason="the record holds nothing to fly")
+
+        def run() -> dict[str, Any]:
+            v = self._vehicle(vid)
+            self._check_control(v, actor)
+            self._require_link(v)
+            label = f"refly-{sid}"
+            if mode == "sticks":
+                rows = refly.stick_rows(detail)
+                assert rows is not None
+                known = modes.available_modes(v.autopilot)
+                for name in (rows["mode"], *(m for _, m in rows["modes"])):
+                    if name not in known:
+                        raise err("unknown_mode", mode=name, modes=known)
+                params = {
+                    "session_id": sid,
+                    "speed": speed,
+                    "mode": rows["mode"],
+                    "duration_s": rows["duration_s"],
+                    "confirm": confirm,
+                    "_samples": rows["rows"],
+                    "_modes": rows["modes"],
+                }
+                prepared, _ = self._prepare_skill(v, "replay", params)
+                self._cancel_plan(v, "superseded by a re-fly", "被再飞取代")
+                skill = self._start_skill(v, "replay", prepared, None)
+                v.refly = {"session_id": sid, "mode": mode, "kind": "skill", "id": skill.id}
+                result = {"id": vid, "skill": skill.view()}
+            else:
+                steps = self._refly_steps(v, detail, mode)
+                result = self.run_plan(vid, actor, steps, label, confirm, refly.MAX_STEPS)
+                v.refly = {"session_id": sid, "mode": mode, "kind": "plan", "id": result["plan"]["id"]}
+            self.events.emit(
+                "refly_started",
+                v.id,
+                data={"session_id": sid, "mode": mode},
+                labels={"vehicle": v.label, "session_id": str(sid), "mode": mode},
+            )
+            return result
+
+        return self.call(run)
+
+    def _refly_steps(self, v: Vehicle, detail: dict[str, Any], mode: str) -> list[dict[str, Any]]:
+        here = v.world_enu()
+        if mode == "plan":
+            cols = detail["samples"]
+            armed = [i for i, a in enumerate(cols["armed"]) if a and cols["x"][i] is not None]
+            offset = (0.0, 0.0, 0.0)
+            if armed and here is not None:
+                i = armed[0]
+                offset = (here[0] - cols["x"][i], here[1] - cols["y"][i], here[2] - cols["z"][i])
+            steps = refly.plan_steps(detail, offset)
+            assert steps is not None
+            return steps
+        if here is None or not v.capabilities.position:
+            raise err("capability_missing", required="position")
+        path = refly.path_waypoints(detail)
+        assert path is not None
+        sv = self.settings.safety_volume
+        origin = v.safety_origin or here
+        steps = refly.path_steps(
+            path, here, v.airborne(), (origin[2] + 0.3, origin[2] + max(0.4, sv.z - 0.05))
+        )
+        for step in steps:
+            if step["action"] == "goto":
+                self._goto_target(v, step)
+        return steps
+
+    def _refly_tick(self, v: Vehicle) -> None:
+        info = v.refly
+        if info is None:
+            return
+        if info["kind"] == "plan":
+            item = v.plan
+            state = item.state if item is not None and item.id == info["id"] else "superseded"
+            detail = item.detail if item is not None else None
+            detail_zh = item.detail_zh if item is not None else None
+        else:
+            item = v.skill
+            state = item.state if item is not None and item.id == info["id"] else "superseded"
+            detail = item.detail if item is not None else None
+            detail_zh = item.detail_zh if item is not None else None
+        if state in ("running",):
+            return
+        v.refly = None
+        data = {"session_id": info["session_id"], "mode": info["mode"]}
+        labels = {"vehicle": v.label, "session_id": str(info["session_id"]), "mode": info["mode"]}
+        if state == "done":
+            self.events.emit("refly_finished", v.id, data=data, labels=labels)
+            return
+        en = detail or ("superseded" if state == "superseded" else state)
+        zh = detail_zh or detail or ("被其他指令取代" if state == "superseded" else state)
+        self.events.emit(
+            "refly_failed",
+            v.id,
+            data={**data, "detail": en, "detail_en": en, "detail_zh": zh},
+            labels={**labels, "detail": en},
+        )
 
     def _goto_target(self, v: Vehicle, params: dict[str, Any]) -> tuple[float, float, float]:
         try:

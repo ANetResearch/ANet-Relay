@@ -64,12 +64,12 @@ _REQUIRED = {
 DEFAULTS = {"takeoff": {"alt": 1.0}, "hover": {"seconds": 3.0}}
 
 
-def normalise_steps(steps: Any) -> list[dict[str, Any]]:
+def normalise_steps(steps: Any, max_steps: int = MAX_STEPS) -> list[dict[str, Any]]:
     """Validate a plan's steps and return them as ``{"action": ..., **params}`` dicts."""
     if not isinstance(steps, list) or not steps:
         raise err("invalid_request", reason="a plan needs at least one step")
-    if len(steps) > MAX_STEPS:
-        raise err("invalid_request", reason=f"a plan has at most {MAX_STEPS} steps")
+    if len(steps) > max_steps:
+        raise err("invalid_request", reason=f"a plan has at most {max_steps} steps")
     out = []
     for i, raw in enumerate(steps, 1):
         if not isinstance(raw, dict):

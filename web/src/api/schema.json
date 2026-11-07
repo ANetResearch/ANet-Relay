@@ -40,6 +40,18 @@
     },
     "SessionOpened": {
       "$ref": "#/$defs/SessionOpened"
+    },
+    "UiState": {
+      "$ref": "#/$defs/UiState"
+    },
+    "UiCommandMessage": {
+      "$ref": "#/$defs/UiCommandMessage"
+    },
+    "UiStateMessage": {
+      "$ref": "#/$defs/UiStateMessage"
+    },
+    "UiResultMessage": {
+      "$ref": "#/$defs/UiResultMessage"
     }
   },
   "required": [
@@ -54,7 +66,11 @@
     "FleetMessage",
     "EventMessage",
     "ErrorMessage",
-    "SessionOpened"
+    "SessionOpened",
+    "UiState",
+    "UiCommandMessage",
+    "UiStateMessage",
+    "UiResultMessage"
   ],
   "additionalProperties": false,
   "$defs": {
@@ -529,7 +545,11 @@
             "home_set",
             "rebooting",
             "calibration_started",
-            "terminated"
+            "terminated",
+            "app_command",
+            "refly_started",
+            "refly_finished",
+            "refly_failed"
           ],
           "type": "string"
         },
@@ -710,6 +730,69 @@
         "items"
       ],
       "title": "FlightHealthView",
+      "type": "object"
+    },
+    "Gamepad": {
+      "properties": {
+        "index": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "mapping": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "connected": {
+          "default": true,
+          "type": "boolean"
+        },
+        "vehicle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "input": {
+          "const": "gamepad",
+          "default": "gamepad",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "id",
+        "name",
+        "mapping",
+        "connected",
+        "vehicle",
+        "input"
+      ],
+      "title": "Gamepad",
       "type": "object"
     },
     "GlobalPosition": {
@@ -1087,6 +1170,34 @@
       "title": "Position",
       "type": "object"
     },
+    "PossessionRef": {
+      "properties": {
+        "vehicle": {
+          "type": "string"
+        },
+        "input": {
+          "type": "string"
+        },
+        "pad": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "vehicle",
+        "input",
+        "pad"
+      ],
+      "title": "PossessionRef",
+      "type": "object"
+    },
     "PossessionView": {
       "properties": {
         "input": {
@@ -1446,6 +1557,326 @@
         "source"
       ],
       "title": "SticksView",
+      "type": "object"
+    },
+    "UiCommandMessage": {
+      "description": "Server -> window over the operator WebSocket.",
+      "properties": {
+        "type": {
+          "const": "ui_command",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "args": {
+          "type": "object"
+        },
+        "by": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "action",
+        "args",
+        "by"
+      ],
+      "title": "UiCommandMessage",
+      "type": "object"
+    },
+    "UiInspector": {
+      "properties": {
+        "open": {
+          "default": false,
+          "type": "boolean"
+        },
+        "tab": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "open",
+        "tab"
+      ],
+      "title": "UiInspector",
+      "type": "object"
+    },
+    "UiRecord": {
+      "properties": {
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "playing": {
+          "default": false,
+          "type": "boolean"
+        },
+        "t": {
+          "default": 0.0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "session_id",
+        "playing",
+        "t"
+      ],
+      "title": "UiRecord",
+      "type": "object"
+    },
+    "UiResultMessage": {
+      "description": "Window -> server, answering a ui_command.",
+      "properties": {
+        "type": {
+          "const": "ui_result",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "data": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "ok",
+        "error",
+        "data"
+      ],
+      "title": "UiResultMessage",
+      "type": "object"
+    },
+    "UiState": {
+      "description": "What the Relay window currently shows (04 §3.1).",
+      "properties": {
+        "lang": {
+          "default": "en",
+          "enum": [
+            "en",
+            "zh"
+          ],
+          "type": "string"
+        },
+        "workspace": {
+          "default": "fly",
+          "enum": [
+            "fly",
+            "agents",
+            "records"
+          ],
+          "type": "string"
+        },
+        "selected": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "view": {
+          "default": "overview",
+          "enum": [
+            "overview",
+            "chase",
+            "top"
+          ],
+          "type": "string"
+        },
+        "inspector": {
+          "$ref": "#/$defs/UiInspector"
+        },
+        "dialog": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "settings_section": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "copilot_open": {
+          "default": false,
+          "type": "boolean"
+        },
+        "prefs": {
+          "type": "object"
+        },
+        "gamepads": {
+          "items": {
+            "$ref": "#/$defs/Gamepad"
+          },
+          "type": "array"
+        },
+        "possession": {
+          "items": {
+            "$ref": "#/$defs/PossessionRef"
+          },
+          "type": "array"
+        },
+        "window": {
+          "$ref": "#/$defs/UiWindow"
+        },
+        "record": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UiRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "lang",
+        "workspace",
+        "selected",
+        "view",
+        "inspector",
+        "dialog",
+        "settings_section",
+        "copilot_open",
+        "prefs",
+        "gamepads",
+        "possession",
+        "window",
+        "record",
+        "version"
+      ],
+      "title": "UiState",
+      "type": "object"
+    },
+    "UiStateMessage": {
+      "description": "Window -> server.",
+      "properties": {
+        "type": {
+          "const": "ui_state",
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/UiState"
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ],
+      "title": "UiStateMessage",
+      "type": "object"
+    },
+    "UiWindow": {
+      "properties": {
+        "focused": {
+          "default": true,
+          "type": "boolean"
+        },
+        "width": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "height": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fullscreen": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "focused",
+        "width",
+        "height",
+        "fullscreen"
+      ],
+      "title": "UiWindow",
       "type": "object"
     },
     "Vehicle": {

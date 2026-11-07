@@ -88,6 +88,7 @@ class Settings:
     possess_mode: str = "auto"  # auto | stabilize | althold
     airborne_alert: bool = True
     auto_params: bool = True
+    agents_app_control: bool = True  # agent sessions may drive the app UI (04 §3.2)
     retention_days: int = 90
     listen_port: int = 14550
     bridge_port: int = 14555

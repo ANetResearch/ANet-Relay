@@ -368,6 +368,10 @@ EventKind = Literal[
     "rebooting",
     "calibration_started",
     "terminated",
+    "app_command",
+    "refly_started",
+    "refly_finished",
+    "refly_failed",
 ]
 
 
@@ -542,6 +546,13 @@ class PlanBody(_Body):
     steps: list[PlanStep] = Field(min_length=1, max_length=24)
     name: str | None = Field(default=None, max_length=80)
     confirm: str | None = Field(default=None, description='"ARM" when the plan arms a real aircraft')
+
+
+class ReflyBody(_Body):
+    session_id: int
+    mode: Literal["auto", "plan", "path", "sticks"] = "auto"
+    speed: float = Field(default=1.0, ge=0.25, le=2.0, description="Time scale; applies to sticks only")
+    confirm: str | None = Field(default=None, description='"ARM" when a real aircraft starts on the ground')
 
 
 class CourseStartBody(_Body):

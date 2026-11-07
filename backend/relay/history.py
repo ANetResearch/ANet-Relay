@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS record_sessions (
 CREATE TABLE IF NOT EXISTS samples (
     session_id INTEGER NOT NULL, t REAL NOT NULL, armed INTEGER, mode TEXT, roll REAL, pitch REAL, yaw REAL,
     x REAL, y REAL, z REAL, alt REAL, climb REAL, voltage REAL, current REAL, remaining REAL, throttle REAL,
-    controller TEXT);
+    controller TEXT, s_roll REAL, s_pitch REAL, s_yaw REAL, s_throttle REAL, s_source TEXT);
 CREATE INDEX IF NOT EXISTS samples_session ON samples (session_id, t);
 CREATE TABLE IF NOT EXISTS events (
     session_id INTEGER NOT NULL, seq INTEGER NOT NULL, t REAL NOT NULL, kind TEXT NOT NULL, data_json TEXT);
@@ -56,6 +56,18 @@ SAMPLE_COLUMNS = (
     "remaining",
     "throttle",
     "controller",
+    "s_roll",
+    "s_pitch",
+    "s_yaw",
+    "s_throttle",
+    "s_source",
+)
+SAMPLE_ADDED = (
+    ("s_roll", "REAL"),
+    ("s_pitch", "REAL"),
+    ("s_yaw", "REAL"),
+    ("s_throttle", "REAL"),
+    ("s_source", "TEXT"),
 )
 ALERT_KINDS = ("crashed", "link_lost", "battery_critical", "battery_warn", "airborne_no_controller")
 
@@ -69,6 +81,7 @@ class History:
             path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = self._connect()
         self._conn.executescript(SCHEMA)
+        self._migrate()
         self._conn.commit()
         self._lock = threading.Lock()
         self._samples: list[tuple] = []
@@ -86,6 +99,13 @@ class History:
             conn.execute("PRAGMA synchronous=NORMAL")
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _migrate(self) -> None:
+        """Add the stick columns (04 §4) to a database written by v0.2.0; idempotent."""
+        have = {r[1] for r in self._conn.execute("PRAGMA table_info(samples)")}
+        for name, kind in SAMPLE_ADDED:
+            if name not in have:
+                self._conn.execute(f"ALTER TABLE samples ADD COLUMN {name} {kind}")
 
     # ------------------------------------------------------------------ lifecycle
 

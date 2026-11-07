@@ -128,6 +128,14 @@ def plan(request: Request, vid: str, body: schemas.PlanBody) -> dict[str, Any]:
     return service(request).run_plan(vid, actor(request, "control"), steps, body.name, body.confirm)
 
 
+@router.post("/vehicles/{vid}/refly", tags=["control"], responses=ERRORS)
+def refly(request: Request, vid: str, body: schemas.ReflyBody) -> dict[str, Any]:
+    """Fly a record again as a plan, a path or its recorded sticks (04 §4)."""
+    return service(request).refly(
+        vid, actor(request, "control"), body.session_id, body.mode, body.speed, body.confirm
+    )
+
+
 @router.post("/vehicles/{vid}/plan/cancel", tags=["control"], responses=ERRORS)
 def plan_cancel(request: Request, vid: str) -> dict[str, Any]:
     """Cancel the running plan; an airborne aircraft holds where it is."""
