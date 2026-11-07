@@ -24,7 +24,7 @@ const UI = [
     "open_inspector",
     "Open inspector",
     "Open the inspector panel of the selected aircraft, optionally on a tab.",
-    Type.Object({ tab: opt(lit("overview", "control", "telemetry", "parameters", "log")) }),
+    Type.Object({ tab: opt(lit("overview", "control", "bench", "telemetry", "parameters", "log")) }),
   ],
   ["app_close_inspector", "close_inspector", "Close inspector", "Close the inspector panel.", empty],
   [

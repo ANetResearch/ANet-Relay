@@ -833,9 +833,7 @@ export interface ProcedureMetric {
   key: string
   label_en: string
   label_zh: string
-  value: {
-    [k: string]: unknown | undefined
-  }
+  value: number | string | null
   unit: string
   level: 'ok' | 'warn' | 'bad' | 'na' | 'info'
   mean: number | null

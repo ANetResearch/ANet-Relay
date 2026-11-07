@@ -1,7 +1,7 @@
 // Toast viewport (02 §14, §18): bottom centre, above the relay timeline; L3 surface; translateY 8 + opacity in
 // (fast), opacity out (quick). Also turns selected events into toasts (handback, released, discovered).
 import * as React from 'react'
-import { t, useLangStore } from '@/i18n'
+import { pickText, t, useLangStore } from '@/i18n'
 import { useRelay } from '@/store/relay'
 import { getVehicle } from '@/store/selectors'
 import { useUi } from '@/store/ui'
@@ -44,6 +44,9 @@ function useEventToasts() {
           const lang = useLangStore.getState().lang
           const course = (lang === 'zh' ? v.course?.name_zh : v.course?.name_en) ?? v.course?.course_id ?? ''
           notify(t('course.agentFinished', { agent: v.claim.name, course, time: String(e.data?.total_text ?? '') }))
+        } else if (e.kind === 'procedure_finished' || e.kind === 'procedure_aborted') {
+          // WP-B: the end of a bench procedure (the backend template names the aircraft and the verdict)
+          notify(pickText(useLangStore.getState().lang, e.text_en, e.text_zh), { level: e.kind === 'procedure_aborted' ? 'warn' : 'info' })
         }
       }
     })

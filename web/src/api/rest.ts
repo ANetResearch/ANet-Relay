@@ -2,7 +2,7 @@
 // {"error": {code, message_en, message_zh, detail}} become RelayApiError. The transport is swappable so the dev
 // fixture (src/dev/fixtures.ts) can serve the same calls without a backend.
 import { env } from './env'
-import type { Alert, ErrorBody, Fleet, Health, Vehicle } from './types'
+import type { Alert, ErrorBody, Fleet, Health, ProcedureCatalogue, ProcedureRun, TestRuns, Vehicle } from './types'
 import type { RelayEvent } from './events'
 
 export class RelayApiError extends Error {
@@ -152,4 +152,19 @@ export const api = {
   ackAlert: (id: string) => op<Ok>('POST', `/alerts/${enc(id)}/ack`),
   settings: () => request<Record<string, unknown>>('GET', '/settings'),
   putSettings: (s: Record<string, unknown>) => op<Ok>('PUT', '/settings', s),
+  // bench procedures (WP-B, 05 §4.4)
+  procedures: () => request<ProcedureCatalogue>('GET', '/procedures'),
+  procedure: (id: string) => request<ProcedureRun>('GET', `/vehicles/${enc(id)}/procedure`),
+  procedureStart: (id: string, procedure: string, options?: ProcedureOptions) =>
+    op<ProcedureRun>('POST', `/vehicles/${enc(id)}/procedure`, { procedure, options: options ?? {} }),
+  procedureAnswer: (id: string, step: string, answer: string, confirm?: string) =>
+    op<ProcedureRun>('POST', `/vehicles/${enc(id)}/procedure/answer`, confirm === undefined ? { step, answer } : { step, answer, confirm }),
+  procedureAbort: (id: string) => op<ProcedureRun>('POST', `/vehicles/${enc(id)}/procedure/abort`),
+  testRuns: (vehicle?: string, limit = 50) =>
+    request<TestRuns>('GET', `/test-runs?${new URLSearchParams(vehicle ? { vehicle, limit: String(limit) } : { limit: String(limit) })}`),
+  testRun: (runId: number) => request<ProcedureRun>('GET', `/test-runs/${enc(String(runId))}`),
+  testRunExportUrl: (runId: number, fmt: 'md' | 'json') => `${env().apiBase}/test-runs/${enc(String(runId))}/export?fmt=${fmt}`,
 } as const
+
+/** Start options of a bench procedure (05 §4.4). */
+export type ProcedureOptions = { hover_s?: number; skip?: string[]; auto_answer?: boolean }

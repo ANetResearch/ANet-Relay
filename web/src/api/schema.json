@@ -1434,6 +1434,20 @@
           "type": "string"
         },
         "value": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": null
         },
         "unit": {

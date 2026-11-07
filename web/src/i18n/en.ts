@@ -170,6 +170,7 @@ export const en = {
   // inspector (02 §11)
   'insp.tab.overview': 'Overview',
   'insp.tab.control': 'Control',
+  'insp.tab.bench': 'Bench', // WP-B
   'insp.tab.telemetry': 'Telemetry',
   'insp.tab.parameters': 'Parameters',
   'insp.tab.log': 'Log',

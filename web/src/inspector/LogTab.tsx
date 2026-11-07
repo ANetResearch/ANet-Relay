@@ -26,6 +26,7 @@ const EVENT_SEVERITY: Partial<Record<RelayEvent['kind'], number>> = {
   link_lost: 3,
   skill_failed: 3,
   course_aborted: 4,
+  procedure_aborted: 4, // WP-B
   battery_warn: 4,
   link_delayed: 4,
   airborne_no_controller: 4,

@@ -2,8 +2,9 @@
 import { create } from 'zustand'
 import { useUi } from '@/store/ui'
 
-export type InspectorTab = 'overview' | 'control' | 'telemetry' | 'parameters' | 'log'
-export const INSPECTOR_TABS: readonly InspectorTab[] = ['overview', 'control', 'telemetry', 'parameters', 'log']
+// WP-B: 'bench' (bench procedures, 05 §4.5) sits between Control and Telemetry
+export type InspectorTab = 'overview' | 'control' | 'bench' | 'telemetry' | 'parameters' | 'log'
+export const INSPECTOR_TABS: readonly InspectorTab[] = ['overview', 'control', 'bench', 'telemetry', 'parameters', 'log']
 
 interface TabState {
   tab: InspectorTab

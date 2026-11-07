@@ -50,7 +50,7 @@ class ProcedureMetric(_Model):
     key: str
     label_en: str
     label_zh: str
-    value: Any = None
+    value: int | float | str | None = None
     unit: str
     level: Literal["ok", "warn", "bad", "na", "info"]
     mean: float | None = None
@@ -199,7 +199,7 @@ class ProcedureStartBody(_Body):
 class ProcedureAnswerBody(_Body):
     step: str = Field(description="id of the step that waits, e.g. S6")
     answer: str = Field(description="one of the prompt's answer ids")
-    value: Any = None
+    value: int | float | str | None = None
     confirm: str | None = Field(default=None, description="the prompt's confirm word on a real aircraft")
 
 
