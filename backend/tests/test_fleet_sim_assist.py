@@ -148,3 +148,11 @@ def test_api_add_and_switch(client):
     resp = client.post("/api/v1/sims/sim-9/assist", json={"on": True}, headers=op)
     assert resp.status_code == 404
     assert client.post(f"/api/v1/sims/{vid}/assist", json={"on": True}).status_code == 401
+
+
+def test_fake_vehicle_no_assist_flag():
+    from fake_vehicle import FakeVehicle
+
+    assert FakeVehicle(http=None, bind=("127.0.0.9", 14555)).autopilot.hover_assist is True
+    fake = FakeVehicle(http=None, bind=("127.0.0.9", 14555), hover_assist=False, turbulence=0.5)
+    assert fake.autopilot.hover_assist is False and fake.autopilot.turbulence == pytest.approx(0.5)

@@ -114,14 +114,9 @@ class FakeVehicle:
         self.sta_timeout_s = sta_timeout_s
         self.drop_after = drop_after
         self.drop_for = drop_for
-        self.autopilot = SimAutopilot(
-            autopilot,
-            sysid=sysid,
-            position=position,
-            name="fake",
-            hover_assist=hover_assist,
-            turbulence=turbulence,
-        )
+        # Hover assist off (05 §5) is passed only when asked for, so the default path stays the v0.2 call.
+        physical = {} if hover_assist else {"hover_assist": False, "turbulence": turbulence}
+        self.autopilot = SimAutopilot(autopilot, sysid=sysid, position=position, name="fake", **physical)
         self.autopilot.keep_received = keep_received
         self.state_file = (
             state_file or Path(tempfile.gettempdir()) / f"anet-relay-fake-{bind[0]}-{bind[1]}.json"
