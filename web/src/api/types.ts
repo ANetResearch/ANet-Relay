@@ -491,6 +491,16 @@ export interface Event {
     | 'plan_finished'
     | 'plan_failed'
     | 'plan_cancelled'
+    | 'device_command'
+    | 'motor_test'
+    | 'motor_test_stopped'
+    | 'actuator_set'
+    | 'rc_override'
+    | 'message_interval'
+    | 'home_set'
+    | 'rebooting'
+    | 'calibration_started'
+    | 'terminated'
   vehicle: string | null
   session: string | null
   text_en: string

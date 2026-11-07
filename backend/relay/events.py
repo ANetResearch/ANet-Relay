@@ -74,6 +74,37 @@ TEMPLATES: dict[str, tuple[str, str]] = {
         "{vehicle} 完成 {course}，用时 {total_text}。",
     ),
     "course_aborted": ("{vehicle} {course} aborted: {reason}.", "{vehicle} 的 {course} 已中止：{reason}。"),
+    "device_command": (
+        "{vehicle} sent {command}: {result}.",
+        "{vehicle} 发送 {command}：{result}。",
+    ),
+    "motor_test": (
+        "{vehicle} motor test: {motor} at {throttle_pct}% for {seconds} s.",
+        "{vehicle} 电机测试：{motor}，{throttle_pct}%，{seconds} 秒。",
+    ),
+    "motor_test_stopped": ("{vehicle} motor test stopped.", "{vehicle} 电机测试已停止。"),
+    "actuator_set": (
+        "{vehicle} output {index} set to {setting}.",
+        "{vehicle} 输出 {index} 设为 {setting}。",
+    ),
+    "rc_override": (
+        "{vehicle} RC channel override started.",
+        "{vehicle} 开始覆盖遥控通道。",
+    ),
+    "message_interval": (
+        "{vehicle} {message} interval set to {rate}.",
+        "{vehicle} 的 {message} 间隔设为 {rate}。",
+    ),
+    "home_set": ("{vehicle} home position set.", "{vehicle} 已设置返航点。"),
+    "rebooting": ("{vehicle} flight controller is rebooting.", "{vehicle} 飞控正在重启。"),
+    "calibration_started": (
+        "{vehicle} {sensor} calibration started.",
+        "{vehicle} 开始 {sensor} 校准。",
+    ),
+    "terminated": (
+        "{vehicle} flight terminated: motors stopped.",
+        "{vehicle} 飞行已终止：电机停转。",
+    ),
     "listen_error": ("UDP listen failed: {error}", "UDP 监听失败：{error}"),
 }
 

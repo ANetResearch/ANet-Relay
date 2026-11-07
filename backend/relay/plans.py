@@ -14,7 +14,7 @@ from typing import Any
 from .errors import err
 
 MAX_STEPS = 24
-ACTIONS = ("takeoff", "hover", "hold", "move", "yaw", "land", "goto", "rtl")
+ACTIONS = ("takeoff", "hover", "hold", "move", "yaw", "land", "goto", "rtl", "sticks", "attitude", "velocity")
 
 # action -> (skill name, allowed parameters)
 _SKILL = {
@@ -26,6 +26,9 @@ _SKILL = {
     "land": ("land", set()),
     "goto": ("goto", {"x", "y", "z", "yaw"}),
     "rtl": ("rtl", set()),
+    "sticks": ("sticks", {"roll", "pitch", "yaw", "throttle", "seconds"}),
+    "attitude": ("attitude", {"roll_deg", "pitch_deg", "yaw_rate_dps", "thrust", "seconds"}),
+    "velocity": ("velocity", {"vx", "vy", "vz", "yaw_rate_dps", "seconds"}),
 }
 
 _RANGES = {
@@ -39,6 +42,23 @@ _RANGES = {
     "y": (-1e4, 1e4),
     "z": (-1e3, 1e3),
     "yaw": (-360.0, 360.0),
+    "roll_deg": (-30.0, 30.0),
+    "pitch_deg": (-30.0, 30.0),
+    "yaw_rate_dps": (-90.0, 90.0),
+    "thrust": (0.0, 1.0),
+    "vx": (-2.0, 2.0),
+    "vy": (-2.0, 2.0),
+    "vz": (-2.0, 2.0),
+}
+# Parameters whose range differs from the shared table for one action.
+_ACTION_RANGES = {
+    "sticks": {"roll": (-1.0, 1.0), "pitch": (-1.0, 1.0), "yaw": (-1.0, 1.0), "throttle": (0.0, 1.0)},
+}
+_SECONDS = {"sticks": (0.05, 10.0), "attitude": (0.05, 10.0), "velocity": (0.05, 10.0)}
+_REQUIRED = {
+    "sticks": ("throttle", "seconds"),
+    "attitude": ("seconds",),
+    "velocity": ("seconds",),
 }
 
 DEFAULTS = {"takeoff": {"alt": 1.0}, "hover": {"seconds": 3.0}}
@@ -68,12 +88,17 @@ def normalise_steps(steps: Any) -> list[dict[str, Any]]:
             value = raw[key]
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
                 raise err("invalid_request", reason=f"step {i} ({action}): {key} must be a number")
-            low, high = _RANGES[key]
+            low, high = _ACTION_RANGES.get(action, {}).get(key) or (
+                _SECONDS[action] if key == "seconds" and action in _SECONDS else _RANGES[key]
+            )
             if not low <= float(value) <= high:
                 raise err("invalid_request", reason=f"step {i} ({action}): {key} must be {low:g} to {high:g}")
             step[key] = float(value)
         if action == "move" and not any(step.get(k) for k in ("forward", "right", "up")):
             raise err("invalid_request", reason=f"step {i} (move): give forward, right or up")
+        for key in _REQUIRED.get(action, ()):
+            if key not in step:
+                raise err("invalid_request", reason=f"step {i} ({action}): {key} is required")
         if action == "yaw" and "deg" not in step:
             raise err("invalid_request", reason=f"step {i} (yaw): deg is required")
         if action == "goto" and not all(k in step for k in ("x", "y", "z")):

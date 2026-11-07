@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from .. import skills
+from .. import device, plans, skills
 from ..config import (
     ARM_CONFIRM,
     LEASE_S,
@@ -73,7 +73,7 @@ def capabilities(request: Request) -> dict[str, Any]:
         },
         "plan": {
             "endpoint": "POST /vehicles/{id}/plan",
-            "actions": ["takeoff", "hover", "hold", "move", "yaw", "land", "goto", "rtl"],
+            "actions": list(plans.ACTIONS),
             "example": [
                 {"action": "takeoff", "alt": 1.0},
                 {"action": "hover", "seconds": 3},
@@ -83,7 +83,33 @@ def capabilities(request: Request) -> dict[str, Any]:
                 {"action": "land"},
             ],
         },
-        "confirm": {"arm_real": ARM_CONFIRM, "motor_test": MOTOR_CONFIRM, "param_set": "<parameter name>"},
+        "confirm": {
+            "arm_real": ARM_CONFIRM,
+            "motor_test": MOTOR_CONFIRM,
+            "param_set": "<parameter name>",
+            **{level: word for level, word in device.CONFIRM_WORDS.items() if level != "motor"},
+            "note": "Real aircraft need the word; simulated aircraft only for terminate (04 §1).",
+        },
+        "device": {
+            "commands": "GET /commands",
+            "endpoints": [
+                "GET /vehicles/{id}/device",
+                "GET /vehicles/{id}/messages/{name}",
+                "GET /vehicles/{id}/params/{name}",
+                "POST /vehicles/{id}/params/read",
+                "POST /vehicles/{id}/command",
+                "POST /vehicles/{id}/motors/test",
+                "POST /vehicles/{id}/motors/stop",
+                "POST /vehicles/{id}/actuators/set",
+                "POST /vehicles/{id}/rc",
+                "POST /vehicles/{id}/message-interval",
+                "POST /vehicles/{id}/request-message",
+                "POST /vehicles/{id}/reboot",
+                "POST /vehicles/{id}/calibrate",
+                "POST /vehicles/{id}/home",
+                "POST /vehicles/{id}/terminate",
+            ],
+        },
         "control_levels": [
             {"level": 1, "name": "sticks", "requires": "manual"},
             {"level": 2, "name": "modes and commands", "requires": "manual / althold"},
@@ -109,6 +135,28 @@ def _skill_params(name: str) -> dict[str, str]:
             "at most 2 m, whose distance is an estimate",
         },
         "yaw": {"deg": "degrees relative to the current heading, positive clockwise"},
+        "sticks": {
+            "roll": "-1..1 right +",
+            "pitch": "-1..1 forward +",
+            "yaw": "-1..1 clockwise +",
+            "throttle": "0..1 (0.5 holds altitude in altitude-hold modes)",
+            "seconds": "0 to 10; the sticks return to centre afterwards",
+        },
+        "attitude": {
+            "roll_deg": "-30..30, right wing down +",
+            "pitch_deg": "-30..30, nose up + (negative tilts forward)",
+            "yaw_rate_dps": "-90..90, clockwise +",
+            "thrust": "0..1, default the calibrated hover thrust",
+            "seconds": "0 to 10; the aircraft returns to altitude hold afterwards",
+            "note": "ArduPilot GUIDED_NOGPS or PX4 OFFBOARD with SET_ATTITUDE_TARGET at 20 Hz",
+        },
+        "velocity": {
+            "vx": "m/s east, -2..2",
+            "vy": "m/s north, -2..2",
+            "vz": "m/s up, -2..2",
+            "yaw_rate_dps": "optional, -90..90",
+            "seconds": "0 to 10; stops before leaving the safety volume (outside_safety_volume)",
+        },
     }.get(name, {})
 
 

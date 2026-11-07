@@ -107,7 +107,7 @@ def sticks(request: Request, vid: str, body: schemas.SticksBody) -> dict[str, An
 
 @router.post("/vehicles/{vid}/arm", tags=["control"], responses=ERRORS)
 def arm(request: Request, vid: str, body: schemas.ArmBody) -> dict[str, Any]:
-    return service(request).arm(vid, actor(request, "control"), body.arm, body.confirm)
+    return service(request).arm(vid, actor(request, "control"), body.arm, body.confirm, force=body.force)
 
 
 @router.post("/vehicles/{vid}/mode", tags=["control"], responses=ERRORS)

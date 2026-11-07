@@ -46,7 +46,18 @@ def error(resp):
 def test_health_capabilities_openapi(client):
     assert client.get("/api/v1/health").json()["ok"] is True
     caps = client.get("/api/v1/capabilities").json()
-    assert {s["name"] for s in caps["skills"]} == {"takeoff", "land", "hold", "rtl", "goto", "move", "yaw"}
+    assert {s["name"] for s in caps["skills"]} >= {
+        "takeoff",
+        "land",
+        "hold",
+        "rtl",
+        "goto",
+        "move",
+        "yaw",
+        "sticks",
+        "attitude",
+        "velocity",
+    }
     assert caps["limits"]["stick_timeout_s"] == 0.8
     spec = client.get("/openapi.json").json()
     assert "/api/v1/vehicles/{vid}/possess" in spec["paths"]

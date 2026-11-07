@@ -45,6 +45,11 @@ MOVE_OPEN_LOOP_MAX_M = 2.0
 YAW_TOLERANCE_DEG = 3.0
 YAW_SETTLE_S = 0.3
 GRAVITY = 9.81
+ATTITUDE_PERIOD_S = 0.05  # SET_ATTITUDE_TARGET at 20 Hz (04 §2.2)
+VELOCITY_PERIOD_S = 0.1  # velocity setpoints at 10 Hz
+BRAKE_SPEED_MPS = 0.2
+BRAKE_MAX_S = 2.5
+BRAKE_DECEL = 3.0  # m/s2 assumed when looking ahead for the safety volume
 
 REQUIREMENTS = {
     "takeoff": "althold",
@@ -54,6 +59,9 @@ REQUIREMENTS = {
     "goto": "position",
     "move": "althold",
     "yaw": "althold",
+    "sticks": "manual",
+    "attitude": "manual",
+    "velocity": "position",
 }
 SKILL_NAMES = tuple(REQUIREMENTS)
 
@@ -77,6 +85,7 @@ class Host(Protocol):
     def ack_after(self, command: int, t: float) -> dict | None: ...
     def heading(self) -> float | None: ...
     def tilt(self) -> tuple[float, float] | None: ...
+    def speed(self) -> float | None: ...
     def param(self, name: str, default: float) -> float: ...
 
 
@@ -538,6 +547,159 @@ class Skill:
         stick = math.copysign(min(0.3, max(0.07, abs(error) / 90.0)), error)
         self.out = StickInput(0.0, 0.0, stick, throttle, source="agent")
 
+    def _tick_sticks(self, host: Host, now: float) -> None:
+        """Timed stick output; afterwards the sticks return to centre (04 §2.2)."""
+        p = self.params
+        rest = StickInput(
+            0.0,
+            0.0,
+            0.0,
+            0.5 if host.mode in modes.HOLD_STICK_MODES else float(p["throttle"]),
+            source="agent",
+        )
+        if self.state == "done":
+            self.out = rest
+            return
+        if self.phase == "start":
+            self.expect_mode = host.mode
+            self._phase("run", now)
+        if not host.armed:
+            self.fail("disarmed", "已上锁")
+            return
+        if not self._check_running_mode(host):
+            return
+        seconds = float(p["seconds"])
+        if now - self.phase_t >= seconds:
+            self.out = rest
+            self.finish(f"sticks held {seconds:g} s")
+            return
+        self.out = StickInput(
+            float(p["roll"]), float(p["pitch"]), float(p["yaw"]), float(p["throttle"]), source="agent"
+        )
+
+    def _althold_mode(self, host: Host) -> str:
+        return modes.possess_mode(host.autopilot, host.has_capability("althold")) or "ALT_HOLD"
+
+    def _tick_attitude(self, host: Host, now: float) -> None:
+        """Attitude targets at 20 Hz in GUIDED_NOGPS / OFFBOARD, then back to altitude hold (04 §2.2)."""
+        px4 = host.autopilot == modes.PX4
+        mode = "OFFBOARD" if px4 else "GUIDED_NOGPS"
+        if self.state == "done":
+            self.out = StickInput(0.0, 0.0, 0.0, self._hold_altitude(host), source="agent")
+            return
+        if self.phase == "start":
+            heading = host.heading()
+            if heading is None:
+                self.fail("no heading", "没有航向")
+                return
+            self.heading_target = heading
+            self._phase("prime" if px4 else "mode", now)
+        if not host.armed:
+            self.fail("disarmed", "已上锁")
+            return
+        if self.phase in ("prime", "mode", "run"):
+            self._send_attitude(host, now, streaming=self.phase == "run")
+        if self.phase == "prime":
+            if now - self.phase_t >= OFFBOARD_PRIME_S:
+                self._phase("mode", now)
+            return
+        if self.phase == "mode":
+            if self._ensure_mode(host, mode, now):
+                self.expect_mode = mode
+                self._phase("run", now)
+            return
+        if self.phase == "run":
+            if not self._check_running_mode(host):
+                return
+            if now - self.phase_t >= float(self.params["seconds"]):
+                self.expect_mode = None
+                self._phase("restore", now)
+            return
+        target = self._althold_mode(host)
+        if self._ensure_mode(host, target, now):
+            self.alt_target = host.altitude()
+            self.expect_mode = target
+            self.finish(f"attitude held {float(self.params['seconds']):g} s")
+
+    def _send_attitude(self, host: Host, now: float, streaming: bool) -> None:
+        if now - self.last_setpoint < ATTITUDE_PERIOD_S:
+            return
+        p = self.params
+        dt = min(0.2, now - self.last_setpoint) if streaming and self.last_setpoint > 0 else 0.0
+        self.last_setpoint = now
+        rate = math.radians(float(p.get("yaw_rate_dps") or 0.0))
+        if streaming and self.heading_target is not None:
+            self.heading_target = _wrap(self.heading_target + rate * dt)
+        roll = math.radians(float(p.get("roll_deg") or 0.0)) if streaming else 0.0
+        pitch = math.radians(float(p.get("pitch_deg") or 0.0)) if streaming else 0.0
+        thrust = p.get("thrust")
+        thrust = float(p["_hover"] if thrust is None else thrust)
+        host.driver.attitude_target(
+            roll, pitch, self.heading_target or 0.0, rate if streaming else 0.0, thrust
+        )
+
+    def _tick_velocity(self, host: Host, now: float) -> None:
+        """Velocity setpoints at 10 Hz inside the safety volume (04 §2.2)."""
+        px4 = host.autopilot == modes.PX4
+        mode = "OFFBOARD" if px4 else "GUIDED"
+        self.expect_mode = mode
+        if self.state == "done":
+            streaming = self.target_local is not None and (px4 or host.mode == mode)
+            if streaming and now - self.last_setpoint >= SETPOINT_PERIOD_S:
+                self.last_setpoint = now
+                host.driver.position_target_local(*self.target_local, None)  # type: ignore[misc]
+            return
+        local = host.local_enu()
+        if local is None:
+            self.fail("no local position", "没有本地位置")
+            return
+        if self.phase == "start":
+            self._phase("prime" if px4 else "mode", now)
+        if not host.armed:
+            self.fail("disarmed", "已上锁")
+            return
+        if self.phase in ("prime", "mode", "brake", "violation"):
+            self._send_velocity(host, now, 0.0, 0.0, 0.0, None)
+        if self.phase == "prime":
+            if now - self.phase_t >= OFFBOARD_PRIME_S:
+                self._phase("mode", now)
+            return
+        if self.phase == "mode":
+            if self._ensure_mode(host, mode, now):
+                self._phase("run", now)
+            return
+        if not self._check_running_mode(host):
+            return
+        p = self.params
+        if self.phase == "run":
+            vx, vy, vz = (float(p[k]) for k in ("vx", "vy", "vz"))
+            box = p.get("_box")
+            ahead = tuple(c + _reach(v) for c, v in zip(local, (vx, vy, vz), strict=True))
+            if box and not _inside(box, ahead):
+                self._phase("violation", now)
+                return
+            rate = p.get("yaw_rate_dps")
+            self._send_velocity(host, now, vx, vy, vz, None if rate is None else math.radians(float(rate)))
+            if now - self.phase_t >= float(p["seconds"]):
+                self._phase("brake", now)
+            return
+        speed = host.speed()
+        if (speed is not None and speed <= BRAKE_SPEED_MPS) or now - self.phase_t >= BRAKE_MAX_S:
+            self.target_local = local
+            if self.phase == "violation":  # braked inside the volume: hold here and report why it stopped
+                host.driver.position_target_local(*local, None)
+                self.fail("outside_safety_volume", "超出安全区")
+                return
+            self.finish(f"velocity held {float(p['seconds']):g} s")
+
+    def _send_velocity(
+        self, host: Host, now: float, vx: float, vy: float, vz: float, yaw_rate: float | None
+    ) -> None:
+        if now - self.last_setpoint < VELOCITY_PERIOD_S:
+            return
+        self.last_setpoint = now
+        host.driver.velocity_target(vx, vy, vz, yaw_rate)
+
     def _tick_rtl(self, host: Host, now: float) -> None:
         if self.phase == "start":
             self._phase("command", now)
@@ -587,6 +749,16 @@ class Skill:
         dist = math.dist(local, self.target_local)
         if dist <= GOTO_TOLERANCE_M:
             self.finish(f"reached within {dist:.2f} m")
+
+
+def _reach(v: float) -> float:
+    """Distance an aircraft moving at ``v`` m/s covers before it can stop: reaction time plus braking."""
+    return v * 0.3 + math.copysign(v * v / (2.0 * BRAKE_DECEL), v)
+
+
+def _inside(box: Any, p: tuple[float, float, float]) -> bool:
+    """``box`` is (xmin, xmax, ymin, ymax, zmin, zmax) in the vehicle's local ENU frame."""
+    return box[0] <= p[0] <= box[1] and box[2] <= p[1] <= box[3] and box[4] <= p[2] <= box[5]
 
 
 def _wrap(angle: float) -> float:
@@ -640,4 +812,10 @@ def make(
         )
     elif name == "yaw":
         skill.timeout = 6.0 + abs(float(params["deg"])) / 20.0
+    elif name == "sticks":
+        skill.timeout = float(params["seconds"]) + 3.0
+    elif name == "attitude":
+        skill.timeout = float(params["seconds"]) + 12.0
+    elif name == "velocity":
+        skill.timeout = float(params["seconds"]) + 15.0
     return skill
