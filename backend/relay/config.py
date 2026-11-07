@@ -94,6 +94,9 @@ class Settings:
     bridge_port: int = 14555
     last_network_ssid: str = ""
     ui: dict[str, Any] = field(default_factory=dict)
+    # WP-C simulator flight model (05 §5): the hover-assist default for new simulators and turbulence 0..1.
+    sim_hover_assist: bool = True
+    sim_turbulence: float = 0.3
 
     RESTART_FIELDS: ClassVar[tuple[str, ...]] = ("listen_port",)
     READ_ONLY: ClassVar[dict[str, float]] = {"stick_timeout_s": STICK_TIMEOUT_S}
@@ -153,6 +156,8 @@ class Settings:
             return "cell_warn_v"
         if self.possess_mode not in ("auto", "stabilize", "althold"):
             return "possess_mode"
+        if not 0.0 <= self.sim_turbulence <= 1.0:  # WP-C
+            return "sim_turbulence"
         if not 1 <= self.retention_days <= 3650:
             return "retention_days"
         for name in ("listen_port", "bridge_port"):

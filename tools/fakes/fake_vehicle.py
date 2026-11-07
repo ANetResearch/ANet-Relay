@@ -100,6 +100,8 @@ class FakeVehicle:
         sta_timeout_s: float = 3.0,
         sysid: int = 1,
         keep_received: int = 4000,
+        hover_assist: bool = True,
+        turbulence: float = 0.0,
     ) -> None:
         self.ap_host = bind[0]
         self.sta_host = sta_bind or bind[0]
@@ -112,7 +114,14 @@ class FakeVehicle:
         self.sta_timeout_s = sta_timeout_s
         self.drop_after = drop_after
         self.drop_for = drop_for
-        self.autopilot = SimAutopilot(autopilot, sysid=sysid, position=position, name="fake")
+        self.autopilot = SimAutopilot(
+            autopilot,
+            sysid=sysid,
+            position=position,
+            name="fake",
+            hover_assist=hover_assist,
+            turbulence=turbulence,
+        )
         self.autopilot.keep_received = keep_received
         self.state_file = (
             state_file or Path(tempfile.gettempdir()) / f"anet-relay-fake-{bind[0]}-{bind[1]}.json"
@@ -433,6 +442,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--no-position", action="store_true", help="no local position estimate (PX4 without flow)"
     )
+    parser.add_argument(
+        "--no-assist",
+        action="store_true",
+        help="hover assist off: no barometer or position source, physical flight (05 §5)",
+    )
+    parser.add_argument("--turbulence", type=float, default=0.3, help="turbulence 0..1 with --no-assist")
     parser.add_argument("--drop-after", type=float, default=None, help="stop all traffic after N seconds")
     parser.add_argument("--drop-for", type=float, default=None, help="resume traffic after this many seconds")
     parser.add_argument("--state-file", type=Path, default=None, help="persisted bridge settings")
@@ -463,6 +478,8 @@ def main(argv: list[str] | None = None) -> int:
         reboot_s=args.reboot_s,
         sysid=args.sysid,
         keep_received=0,
+        hover_assist=not args.no_assist,
+        turbulence=min(1.0, max(0.0, args.turbulence)),
     ).start()
     sys.stderr.write(
         f"fake {args.autopilot} on udp {fake.host}:{bind[1]} -> {args.gcs}"

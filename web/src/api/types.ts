@@ -127,6 +127,7 @@ export interface Vehicle {
   preflight: PreflightSummary
   course: CourseRunView | null
   record_session: number | null
+  sim: SimView | null
 }
 /**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
@@ -432,6 +433,22 @@ export interface Ring {
   r: number
 }
 /**
+ * Simulator flight model (05 §5.2, WP-C); null on real aircraft.
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "SimView".
+ */
+export interface SimView {
+  /**
+   * altitude and position hold available; false: physical flight
+   */
+  hover_assist: boolean
+  /**
+   * turbulence strength 0..1 (acts only with hover assist off)
+   */
+  turbulence: number
+}
+/**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
  * via the `definition` "Alert".
  */
@@ -509,6 +526,7 @@ export interface Event {
     | 'refly_started'
     | 'refly_finished'
     | 'refly_failed'
+    | 'sim_assist_changed'
   vehicle: string | null
   session: string | null
   text_en: string

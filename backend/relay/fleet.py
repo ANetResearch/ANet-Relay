@@ -63,6 +63,7 @@ from .drivers.sim import SimDriver
 from .errors import RelayError, err
 from .events import EventBus
 from .fleet_device import DeviceOps
+from .fleet_sim import SimOps
 from .flighthealth import FlightHealth
 from .history import History
 from .mav import bridge as bridgemod
@@ -333,7 +334,7 @@ class Vehicle:
         return auth.controller(self.auth, claim is not None and sessions.alive(claim.session_id))
 
 
-class FleetService(DeviceOps):
+class FleetService(DeviceOps, SimOps):
     def __init__(
         self,
         settings: Settings | None = None,
@@ -1261,7 +1262,13 @@ class FleetService(DeviceOps):
 
         return self.call(run)
 
-    def add_sims(self, count: int = 1, flavour: str = ARDUPILOT, position: bool = True) -> list[str]:
+    def add_sims(
+        self,
+        count: int = 1,
+        flavour: str = ARDUPILOT,
+        position: bool = True,
+        hover_assist: bool | None = None,
+    ) -> list[str]:
         if flavour not in (ARDUPILOT, PX4):
             raise err("invalid_request", reason="autopilot must be ardupilot or px4")
         if not 1 <= int(count) <= SIM_LIMIT:
@@ -1277,7 +1284,13 @@ class FleetService(DeviceOps):
                 n = next(i for i in range(1, SIM_LIMIT + 1) if f"sim-{i}" not in existing)
                 vid = f"sim-{n}"
                 existing.add(vid)
-                autopilot = SimAutopilot(flavour, position=position, position_hz=SIM_POSITION_HZ, name=vid)
+                autopilot = SimAutopilot(
+                    flavour,
+                    position=position,
+                    position_hz=SIM_POSITION_HZ,
+                    name=vid,
+                    **self._sim_options(hover_assist),  # WP-C: hover assist and turbulence (05 §5)
+                )
                 v = Vehicle(vid, "sim", f"SIM-{n}", SimDriver(autopilot))
                 self._attach(v)
                 v.created = now
@@ -1286,7 +1299,12 @@ class FleetService(DeviceOps):
                 v.safety_origin = (v.spawn[0], v.spawn[1], 0.0)
                 self.vehicles[vid] = v
                 added.append(vid)
-                self.events.emit("sim_added", vid, data={"autopilot": flavour}, labels={"vehicle": v.label})
+                self.events.emit(
+                    "sim_added",
+                    vid,
+                    data={"autopilot": flavour, "hover_assist": autopilot.hover_assist},
+                    labels={"vehicle": v.label},
+                )
             return added
 
         return self.call(run)
@@ -2476,6 +2494,7 @@ class FleetService(DeviceOps):
         def run() -> dict[str, Any]:
             self.settings = new
             save_settings(self.data_dir, new)
+            self._apply_sim_settings()  # WP-C: turbulence follows the setting live
             return self.get_settings()
 
         return self.call(run)
@@ -2742,6 +2761,7 @@ class FleetService(DeviceOps):
             "calibration": v.calibration.view(),
             "confirmed": v.confirmed.view(),
             "preflight": preflight.summary(items),
+            "sim": self._sim_view(v),  # WP-C (05 §5.2)
             "course": None if v.course is None else v.course.view(now),
             "record_session": v.record_session,
         }

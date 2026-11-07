@@ -62,6 +62,7 @@ function base(over: Partial<V> & Pick<V, 'id' | 'label' | 'kind'>): V {
     preflight: { ok: sim, blocking: sim ? [] : ['signs', 'props'] },
     course: null,
     record_session: null,
+    sim: sim ? { hover_assist: true, turbulence: 0.3 } : null,
     ...over,
   }
 }
@@ -191,7 +192,7 @@ export function startFixture(name: FixtureName): () => void {
   }
 
   const transport: RestTransport = {
-    async request(method, path) {
+    async request(method, path, body) {
       const m = path.match(/^\/vehicles\/([^/]+)\/(\w+)/)
       if (path === '/health') return { ok: true, version: '0.1.0-fixture', uptime_s: 1 }
       if (path === '/fleet') return fleet
@@ -205,6 +206,14 @@ export function startFixture(name: FixtureName): () => void {
       if (path === '/stop-all') {
         emit('stop_all', null)
         return { ok: true }
+      }
+      const assist = path.match(/^\/sims\/([^/]+)\/assist$/)
+      if (assist && method === 'POST') {
+        const id = decodeURIComponent(assist[1])
+        const on = Boolean((body as { on?: unknown } | undefined)?.on)
+        mutate(id, (x) => (x.sim ? { ...x, sim: { ...x.sim, hover_assist: on }, ...(on ? {} : { mode: 'STABILIZE', mode_class: 'manual' as const }) } : x))
+        emit('sim_assist_changed', id, { hover_assist: on, by: 'operator' })
+        return { id, hover_assist: on }
       }
       if (m && method === 'POST') {
         const id = decodeURIComponent(m[1])

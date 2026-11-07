@@ -465,6 +465,7 @@ APP_REST = [
     ),
     ("app_sims_remove", {"id": ["sim-2", "sim-3"]}, "DELETE", "/sims", None, None),
     ("app_sim_reset", {"vehicle": "sim-1"}, "POST", "/sims/sim-1/reset", {}, None),
+    ("app_sim_assist", {"vehicle": "sim-1", "on": False}, "POST", "/sims/sim-1/assist", {"on": False}, None),
     ("app_settings_get", {}, "GET", "/settings", None, None),
     (
         "app_settings_set",
