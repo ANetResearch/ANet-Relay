@@ -25,6 +25,7 @@ hiddenimports = [
     "pymavlink.dialects.v20.common",
     "pymavlink.dialects.v10.ardupilotmega",
     "pymavlink.dialects.v10.common",
+    "pymavlink.dialects.v20.all",  # mavutil's default when MAVLINK_DIALECT is unset
 ]
 
 a = Analysis(
