@@ -55,7 +55,7 @@ def confirm(request: Request, vid: str, body: schemas.ConfirmBody) -> dict[str, 
 @router.post("/sims", tags=["sims"], dependencies=APP, responses=ERRORS)
 def add_sims(request: Request, body: schemas.SimsBody | None = None) -> dict[str, Any]:
     body = body or schemas.SimsBody()
-    return {"added": service(request).add_sims(body.count, body.autopilot, body.position)}
+    return {"added": service(request).add_sims(body.count, body.autopilot, body.position, body.hover_assist)}
 
 
 @router.delete("/sims", tags=["sims"], dependencies=APP, responses=ERRORS)
@@ -66,6 +66,12 @@ def remove_sims(request: Request, id: list[str] | None = Query(None)) -> dict[st
 @router.post("/sims/{vid}/reset", tags=["sims"], dependencies=APP, responses=ERRORS)
 def reset_sim(request: Request, vid: str) -> dict[str, Any]:
     return service(request).reset_sim(vid)
+
+
+@router.post("/sims/{vid}/assist", tags=["sims"], responses=ERRORS)
+def sim_assist(request: Request, vid: str, body: schemas.SimAssistBody) -> dict[str, Any]:
+    """Hover assist on or off (05 §5.2): the operator or the controller; allowed armed and in flight."""
+    return service(request).set_sim_assist(vid, body.on, actor(request, "control"), app_control=True)
 
 
 # ---------------------------------------------------------------------------- authority

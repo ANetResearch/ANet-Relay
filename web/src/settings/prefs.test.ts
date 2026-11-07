@@ -17,3 +17,28 @@ describe('window preferences', () => {
     expect(formatLength(null, 'm')).toBeNull()
   })
 })
+
+describe('control preferences (05 §6.1, §6.3)', () => {
+  it('defaults to Standard, Mode 2, no inversion, detent on, no profiles', () => {
+    const p = sanitizePrefs({})
+    expect(p.controlFeel).toBe('standard')
+    expect(p.stickMode).toBe(2)
+    expect(p.invert).toEqual({ roll: false, pitch: false, yaw: false, throttle: false })
+    expect(p.throttleDetent).toBe(true)
+    expect(p.padProfiles).toEqual({})
+  })
+  it('accepts valid values and rejects junk', () => {
+    const p = sanitizePrefs({ controlFeel: 'sport', stickMode: 1, invert: { pitch: true, yaw: 'yes' }, throttleDetent: false })
+    expect(p.controlFeel).toBe('sport')
+    expect(p.stickMode).toBe(1)
+    expect(p.invert).toEqual({ roll: false, pitch: true, yaw: false, throttle: false })
+    expect(p.throttleDetent).toBe(false)
+    expect(sanitizePrefs({ controlFeel: 'turbo', stickMode: 3 })).toMatchObject({ controlFeel: 'standard', stickMode: 2 })
+  })
+  it('keeps learned profiles through the round trip', () => {
+    const profile = { id: 'radio', kind: 'transmitter', axes: {}, switches: [], updatedAt: 5 }
+    const p = sanitizePrefs({ padProfiles: { radio: profile } })
+    expect(p.padProfiles.radio.kind).toBe('transmitter')
+    expect(p.padProfiles.radio.axes.throttle.index).toBe(2)
+  })
+})

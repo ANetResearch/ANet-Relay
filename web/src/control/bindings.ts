@@ -93,3 +93,34 @@ export function linkUsable(state: Vehicle['link']['state']): boolean {
 export function acceptsSticks(modeClass: Vehicle['mode_class']): boolean {
   return modeClass === 'manual' || modeClass === 'althold' || modeClass === 'position'
 }
+
+// ---------------------------------------------------------------------------------------------- WP-C (05 §6.3)
+
+export type AssistAction = { kind: 'assist'; on: boolean } | { kind: 'mode'; name: string } | null
+
+/**
+ * Triangle and H (05 §6.3): "hover assist", meaning altitude hold or none. A simulated aircraft switches its
+ * hover assist (turning it on enters altitude hold); one with assist on but in a self-levelling mode goes to
+ * altitude hold first. A real aircraft keeps the stabilise <-> altitude hold mode toggle.
+ */
+export function assistAction(v: Pick<Vehicle, 'kind' | 'mode_class' | 'modes' | 'sim'>): AssistAction {
+  if (v.kind === 'sim' && v.sim) {
+    const holding = v.sim.hover_assist && (v.mode_class === 'althold' || v.mode_class === 'position')
+    if (holding) return { kind: 'assist', on: false }
+    if (!v.sim.hover_assist) return { kind: 'assist', on: true }
+    const target = modeToggleTarget(v)
+    return target ? { kind: 'mode', name: target } : null
+  }
+  if (!acceptsSticks(v.mode_class)) return null
+  const target = modeToggleTarget(v)
+  return target ? { kind: 'mode', name: target } : null
+}
+
+/** H5: a transmitter's throttle must be at most 5 % (self-levelling) or within 10 % of centre (hold) to start. */
+export const H5_LOW = 0.05
+export const H5_MID = 0.1
+
+export function throttleReady(throttle01: number, hold: boolean): boolean {
+  if (!Number.isFinite(throttle01)) return false
+  return hold ? Math.abs(throttle01 - 0.5) <= H5_MID : throttle01 <= H5_LOW
+}

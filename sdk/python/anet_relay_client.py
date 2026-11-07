@@ -684,8 +684,22 @@ class RelayClient:
 
     # ------------------------------------------------------------------ simulators (app operations)
 
-    def add_sims(self, count: int = 1, autopilot: str = "ardupilot") -> list[str]:
-        return self._app("POST", "/sims", {"count": count, "autopilot": autopilot})["added"]
+    def add_sims(
+        self, count: int = 1, autopilot: str = "ardupilot", hover_assist: bool | None = None
+    ) -> list[str]:
+        """Add simulators; ``hover_assist=False`` gives physical flight (omitted: the setting)."""
+        body: dict[str, Any] = {"count": count, "autopilot": autopilot}
+        if hover_assist is not None:
+            body["hover_assist"] = hover_assist
+        return self._app("POST", "/sims", body)["added"]
+
+    def sim_assist(self, vehicle_id: str, on: bool) -> dict:
+        """Switch a simulator's hover assist (05 §5), armed and in flight too; returns ``{id, hover_assist}``.
+
+        Off: physical flight (throttle is thrust, hold modes refused, airborne aircraft move to STABILIZE).
+        Needs the claim on the aircraft, or one nobody controls; ``sim_only`` for a real aircraft.
+        """
+        return self._app("POST", f"/sims/{vehicle_id}/assist", {"on": bool(on)})
 
     def remove_sims(self, ids: list[str] | None = None) -> list[str]:
         return self._app("DELETE", "/sims", query={"id": ids} if ids else None)["removed"]

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { allocateIndex, autoBindTarget, modeToggleTarget, optionsDecision, possessedBy, simOrder, sourceOf } from './bindings'
+import { allocateIndex, assistAction, autoBindTarget, modeToggleTarget, optionsDecision, possessedBy, simOrder, sourceOf, throttleReady } from './bindings'
 
 type P = { input: 'keyboard' | 'screen' | 'gamepad'; pad: number | null; since: number } | null
 const v = (id: string, kind: 'real' | 'sim', possession: P = null, controller: 'none' | 'human' | 'agent' = possession ? 'human' : 'none') => ({
@@ -63,5 +63,27 @@ describe('mode toggle', () => {
     expect(modeToggleTarget({ mode_class: 'althold', modes: ['STABILIZE', 'ALT_HOLD'] })).toBe('STABILIZE')
     expect(modeToggleTarget({ mode_class: 'position', modes: ['STABILIZED', 'ALTCTL', 'POSCTL'] })).toBe('STABILIZED')
     expect(modeToggleTarget({ mode_class: 'manual', modes: ['STABILIZE'] })).toBeNull()
+  })
+})
+
+describe('hover assist action and H5 (05 §6.3)', () => {
+  const modes = ['STABILIZE', 'ALT_HOLD', 'LOITER']
+  it('switches a sim by whether it holds altitude now', () => {
+    const s = (hover_assist: boolean, mode_class: 'manual' | 'althold' | 'position') => ({ kind: 'sim' as const, mode_class, modes, sim: { hover_assist, turbulence: 0 } })
+    expect(assistAction(s(true, 'althold'))).toEqual({ kind: 'assist', on: false })
+    expect(assistAction(s(true, 'position'))).toEqual({ kind: 'assist', on: false })
+    expect(assistAction(s(false, 'manual'))).toEqual({ kind: 'assist', on: true })
+    expect(assistAction(s(true, 'manual'))).toEqual({ kind: 'mode', name: 'ALT_HOLD' })
+  })
+  it('keeps the mode toggle on a real aircraft, and nothing in autonomous modes', () => {
+    expect(assistAction({ kind: 'real', mode_class: 'althold', modes, sim: null })).toEqual({ kind: 'mode', name: 'STABILIZE' })
+    expect(assistAction({ kind: 'real', mode_class: 'auto', modes, sim: null })).toBeNull()
+  })
+  it('H5 thresholds', () => {
+    expect(throttleReady(0.05, false)).toBe(true)
+    expect(throttleReady(0.06, false)).toBe(false)
+    expect(throttleReady(0.4, true)).toBe(true)
+    expect(throttleReady(0.61, true)).toBe(false)
+    expect(throttleReady(Number.NaN, true)).toBe(false)
   })
 })

@@ -245,6 +245,13 @@ class CourseRunView(_Model):
     rings: list[Ring] = Field(description="rings placed in the vehicle's position frame")
 
 
+class SimView(_Model):
+    """Simulator flight model (05 §5.2, WP-C); null on real aircraft."""
+
+    hover_assist: bool = Field(description="altitude and position hold available; false: physical flight")
+    turbulence: float = Field(description="turbulence strength 0..1 (acts only with hover assist off)")
+
+
 class Vehicle(_Model):
     id: str
     kind: Literal["real", "sim"]
@@ -291,6 +298,7 @@ class Vehicle(_Model):
     preflight: PreflightSummary
     course: CourseRunView | None
     record_session: int | None
+    sim: SimView | None
 
 
 class Alert(_Model):
@@ -372,6 +380,7 @@ EventKind = Literal[
     "refly_started",
     "refly_finished",
     "refly_failed",
+    "sim_assist_changed",
 ]
 
 
@@ -582,6 +591,14 @@ class SimsBody(_Body):
     count: int = Field(default=1, ge=1, le=8)
     autopilot: Literal["ardupilot", "px4"] = "ardupilot"
     position: bool = Field(default=True, description="false: no position estimate (barometer only)")
+    hover_assist: bool | None = Field(
+        default=None,
+        description="false: physical flight, no altitude or position hold; omitted: setting sim_hover_assist",
+    )
+
+
+class SimAssistBody(_Body):
+    on: bool = Field(description="hover assist on (altitude and position hold) or off (physical flight)")
 
 
 class SessionBody(_Body):

@@ -112,13 +112,25 @@ export function appTools(relay) {
     defineTool(
       "app_add_sim",
       "Add simulators",
-      "Add simulated aircraft: count, autopilot px4 or ardupilot, with or without a position estimate.",
-      Type.Object({ count: opt(Type.Integer({ minimum: 1, maximum: 8 })), autopilot: opt(lit("px4", "ardupilot")), position: opt(Type.Boolean()) }),
-      (p) => call("POST", "/sims", { count: p.count ?? 1, autopilot: p.autopilot, position: p.position }),
+      "Add simulated aircraft: count, autopilot px4 or ardupilot, with or without a position estimate, with or without hover assist (omitted: the sim_hover_assist setting).",
+      Type.Object({
+        count: opt(Type.Integer({ minimum: 1, maximum: 8 })),
+        autopilot: opt(lit("px4", "ardupilot")),
+        position: opt(Type.Boolean()),
+        hover_assist: opt(Type.Boolean()),
+      }),
+      (p) => call("POST", "/sims", { count: p.count ?? 1, autopilot: p.autopilot, position: p.position, hover_assist: p.hover_assist }),
     ),
     defineTool("app_remove_sims", "Remove all simulators", "Delete every simulated aircraft.", empty, () => call("DELETE", "/sims")),
     defineTool("app_reset_sim", "Reset simulator", "Reset one simulated aircraft to its start state.", Type.Object({ vehicle: Type.String() }), (p) =>
       call("POST", `/sims/${enc(p.vehicle)}/reset`),
+    ),
+    defineTool(
+      "app_sim_assist",
+      "Simulator hover assist",
+      "Switch hover assist of one simulated aircraft. On: altitude and position hold. Off: physical flight; the throttle is thrust, hold modes are refused and an airborne aircraft moves to STABILIZE. Allowed armed and in flight. Needs the claim on the aircraft, or an aircraft nobody controls.",
+      Type.Object({ vehicle: Type.String(), on: Type.Boolean() }),
+      (p) => call("POST", `/sims/${enc(p.vehicle)}/assist`, { on: p.on }),
     ),
     defineTool("app_settings_get", "Read settings", "The persistent Relay settings (safety volume, interface preferences, agent control switch).", empty, () => call("GET", "/settings")),
     defineTool(

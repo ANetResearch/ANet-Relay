@@ -142,6 +142,8 @@ export const api = {
   addSim: (body?: Record<string, unknown>) => op<Ok>('POST', '/sims', body ?? {}),
   removeSims: () => op<Ok>('DELETE', '/sims'),
   resetSim: (id: string) => op<Ok>('POST', `/sims/${enc(id)}/reset`),
+  // WP-C: hover assist on one simulator (05 §5.2); allowed armed and in flight.
+  simAssist: (id: string, on: boolean) => op<Ok>('POST', `/sims/${enc(id)}/assist`, { on }),
   sessions: () => request<unknown>('GET', '/sessions'),
   bridge: (ip: string) => op<unknown>('GET', `/bridges/${enc(ip)}`),
   configureBridge: (ip: string, body: Record<string, unknown>) => op<Ok>('POST', `/bridges/${enc(ip)}/configure`, body),

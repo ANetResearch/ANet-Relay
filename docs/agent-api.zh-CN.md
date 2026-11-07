@@ -123,6 +123,7 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | `POST /vehicles/{id}/course/start` | 控制者 | `{course_id}`（缺省 `cage-loop`） |
 | `POST /vehicles/{id}/course/stop` | 控制者 | 中止航线 |
 | `POST /vehicles/{id}/stop` | 控制者 | 急停 |
+| `POST /sims/{id}/assist` | 控制者或操作员 | `{on}`：模拟机悬停辅助（见下）；真机返回 `sim_only` |
 
 ### 技能
 
@@ -242,6 +243,12 @@ POST /api/v1/vehicles/sim-1/plan
 
 `course/start` 把航线放在飞机原点并返回，其中 `rings` 已换算到飞机坐标系：`c`（环心 `[x, y, z]`）、`yaw_deg`（环法向的罗盘朝向）与 `r`（半径）。计时从起飞开始。飞机按顺序在半径以内穿过环平面即计为通过。飞机的 `course` 字段报告 `next`、`total`、`splits`、`elapsed_s` 与 `best_s`；事件 `ring_passed` 与 `course_finished` 标记进度。`course_sim.py` 沿每个环的法向，在环前 0.35 m 与环后 0.35 m 各设一个航点。
 
+### 模拟机悬停辅助
+
+每架模拟机有 `hover_assist`（缺省取设置 `sim_hover_assist`，开）。开：与以前相同，ALT_HOLD 保持高度、LOITER 保持位置，GUIDED、RTL、LAND 自主飞行。关：模拟一架没有气压计与定位源的穿越机，姿态自稳仍在，但油门就是推力（无定高、无倾斜与电压补偿，电压下降后悬停点升高），地效、电机响应、湍流（设置 `sim_turbulence`，0–1）与桨洗生效；飞机报告无气压计、无位置估计（`capabilities.althold` 与 `position` 为 false），请求 ALT_HOLD、LOITER、GUIDED、RTL、AUTO 被拒绝（`Mode requires hover assist`）。LAND 保留为失控保护，以开环推力下降。开关可在解锁与飞行中切换：关闭时空中的飞机转 STABILIZE，推力以 0.3 s 斜坡过渡；开启时以当前高度进入 ALT_HOLD。
+
+创建时用 `POST /sims {count, autopilot, position, hover_assist}` 设定；`POST /sims/{id}/assist {on}` 切换（操作员、控制该机的会话，或在无人控制该机且操作员允许应用控制时的任意会话）。快照携带 `vehicle.sim = {hover_assist, turbulence}`（真机为 null）；事件 `sim_assist_changed` 报告变化。MCP：`app_sim_assist`；SDK：`sim_assist(id, on)` 与 `add_sims(count, autopilot, hover_assist)`。
+
 ## 6. WebSocket `/api/v1/stream`
 
 服务端 → 客户端：
@@ -273,6 +280,7 @@ POST /api/v1/vehicles/sim-1/plan
 | `course_started` / `ring_passed` / `course_finished` / `course_aborted` | 穿环航线 |
 | `stop` / `stop_all` | 急停 |
 | `refly_started` / `refly_finished` / `refly_failed` | 再飞 |
+| `sim_assist_changed` | 模拟机悬停辅助已切换（`data.hover_assist`） |
 | `device_command` / `motor_test` / `motor_test_stopped` / `actuator_set` / `rc_override` / `message_interval` / `home_set` / `rebooting` / `calibration_started` / `terminated` | 设备级操作 |
 | `app_command` | 会话或操作员执行的界面动作（`data.action`、`data.by`） |
 
@@ -373,7 +381,7 @@ Relay 不在 8765 端口运行时，追加 `"--base", "http://127.0.0.1:<port>"`
 | `command(id, command, params, frame, use_int, confirm, timeout_s)` · `motor_test(id, motor, throttle_pct, seconds, confirm)` · `motors_stop(id)` · `actuator(id, index, value, pwm, seconds, confirm)` · `rc(id, channels, axes)` | 原始指令、电机、执行器、遥控覆盖 |
 | `message_interval(id, message, hz)` · `request_message(id, message)` · `reboot(id, confirm)` · `calibrate(id, sensor, confirm)` · `set_home(id, here, lat, lon, alt)` · `terminate(id, confirm)` | 消息频率、重启、校准、home、飞行终止 |
 | `app()` · `ui_state()` · `gamepads()` · `app_actions()` · `ui(action, **args)` | 应用与窗口状态、界面动作 |
-| `scan_network(networks)` · `connect_vehicle(host, port)` · `remove_vehicle(id)` · `add_sims(count, autopilot)` · `remove_sims(ids)` · `settings()` · `update_settings(**patch)` · `ack_alert(id)` · `stop_all()` | 应用操作：打开会话时以会话身份调用，否则使用操作员令牌 |
+| `scan_network(networks)` · `connect_vehicle(host, port)` · `remove_vehicle(id)` · `add_sims(count, autopilot, hover_assist)` · `remove_sims(ids)` · `sim_assist(id, on)` · `settings()` · `update_settings(**patch)` · `ack_alert(id)` · `stop_all()` | 应用操作：打开会话时以会话身份调用，否则使用操作员令牌 |
 
 `sdk/python/examples/device_tour.py` 在模拟机上演示设备级接口：读取设备总览与原始指令目录，测试单个电机并读回输出 PWM，起飞后用 `attitude` 保持一个姿态，然后降落。
 

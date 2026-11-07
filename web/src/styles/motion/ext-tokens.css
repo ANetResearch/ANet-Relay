@@ -16,6 +16,7 @@
     --duration-chart-slow: 1200ms;        /* editorial large chart entrance (lieflat enterSlow) */
     --duration-instant: 0s;               /* Base UI parts in reduced, off and data-instant */
     --duration-epsilon: 0.01ms;           /* JS recipes in reduced (transitionend still fires) */
+    --duration-voxel-flash: 120ms;        /* WP-C: driving HUD cell flash on a mode / assist / feel change (05 §6.4) */
   }
   html[data-tier="S"] { --telemetry-text-interval: 250ms; }   /* Tier S text <= 4 Hz (ADR-029) */
 }

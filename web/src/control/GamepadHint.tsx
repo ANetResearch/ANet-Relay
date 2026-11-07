@@ -16,8 +16,8 @@ import { Icon } from '@/ui/icons'
 import { motionReduced } from '@/ui/motion/tier'
 import { flyRingCourse } from './actions'
 import { DualSenseGlyph } from './DualSenseGlyph'
-import { useInputUi, type HintCard } from './store'
-import { useCT } from './strings'
+import { useInputUi, type AwaitReason, type HintCard } from './store'
+import { h5Key, useCT } from './strings'
 import './control.css'
 
 const SHOW_MS = 6000
@@ -119,7 +119,7 @@ interface Notices {
   /** possessed aircraft with a lost link */
   lost: string[]
   /** aircraft waiting for a stick movement, with the reason */
-  awaiting: [string, 'focus' | 'link'][]
+  awaiting: [string, AwaitReason][]
   /** aircraft whose controller is disconnected, with the pad number */
   padLost: [string, number][]
   /** airborne with no controller (backend warn alert) */
@@ -169,7 +169,8 @@ function StageNotices() {
   if (n.paused) top.push(<Chip key="paused">{tr('stage.inputPaused')}</Chip>)
   for (const [id, why] of n.awaiting) {
     if (n.paused) break
-    top.push(<Chip key={`aw-${id}`}>{why === 'link' ? t('stage.linkRestored') : `${name(id)} · ${ct('ctl.moveToResume')}`}</Chip>)
+    const text = why === 'link' ? t('stage.linkRestored') : why === 'throttle' ? `${name(id)} · ${ct(h5Key(getVehicle(id)?.mode_class))}` : `${name(id)} · ${ct('ctl.moveToResume')}`
+    top.push(<Chip key={`aw-${id}`}>{text}</Chip>)
   }
   for (const id of n.airborne) top.push(<Chip key={`air-${id}`} tone="warn">{t('possess.airborneNoController', { aircraft: name(id) })}</Chip>)
   const cards: React.ReactNode[] = []

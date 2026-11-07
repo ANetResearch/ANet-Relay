@@ -338,6 +338,11 @@ def build_tools() -> list[Tool]:
                     "default": True,
                     "description": "false: no position estimate (barometer only)",
                 },
+                "hover_assist": {
+                    "type": "boolean",
+                    "description": "false: physical flight without altitude or position hold "
+                    "(omitted: the sim_hover_assist setting)",
+                },
             },
         ),
         http_tool(
@@ -361,6 +366,17 @@ def build_tools() -> list[Tool]:
             "/sims/{vehicle}/reset",
             {"vehicle": VID},
             ["vehicle"],
+        ),
+        http_tool(
+            "app_sim_assist",
+            APP + "Switch hover assist of a simulator (05 §5). On: altitude and position hold as before. "
+            "Off: physical flight; the throttle is thrust, hold modes are refused and an airborne aircraft "
+            "moves to STABILIZE. Allowed armed and in flight. Needs the claim on the aircraft, or an "
+            "aircraft nobody controls; sim_only (400) for a real aircraft.",
+            "POST",
+            "/sims/{vehicle}/assist",
+            {"vehicle": VID, "on": {"type": "boolean", "description": "true: hover assist on"}},
+            ["vehicle", "on"],
         ),
         http_tool(
             "app_settings_get",

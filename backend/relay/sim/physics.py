@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import itertools
 import math
+import random
+import zlib
 from dataclasses import dataclass, field
 
 G = 9.80665
@@ -27,6 +29,23 @@ CRASH_VZ = 2.5
 CRASH_VH = 3.0
 CRASH_TILT = math.radians(60.0)
 GROUND_FRICTION = 6.0
+
+# Physical effects (05 §5.1), active only while ``Quad.effects`` is set (hover assist off).
+PROP_DIAMETER = 0.13
+GROUND_EFFECT_GAIN = 0.12
+GROUND_EFFECT_K = 3.0 / PROP_DIAMETER
+MOTOR_TAU_UP = 0.03
+MOTOR_TAU_DOWN = 0.05
+V_REF_CELL = 4.09  # loaded cell voltage at full charge and hover: thrust scales with voltage around it
+V_FACTOR_MAX = 1.03
+TURBULENCE_TAU = 0.6  # s, correlation time of the gust process
+TURBULENCE_XY = 1.2  # m/s^2 gust acceleration standard deviation at strength 1
+TURBULENCE_Z = 0.5
+PROP_WASH_VZ = 1.2  # m/s descent rate where the aircraft enters its own wake
+PROP_WASH_GAIN = 0.12  # thrust fluctuation per m/s beyond PROP_WASH_VZ
+PROP_WASH_MAX = 0.18
+IMPULSE_MAX = 5.0  # m/s per component, a sanity bound on external velocity changes
+KICK_MAX = math.radians(30.0)
 
 # Battery: 3S 850 mAh LiPo.
 CELLS = 3
@@ -74,6 +93,11 @@ def ocv_per_cell(soc: float) -> float:
 
 def wrap_pi(angle: float) -> float:
     return (angle + math.pi) % (2.0 * math.pi) - math.pi
+
+
+def seed_for(name: str) -> int:
+    """Stable turbulence seed for an aircraft id (``hash()`` is salted per process, crc32 is not)."""
+    return zlib.crc32(name.encode("utf-8"))
 
 
 @dataclass
@@ -137,30 +161,127 @@ class State:
 
 
 class Quad:
-    """Rigid-body quadrotor with motor lag, idealised attitude loop, drag, ground contact and battery."""
+    """Rigid-body quadrotor with motor lag, idealised attitude loop, drag, ground contact and battery.
 
-    def __init__(self, wind: tuple[float, float, float] = (0.0, 0.0, 0.0)) -> None:
+    With ``effects`` off (the default, and hover assist on) the model is exactly the v0.2 one. With
+    ``effects`` on (hover assist off, 05 §5.1) thrust scales with battery voltage, the motor spins up
+    faster than it spins down, ground effect adds up to 12 % thrust within one propeller diameter,
+    seeded turbulence (strength ``turbulence`` 0..1) pushes the airframe, and descending into the
+    propeller wake makes thrust fluctuate. The noise stream is a ``random.Random`` seeded by ``seed``,
+    so the same seed and the same inputs give the same trajectory.
+    """
+
+    def __init__(
+        self,
+        wind: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        *,
+        effects: bool = False,
+        turbulence: float = 0.0,
+        seed: int = 0,
+    ) -> None:
         self.s = State()
         self.battery = Battery()
         self.wind = wind
         self.max_thrust = THRUST_TO_WEIGHT * MASS * G
+        self.effects = effects
+        self.turbulence = min(1.0, max(0.0, turbulence))
+        self.seed = seed
+        self._reset_noise()
 
     def reset(self, yaw: float = 0.0) -> None:
         self.s = State(yaw=yaw)
         self.battery = Battery()
+        self._reset_noise()
+
+    def _reset_noise(self) -> None:
+        self.rng = random.Random(self.seed)
+        self.gust = [0.0, 0.0, 0.0]  # m/s^2, Ornstein-Uhlenbeck state
+        self.wash = 0.0
+
+    def voltage_factor(self) -> float:
+        """Thrust multiplier from battery voltage: below 3.3 V per cell only, or proportional with effects."""
+        cell = self.battery.cell_voltage
+        if cell <= 0:
+            return 0.0
+        if self.effects:
+            return min(V_FACTOR_MAX, cell / V_REF_CELL)
+        return min(1.0, cell / SAG_CELL_V)
+
+    def ground_effect(self, height: float | None = None) -> float:
+        """Thrust multiplier near the ground: 1 + 12 % at contact, decaying to 1 at one prop diameter."""
+        if not self.effects:
+            return 1.0
+        h = self.s.p[2] if height is None else height
+        if h >= PROP_DIAMETER:
+            return 1.0
+        floor = math.exp(-GROUND_EFFECT_K * PROP_DIAMETER)
+        decay = (math.exp(-GROUND_EFFECT_K * max(0.0, h)) - floor) / (1.0 - floor)
+        return 1.0 + GROUND_EFFECT_GAIN * decay
+
+    def hover_throttle(self, height: float | None = None) -> float:
+        """Motor output that balances gravity level at ``height`` with the present battery voltage."""
+        gain = self.voltage_factor() * self.ground_effect(height)
+        if gain <= 0:
+            return 1.0
+        return throttle_for_fraction(1.0 / (THRUST_TO_WEIGHT * gain))
 
     def thrust(self) -> float:
-        """Thrust in newtons for the current motor output, attenuated below 3.3 V per cell."""
-        sag = min(1.0, self.battery.cell_voltage / SAG_CELL_V) if self.battery.cell_voltage > 0 else 0.0
-        return self.max_thrust * thrust_fraction(self.s.motor) * sag
+        """Thrust in newtons for the current motor output (voltage, ground effect and wake applied)."""
+        thrust = self.max_thrust * thrust_fraction(self.s.motor) * self.voltage_factor()
+        if self.effects:
+            thrust *= self.ground_effect() * (1.0 + self.wash)
+        return thrust
+
+    def impulse(self, dv: tuple[float, float, float], kick: tuple[float, float] = (0.0, 0.0)) -> None:
+        """Apply an instant external disturbance (05 §7.4: a virtual bullet hit).
+
+        ``dv`` is a velocity change in ENU m/s, ``kick`` a (roll, pitch) attitude offset in radians that
+        the attitude loop then levels out again. Each component is bounded (5 m/s, 30 deg). An aircraft
+        resting on the ground keeps still unless the push has an upward part, as ground contact absorbs it.
+        Call it on the thread that steps the simulation.
+        """
+        s = self.s
+        if s.crashed:
+            return
+        bounded = [max(-IMPULSE_MAX, min(IMPULSE_MAX, float(c))) for c in dv]
+        if not all(math.isfinite(c) for c in bounded):
+            return
+        if s.on_ground and bounded[2] <= 0.0:
+            return
+        if s.on_ground:
+            s.on_ground = False
+        for i in range(3):
+            s.v[i] += bounded[i]
+        roll, pitch = (max(-KICK_MAX, min(KICK_MAX, float(c))) for c in kick)
+        if math.isfinite(roll) and math.isfinite(pitch):
+            s.roll += roll
+            s.pitch += pitch
+
+    def _noise(self, dt: float) -> None:
+        """Advance the gust and propeller-wake processes by one step (effects only)."""
+        s = self.s
+        decay = math.exp(-dt / TURBULENCE_TAU)
+        spread = math.sqrt(1.0 - decay * decay)
+        sigma = (TURBULENCE_XY, TURBULENCE_XY, TURBULENCE_Z)
+        for i in range(3):
+            shock = sigma[i] * self.turbulence * spread * self.rng.gauss(0.0, 1.0)
+            self.gust[i] = self.gust[i] * decay + shock
+        sink = -s.v[2] - PROP_WASH_VZ
+        depth = min(PROP_WASH_MAX, PROP_WASH_GAIN * sink) if sink > 0.0 else 0.0
+        self.wash = depth * self.rng.uniform(-1.0, 1.0)
 
     def step(self, cmd: Command, armed: bool, dt: float = DT) -> None:
         s = self.s
         if s.crashed:
             armed = False
         target = cmd.throttle if armed else 0.0
-        s.motor += (target - s.motor) * min(1.0, dt / MOTOR_TAU)
+        tau = MOTOR_TAU
+        if self.effects:
+            tau = MOTOR_TAU_UP if target > s.motor else MOTOR_TAU_DOWN
+        s.motor += (target - s.motor) * min(1.0, dt / tau)
         self.battery.step(s.motor, armed, dt)
+        if self.effects:
+            self._noise(dt)
 
         if s.on_ground and not armed:
             s.rates = [0.0, 0.0, 0.0]
@@ -198,6 +319,10 @@ class Quad:
         ax = a_e + drag[0]
         ay = a_n + drag[1]
         az = a_u + drag[2]
+        if self.effects and not s.on_ground:
+            ax += self.gust[0]
+            ay += self.gust[1]
+            az += self.gust[2]
         if s.on_ground:
             if az <= 0.0:
                 s.v = [0.0, 0.0, 0.0]
@@ -229,6 +354,9 @@ class Quad:
         s.on_ground = True
 
     def _crash(self, reason: str) -> None:
+        if self.s.crashed:
+            self.s.motor = 0.0
+            return  # the first cause stands (a shot-down aircraft also hits the ground)
         self.s.crashed = True
         self.s.crash_reason = reason
         self.s.motor = 0.0

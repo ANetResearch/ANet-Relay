@@ -349,3 +349,33 @@ Everything below lives in `src/stage/` and `src/course/`. Placeholder exports an
 ### Dev probe
 - Dev builds only: `window.__relayStage = {live, rig, framingExtras, stage}` for screenshot scripts. Not present in
   production builds.
+
+## 8. v0.3.0 WP-C additions (control feel, transmitters, driving HUD; docs/design/05 §5, §6)
+
+### Fire input hook (`control/actions.ts`, consumed by the arena package)
+- **`setFireHandler((vehicle, on) => void): () => void`** installs the hold-to-fire transport (05 §7.4) and returns
+  a function that restores the no-op default. The input engine calls it through `EngineActions.fire` with
+  `on = true` at the press of R1, keyboard X or a bound fire switch, again every 100 ms while held (the backend
+  treats 300 ms without a refresh as released) and `on = false` at the release, on blur, on possession end or when
+  the sticks stop flowing. Only possessed simulated aircraft whose sticks are being sent; never a real aircraft.
+- `useInputUi((s) => s.firing)` lists the aircraft a fire input is held for (for a crosshair or HUD cue).
+
+### Driving HUD (`stage/DrivingHud.tsx`, mounted by `Stage()`)
+- Bottom left above the stick panel, 220 wide (`DRIVING_HUD_W`), `DRIVING_HUD_H` high in the stage collision
+  layout; only while this window flies an aircraft (`useDrivenId()`).
+- **Arena slot:** `setDrivingHudSlot(vehicleId, { hp?: number /* 0..100 */, ammo?: { n, max, reloading,
+  progress? /* 0..1 */ } } | null)` feeds the third row; `<DrivingHud hp ammo>` props win over the feed. Without
+  either, row 3 shows only the throttle bar. `DrivingHudView` + `hudModel()` are the pure parts (SSR-tested).
+
+### Control preferences (`settings/prefs.ts`)
+- New fields: `controlFeel: 'gentle' | 'standard' | 'sport'`, `stickMode: 1 | 2`, `invert: {roll, pitch, yaw,
+  throttle}`, `throttleDetent: boolean`, `padProfiles: Record<deviceId, PadProfile>` (at most 8, `control/devices.ts`).
+  `setControlFeel(feel)` also sets `padExpo` to the preset's expo. All persist under `settings.ui`.
+
+### Input engine (`control/engine.ts`)
+- `EngineActions` gains `simAssist(vehicle, on)`, `fire(vehicle, on)` and `setFeel(feel)`; `EngineDeps.prefs()`
+  returns the control preferences (missing fields take `DEFAULT_CONTROL`), `EngineDeps.profiles()` the learned
+  profiles. `AwaitReason` gains `'throttle'` (H5: a transmitter's throttle must be lowest, or centred in hold
+  modes, before sticks flow). `setPadLearning(pad, on)` (InputLayer) takes a controller out of flight while the
+  mapping wizard runs.
+- Hotkeys added in the Fly workspace: `z` (throttle to the hover point), `h` (hover assist), `x` (held: fire).

@@ -549,7 +549,8 @@
             "app_command",
             "refly_started",
             "refly_finished",
-            "refly_failed"
+            "refly_failed",
+            "sim_assist_changed"
           ],
           "type": "string"
         },
@@ -1466,6 +1467,25 @@
       "title": "Signs",
       "type": "object"
     },
+    "SimView": {
+      "description": "Simulator flight model (05 §5.2, WP-C); null on real aircraft.",
+      "properties": {
+        "hover_assist": {
+          "description": "altitude and position hold available; false: physical flight",
+          "type": "boolean"
+        },
+        "turbulence": {
+          "description": "turbulence strength 0..1 (acts only with hover assist off)",
+          "type": "number"
+        }
+      },
+      "required": [
+        "hover_assist",
+        "turbulence"
+      ],
+      "title": "SimView",
+      "type": "object"
+    },
     "SkillView": {
       "properties": {
         "id": {
@@ -2243,6 +2263,16 @@
               "type": "null"
             }
           ]
+        },
+        "sim": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SimView"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -2290,7 +2320,8 @@
         "confirmed",
         "preflight",
         "course",
-        "record_session"
+        "record_session",
+        "sim"
       ],
       "title": "Vehicle",
       "type": "object"

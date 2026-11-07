@@ -76,6 +76,7 @@ export const TOOL_LABELS: Record<string, readonly [en: string, zh: string]> = {
   app_add_sim: ['Add simulators', '添加模拟机'],
   app_remove_sims: ['Remove all simulators', '移除全部模拟机'],
   app_reset_sim: ['Reset simulator', '重置模拟机'],
+  app_sim_assist: ['Simulator hover assist', '模拟机悬停辅助'],
   app_settings_get: ['Read settings', '读取设置'],
   app_settings_set: ['Write settings', '写入设置'],
   app_alerts: ['Alerts', '告警'],

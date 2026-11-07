@@ -1,0 +1,29 @@
+/* Driving state HUD (05 §6.4, WP-C). Colours only through Graphite tokens; the change flash is a 120 ms voxel
+   mosaic (--duration-voxel-flash) and is off in reduced motion. */
+@layer components {
+  .dhud { position: absolute; left: 16px; width: 220px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px;
+    font: 450 var(--text-hud-sub)/var(--text-hud-sub--line-height) var(--font-mono); color: var(--g200);
+    transition: bottom var(--duration-fast) var(--ease-smooth-out); pointer-events: none; }
+  .dhud-row { display: flex; align-items: center; gap: 6px; min-width: 0; height: 16px; white-space: nowrap; }
+  .dhud-id { color: var(--g100); font-weight: 560; }
+  .dhud-sep { color: var(--g500); }
+  .dhud-state { justify-content: space-between; }
+  .dhud-cell { position: relative; padding: 0 3px; margin: 0 -3px; color: var(--g100); letter-spacing: 0.04em; overflow: hidden; text-overflow: ellipsis; }
+  .dhud-cell::after { content: ""; position: absolute; inset: 0; opacity: 0; pointer-events: none;
+    background: repeating-conic-gradient(var(--g50) 0% 25%, transparent 0% 50%) 0 0 / 4px 4px; mix-blend-mode: difference; }
+  .dhud-flash::after { animation: dhud-voxel var(--duration-voxel-flash) steps(3, end) 1; }
+  @keyframes dhud-voxel { 0% { opacity: 0.9; } 50% { opacity: 0.5; background-size: 6px 6px; } 100% { opacity: 0; background-size: 8px 8px; } }
+  .dhud-wait { color: var(--g50); font-family: var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dhud-bars { gap: 5px; }
+  .dhud-cap { color: var(--g400); font-size: var(--text-hud-cap); letter-spacing: var(--text-hud-cap--letter-spacing); }
+  .dhud-bar { position: relative; flex: 1 1 0; min-width: 24px; height: 6px; border: 1px solid var(--g700); border-radius: 1px; overflow: visible; }
+  .dhud-bar-fill { position: absolute; inset: 0; background: var(--g300); transform-origin: left; transform: scaleX(0); }
+  .dhud-bar-hp .dhud-bar-fill { background: var(--g100); }
+  .dhud-bar-tick { position: absolute; top: -3px; bottom: -3px; width: 1px; margin-left: -0.5px; background: var(--g50); left: 50%; }
+  .dhud-num { color: var(--g100); font-variant-numeric: tabular-nums; }
+  .dhud-reload { display: inline-flex; gap: 1px; }
+  .dhud-reload i { width: 4px; height: 6px; background: var(--g700); }
+  .dhud-reload i[data-on] { background: var(--g200); }
+  html:is([data-motion="reduced"], [data-motion="off"]) .dhud-flash::after { animation: none; }
+  html:is([data-motion="reduced"], [data-motion="off"]) .dhud { transition: none; }
+}

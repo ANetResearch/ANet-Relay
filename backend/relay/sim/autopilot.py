@@ -13,6 +13,13 @@ vehicle both drive this class, so simulated aircraft follow the same code path a
 Sim behaviour notes: when pilot input stops for longer than the stick timeout in a mode that needs a
 pilot (STABILIZE, ALT_HOLD and their PX4 equivalents), the RC failsafe lands the aircraft (any non-zero
 FS_THR_ENABLE lands; PX4 follows NAV_RCL_ACT). LOITER keeps its position without pilot input.
+
+Hover assist (05 §5.1): with ``hover_assist`` on (the default) the behaviour above is unchanged. With it
+off the aircraft models a racing quad with no barometer and no position source: the attitude is still
+self-levelled, but the throttle stick is thrust, SYS_STATUS and the estimator report no barometer and no
+horizontal position, every mode that holds altitude or position is refused, LAND descends open loop on
+the learned hover thrust, and the physical effects of ``Quad`` (voltage, ground effect, motor asymmetry,
+turbulence, propeller wake) are switched on.
 """
 
 from __future__ import annotations
@@ -24,7 +31,19 @@ from typing import Any
 from ..mav import modes as modetab
 from ..mav.decode import px4_param_decode, px4_param_encode
 from ..mav.mavlink import Encoder, M, Parser
-from .physics import DT, MASS, Command, G, Quad, throttle_for_fraction, wrap_pi
+from .physics import (
+    DRAG_LINEAR,
+    DRAG_QUADRATIC,
+    DT,
+    MASS,
+    Command,
+    G,
+    Quad,
+    seed_for,
+    throttle_for_fraction,
+    thrust_fraction,
+    wrap_pi,
+)
 
 ARDUPILOT = "ardupilot"
 PX4 = "px4"
@@ -42,6 +61,16 @@ KP_VZ = 4.0
 KI_VZ = 2.0
 KP_YAW = 2.5
 MAX_STEPS = 500
+
+# Hover assist off (05 §5.1).
+ASSIST_RAMP_S = 0.3  # thrust ramp from the held output to the stick after assist turns off in flight
+ASSIST_OFF_BEHAVIOURS = {"stab", "land", "attitude"}  # what a flight controller without baro/position flies
+ASSIST_FOLD = {"althold": "stab", "loiter": "stab"}
+ASSIST_DENIED_TEXT = "Mode requires hover assist"
+OPEN_LAND_SPEED = 0.25  # m/s nominal open-loop descent
+OPEN_LAND_TRIM = 0.03  # thrust deficit change per second per m/s of sink-rate error (accelerometer)
+OPEN_LAND_DEFICIT_MAX = 0.15
+HOVER_LEARN_TAU = 2.0  # s, low-pass of the motor output used as the hover thrust estimate
 
 # Behaviour per mode name.
 _AP_BEHAVIOUR = {
@@ -219,6 +248,8 @@ class SimAutopilot:
         params: dict[str, float] | None = None,
         on_param_change: Callable[[str, float], None] | None = None,
         name: str = "SIM",
+        hover_assist: bool = True,
+        turbulence: float = 0.0,
     ) -> None:
         if flavour not in (ARDUPILOT, PX4):
             raise ValueError(flavour)
@@ -238,7 +269,10 @@ class SimAutopilot:
         for key, value in (params or {}).items():
             if key in self.params:
                 self.params[key][0] = float(value)
-        self.quad = Quad()
+        # Hover assist survives reset(); the airframe seed is the aircraft name, so turbulence repeats.
+        self.hover_assist = bool(hover_assist)
+        self.quad = Quad(effects=not self.hover_assist, turbulence=turbulence, seed=seed_for(name))
+        self.estimator_status = False  # PX4: ESTIMATOR_STATUS streams once hover assist has been off
         self.t: float | None = None
         self.boot: float | None = None
         self.out: list[bytes] = []
@@ -287,6 +321,10 @@ class SimAutopilot:
         self.low_batt_warned = False
         self.crash_reported = False
         self.failsafe = False
+        self.assist_ramp: tuple[float, float] | None = None  # (throttle at the switch, time)
+        self.hover_est = self.param("MOT_THST_HOVER" if self.flavour == ARDUPILOT else "MPC_THR_HOVER", 0.5)
+        self.open_land_t: float | None = None
+        self.open_land_deficit = 0.0
 
     def reset(self) -> None:
         """Back to the spawn point, disarmed, full battery, crash cleared. Parameters are kept."""
@@ -294,14 +332,96 @@ class SimAutopilot:
         self._reset_state()
         self._text(M.MAV_SEVERITY_INFO, "Simulation reset")
 
+    def shoot_down(self, reason: str = "Shot down") -> None:
+        """Bring the aircraft down from outside (05 §7.4, used by the arena).
+
+        The motors stop at once, ``quad.s.crash_reason`` becomes ``reason`` and the airframe falls under
+        gravity and drag; it disarms when it reaches the ground. The crash is reported over the usual
+        STATUSTEXT path ("Crash: Disarming (Shot down)"), so the fleet raises its normal ``crashed``
+        event. A crashed aircraft needs ``reset()``. No effect when already crashed. Call it on the
+        thread that steps the simulation.
+        """
+        s = self.quad.s
+        if s.crashed:
+            return
+        s.crashed = True
+        s.crash_reason = reason
+        s.motor = 0.0
+        self.assist_ramp = None
+
     def param(self, name: str, default: float = 0.0) -> float:
         entry = self.params.get(name)
         return entry[0] if entry else default
 
     @property
     def behaviour(self) -> str:
+        key = self._mode_behaviour()
+        if not self.hover_assist:
+            key = ASSIST_FOLD.get(key, key)  # no barometer: the hold modes fly as attitude-only
+        return key
+
+    def _mode_behaviour(self) -> str:
         table = _AP_BEHAVIOUR if self.flavour == ARDUPILOT else _PX4_BEHAVIOUR
         return table.get(self.mode, "hold")
+
+    # ------------------------------------------------------------------ hover assist (05 §5.1)
+
+    @property
+    def turbulence(self) -> float:
+        return self.quad.turbulence
+
+    @turbulence.setter
+    def turbulence(self, value: float) -> None:
+        self.quad.turbulence = min(1.0, max(0.0, float(value)))
+
+    @property
+    def has_baro(self) -> bool:
+        return self.hover_assist
+
+    @property
+    def position_source(self) -> bool:
+        """Horizontal position as reported to the GCS: none while hover assist is off."""
+        return self.has_position and self.hover_assist
+
+    def _manual_mode(self) -> str:
+        return "STABILIZE" if self.flavour == ARDUPILOT else "STABILIZED"
+
+    def _hold_mode(self) -> str:
+        return "ALT_HOLD" if self.flavour == ARDUPILOT else "ALTCTL"
+
+    def set_hover_assist(self, on: bool, now: float | None = None, *, enter_hold: bool = True) -> None:
+        """Turn hover assist on or off; allowed armed and in flight.
+
+        Off: a mode the aircraft can no longer fly switches to STABILIZE, and in flight the motor output
+        ramps from its present value to the stick over 0.3 s, so thrust does not jump. On: an airborne
+        aircraft in a manual mode enters ALT_HOLD (PX4 ALTCTL) holding its present height; on the ground
+        it does so only with ``enter_hold``.
+        """
+        on = bool(on)
+        if on == self.hover_assist:
+            return
+        now = (self.t or 0.0) if now is None else now
+        s = self.quad.s
+        airborne = self.armed and not s.on_ground
+        if not on:
+            held = s.motor
+            self.hover_assist = False
+            self.quad.effects = True
+            self.open_land_t = None
+            if self.flavour == PX4:
+                self.estimator_status = True
+            if self._mode_behaviour() not in ASSIST_OFF_BEHAVIOURS:
+                self._set_mode(self._manual_mode(), now)
+            if airborne:
+                self.assist_ramp = (held, now)
+        else:
+            self.hover_assist = True
+            self.quad.effects = False
+            self.assist_ramp = None
+            self.open_land_t = None
+            if self.behaviour == "stab" and (airborne or enter_hold):
+                self._set_mode(self._hold_mode(), now)
+        self.next_heartbeat = 0.0
 
     @property
     def p(self) -> list[float]:
@@ -586,6 +706,9 @@ class SimAutopilot:
         if name not in table:
             return M.MAV_RESULT_DENIED
         behaviour = table[name]
+        if not self.hover_assist and behaviour not in ASSIST_OFF_BEHAVIOURS:
+            self._text(M.MAV_SEVERITY_WARNING, ASSIST_DENIED_TEXT)
+            return M.MAV_RESULT_DENIED
         attitude_ok = name == "OFFBOARD" and self.att_t is not None and now - self.att_t <= 0.5
         if behaviour in POSITION_BEHAVIOURS and not self.has_position and not attitude_ok:
             self._text(M.MAV_SEVERITY_WARNING, f"Mode change to {name} failed: requires position")
@@ -675,7 +798,7 @@ class SimAutopilot:
 
     def _takeoff(self, alt_param: float, now: float) -> int:
         s = self.quad.s
-        if not self.has_position or not self.armed or s.crashed:
+        if not self.position_source or not self.armed or s.crashed:
             return M.MAV_RESULT_DENIED
         if self.flavour == ARDUPILOT:
             if self.mode != "GUIDED" or not s.on_ground:
@@ -811,7 +934,7 @@ class SimAutopilot:
         return M.MAV_RESULT_ACCEPTED
 
     def _reposition(self, p: tuple[float, ...]) -> int:
-        if not (self.armed and self.behaviour == "guided" and self.has_position):
+        if not (self.armed and self.behaviour == "guided" and self.position_source):
             return M.MAV_RESULT_DENIED
         x = math.radians(p[5] - HOME[1]) * 6371000.0 * math.cos(math.radians(HOME[0]))
         y = math.radians(p[4] - HOME[0]) * 6371000.0
@@ -917,13 +1040,14 @@ class SimAutopilot:
                 M.MAV_SYS_STATUS_SENSOR_3D_GYRO
                 | M.MAV_SYS_STATUS_SENSOR_3D_ACCEL
                 | M.MAV_SYS_STATUS_SENSOR_3D_MAG
-                | M.MAV_SYS_STATUS_SENSOR_ABSOLUTE_PRESSURE
                 | M.MAV_SYS_STATUS_AHRS
                 | M.MAV_SYS_STATUS_SENSOR_MOTOR_OUTPUTS
                 | M.MAV_SYS_STATUS_SENSOR_BATTERY
                 | M.MAV_SYS_STATUS_PREARM_CHECK
             )
-            if self.has_position:
+            if self.has_baro:
+                sensors |= M.MAV_SYS_STATUS_SENSOR_ABSOLUTE_PRESSURE
+            if self.position_source:
                 sensors |= M.MAV_SYS_STATUS_SENSOR_OPTICAL_FLOW
             health = sensors
             if s.crashed or b.voltage < self._crit_voltage():
@@ -1044,8 +1168,10 @@ class SimAutopilot:
         if name == "EKF_STATUS_REPORT":
             if self.flavour != ARDUPILOT:
                 return None
-            flags = M.EKF_ATTITUDE | M.EKF_VELOCITY_VERT | M.EKF_POS_VERT_ABS
-            if self.has_position:
+            flags = M.EKF_ATTITUDE
+            if self.has_baro:
+                flags |= M.EKF_VELOCITY_VERT | M.EKF_POS_VERT_ABS
+            if self.position_source:
                 flags |= M.EKF_VELOCITY_HORIZ | M.EKF_POS_HORIZ_REL | M.EKF_PRED_POS_HORIZ_REL
             else:
                 flags |= M.EKF_CONST_POS_MODE
@@ -1056,6 +1182,26 @@ class SimAutopilot:
                 pos_vert_variance=0.05,
                 compass_variance=0.05,
                 terrain_alt_variance=0.0,
+            )
+        if name == "ESTIMATOR_STATUS":
+            flags = M.ESTIMATOR_ATTITUDE
+            if self.has_baro:
+                flags |= M.ESTIMATOR_VELOCITY_VERT | M.ESTIMATOR_POS_VERT_ABS
+            if self.position_source:
+                flags |= M.ESTIMATOR_VELOCITY_HORIZ | M.ESTIMATOR_POS_HORIZ_REL
+            else:
+                flags |= M.ESTIMATOR_CONST_POS_MODE
+            return M.MAVLink_estimator_status_message(
+                time_usec=int(boot_ms * 1000),
+                flags=flags,
+                vel_ratio=0.1,
+                pos_horiz_ratio=0.1,
+                pos_vert_ratio=0.1,
+                mag_ratio=0.1,
+                hagl_ratio=0.0,
+                tas_ratio=0.0,
+                pos_horiz_accuracy=0.1,
+                pos_vert_accuracy=0.1,
             )
         if name == "AUTOPILOT_VERSION":
             if self.flavour == ARDUPILOT:
@@ -1110,6 +1256,10 @@ class SimAutopilot:
                 msg = self._build(name, now)
                 if msg is not None:
                     self._send(msg)
+                if name == "SYS_STATUS" and self.estimator_status:
+                    # PX4 reports the estimator unasked once hover assist has been off, so the GCS sees
+                    # the position source come and go (v0.2 streams stay byte-identical until then).
+                    self._send(self._build("ESTIMATOR_STATUS", now))
                 due = self.due.get(name, now) + interval
                 self.due[name] = due if due > now else now + interval
 
@@ -1154,10 +1304,16 @@ class SimAutopilot:
         b = self.quad.battery
         if s.crashed and not self.crash_reported:
             self.crash_reported = True
-            if self.armed:
+            if self.armed and s.on_ground:
                 self.armed = False
             text = "Crash: Disarming" if self.flavour == ARDUPILOT else "Crash detected, disarming"
             self._text(M.MAV_SEVERITY_CRITICAL, f"{text} ({s.crash_reason})")
+        if s.crashed and self.armed:
+            if s.on_ground:  # shot down: the airframe fell with its motors stopped and disarms on impact
+                self.armed = False
+                self.next_heartbeat = 0.0
+            self.ground_t = None
+            return
         if not self.armed:
             self.ground_t = None
             return
@@ -1174,7 +1330,7 @@ class SimAutopilot:
             and (self.offboard_t is None or now - self.offboard_t > self.param("COM_OF_LOSS_T", 1.0))
         ):
             self._text(M.MAV_SEVERITY_WARNING, "Failsafe: offboard signal lost, holding")
-            self._set_mode("LOITER" if self.has_position else "LAND", now)
+            self._set_mode("LOITER" if self.position_source else "LAND", now)
         if not self.low_batt_warned and b.voltage < self._low_voltage():
             self.low_batt_warned = True
             self._text(
@@ -1220,7 +1376,7 @@ class SimAutopilot:
             if action == 0:
                 return
             target = {1: "LOITER", 2: "RTL"}.get(action, "LAND")
-            if target != "LAND" and not self.has_position:
+            if target != "LAND" and not self.position_source:
                 target = "LAND"
             self._text(M.MAV_SEVERITY_WARNING, "Failsafe: manual control lost")
         self._set_mode(target, now)
@@ -1332,8 +1488,17 @@ class SimAutopilot:
             cmd.pitch = -pitch_s * limit
             cmd.yaw_rate = yaw_s * math.radians(120.0)
             cmd.throttle = thr_s if thr_s is not None else (self.pilot[3] if self.pilot else 0.0)
+            if self.assist_ramp is not None:
+                held, since = self.assist_ramp
+                blend = (now - since) / ASSIST_RAMP_S
+                if blend >= 1.0:
+                    self.assist_ramp = None
+                else:
+                    cmd.throttle = held + (cmd.throttle - held) * max(0.0, blend)
             if s.on_ground and cmd.throttle < 0.05:
                 cmd.throttle = SPIN_ARM
+            if not self.hover_assist:
+                self._learn_hover(dt)
         elif behaviour in ("althold", "loiter"):
             rate = 0.0
             if thr_s is not None:
@@ -1384,6 +1549,8 @@ class SimAutopilot:
                 vx, vy = self._position_velocity(self.hold, 1.0)
                 cmd.roll, cmd.pitch = self._velocity_tilt(vx, vy)
                 cmd.throttle = self._vertical(self.hold[2], 0.0, dt, up, dn)
+        elif behaviour == "land" and not self.hover_assist:
+            cmd = self._open_land(now, yaw_s)
         elif behaviour == "land":
             point = self.hold or [s.p[0], s.p[1], s.p[2]]
             if self.has_position:
@@ -1398,6 +1565,40 @@ class SimAutopilot:
         elif behaviour == "rtl":
             cmd = self._rtl(now, dt, up, dn)
         self.quad.step(cmd, armed=True, dt=dt)
+
+    def _learn_hover(self, dt: float) -> None:
+        """Track the motor output in steady level flight as the hover estimate (as MOT_THST_HOVER learns)."""
+        s = self.quad.s
+        if s.on_ground or abs(s.v[2]) > 0.3 or self.quad.tilt > math.radians(15.0):
+            return
+        self.hover_est += (s.motor - self.hover_est) * min(1.0, dt / HOVER_LEARN_TAU)
+        self.hover_est = min(0.8, max(0.2, self.hover_est))
+
+    def _open_land(self, now: float, yaw_s: float) -> Command:
+        """LAND without barometer: level attitude and a thrust a little under the learned hover thrust.
+
+        The starting deficit gives the nominal 0.25 m/s sink through drag. With no height reference the
+        only feedback is the accelerometer's short-term sink-rate estimate, which trims the deficit
+        slowly (so the aircraft neither floats in ground effect nor drops). Battery voltage and turbulence
+        still change the sink rate, as on a real aircraft in this failsafe.
+        """
+        s = self.quad.s
+        cmd = Command(yaw_rate=yaw_s * math.radians(60.0))
+        if s.on_ground:
+            self.open_land_t = None
+            cmd.throttle = SPIN_ARM
+            return cmd
+        if self.open_land_t is None:
+            self.open_land_t = now
+            drag = DRAG_LINEAR * OPEN_LAND_SPEED + DRAG_QUADRATIC * OPEN_LAND_SPEED**2
+            self.open_land_deficit = drag / G
+        sink = -s.v[2]
+        self.open_land_deficit += OPEN_LAND_TRIM * (OPEN_LAND_SPEED - sink) * DT
+        limit = OPEN_LAND_DEFICIT_MAX
+        self.open_land_deficit = min(limit, max(-limit, self.open_land_deficit))
+        fraction = thrust_fraction(self.hover_est) * (1.0 - self.open_land_deficit)
+        cmd.throttle = min(1.0, max(SPIN_ARM, throttle_for_fraction(fraction)))
+        return cmd
 
     def _attitude_active(self, now: float) -> bool:
         """PX4 OFFBOARD follows attitude setpoints while newer than the last position or velocity one."""

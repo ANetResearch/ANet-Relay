@@ -122,6 +122,8 @@ TEMPLATES: dict[str, tuple[str, str]] = {
         "{vehicle} 的再飞记录 {session_id} 已中止：{detail}。",
     ),
     "listen_error": ("UDP listen failed: {error}", "UDP 监听失败：{error}"),
+    # WP-C simulator flight model (05 §5.2).
+    "sim_assist_changed": ("{vehicle} hover assist {detail}.", "{vehicle} 悬停辅助{detail}。"),
 }
 
 INPUT_LABELS = {"keyboard": ("keyboard", "键盘"), "screen": ("on-screen sticks", "屏幕摇杆")}

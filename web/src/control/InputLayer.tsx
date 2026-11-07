@@ -16,7 +16,7 @@ import { isWindowSource, sourceOf } from './bindings'
 import { engineActions, PAD_BOUND_EVENT, possessWith, releaseVehicle, sourceLabel } from './actions'
 import { InputEngine, type EngineOutput } from './engine'
 import { FLIGHT_KEYS, type FlightKey, type GamepadLike } from './mapping'
-import { liveWriter, useInputUi, type HintCard } from './store'
+import { liveWriter, publishDevices, useInputUi, type HintCard } from './store'
 import { ct } from './strings'
 
 const TICK_MS = 20
@@ -32,6 +32,11 @@ export function screenStick(side: 'left' | 'right', x: number, y: number, presse
 /** Current window throttle stick (y, -1..1) so the on-screen left stick can start from it. */
 export function windowThrottleY(): number {
   return active?.windowThrottleY ?? 0
+}
+
+/** The mapping wizard (05 §6.3) takes a controller out of flight while it runs. */
+export function setPadLearning(pad: number, on: boolean): void {
+  active?.setLearning(pad, on)
 }
 
 function windowDriven(): string | null {
@@ -69,6 +74,7 @@ function publish(out: EngineOutput): void {
   const gate = out.gateOpen ? 'open' : 'pending'
   const pads: PadInfo[] = out.pads.map((p) => ({ index: p.index, id: p.id, model: p.model, connected: p.connected, vehicle: p.vehicle, battery: null }))
   if (relay.inputs.gate !== gate || !samePads(relay.inputs.pads, pads)) relay.setInputs({ gate, pads })
+  publishDevices(out)
 
   const ui = useInputUi.getState()
   const patch: Partial<ReturnType<typeof useInputUi.getState>> = {}
@@ -150,8 +156,16 @@ export function InputLayer() {
       cancel: (vehicle) => cancelSticks(vehicle),
       prefs: () => {
         const p = usePrefs.getState()
-        return { deadzone: p.padDeadzone, expo: p.padExpo }
+        return {
+          deadzone: p.padDeadzone,
+          expo: p.padExpo,
+          feel: p.controlFeel,
+          stickMode: p.stickMode,
+          invert: p.invert,
+          throttleDetent: p.throttleDetent,
+        }
       },
+      profiles: () => usePrefs.getState().padProfiles,
       act: engineActions,
     })
     active = engine
@@ -201,6 +215,23 @@ export function InputLayer() {
         },
       }),
       registerHotkey({ combo: 'p', workspace: 'fly', handler: toggleKeyboardPossession }),
+      // WP-C (05 §6.1, §6.3): Z throttle to the hover point, H hover assist
+      registerHotkey({
+        combo: 'z',
+        workspace: 'fly',
+        handler: () => {
+          if (!windowDriven()) return false
+          engine.throttleToHover()
+        },
+      }),
+      registerHotkey({
+        combo: 'h',
+        workspace: 'fly',
+        handler: () => {
+          if (!windowDriven()) return false
+          engine.toggleAssist()
+        },
+      }),
     ]
 
     const timer = setInterval(() => publish(engine.tick()), TICK_MS)
