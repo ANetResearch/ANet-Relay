@@ -1,5 +1,6 @@
 /* LAN arena overlays (05 §7.5). Graphite only: g50 marks, lieflat table; no red here. Durations come from the
-   motion tokens (MOT-01); reduced and off motion show the marks without movement. */
+   motion tokens (MOT-01); reduced and off motion show the marks without movement, and ArenaHud unmounts every mark
+   after its token duration (the animation never decides how long a mark stays). */
 @layer components {
   .arena-board { position: absolute; right: 16px; width: 300px; max-width: calc(100% - 32px); padding: 4px 8px 6px;
     transition: top var(--duration-fast) var(--ease-smooth-out); pointer-events: auto; }

@@ -1,6 +1,8 @@
 // Single-red rule (02 §2.3). Every component that might paint r500 asks useRedOwner() and nothing else.
 //   1. an unacknowledged critical alert exists -> only critical alerts are red; ARMED becomes bold g50
-//   2. otherwise, if any aircraft is armed     -> only ARMED text and card bars are red
+//   2. otherwise, if any aircraft is armed     -> only ARMED text and card bars are red, and the 80 ms arena hit
+//                                               flash on our own (armed) aircraft (05 §7.5: damage to it is part
+//                                               of the armed semantics; damageTone)
 //   3. otherwise no red on screen (the boot logo excepted)
 import type { Alert, Vehicle } from '@/api'
 
@@ -24,4 +26,9 @@ export function armedTone(owner: RedOwner): 'red' | 'strong' {
 /** Treatment of a critical-alert mark (alert bar, card bar, stage label, battery) under the current owner. */
 export function criticalTone(owner: RedOwner): 'red' | 'strong' {
   return owner === 'critical' ? 'red' : 'strong'
+}
+
+/** Treatment of the arena hit flash on one of our own aircraft (05 §7.5): it follows ARMED under rule 2. */
+export function damageTone(owner: RedOwner): 'red' | 'strong' {
+  return armedTone(owner)
 }

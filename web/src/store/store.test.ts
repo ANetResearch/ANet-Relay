@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeRedOwner, armedTone, criticalTone } from './red'
+import { computeRedOwner, armedTone, criticalTone, damageTone } from './red'
 import { share } from './share'
 
 describe('single-red rule (02 §2.3)', () => {
@@ -14,6 +14,10 @@ describe('single-red rule (02 §2.3)', () => {
     expect(computeRedOwner([{ ...crit, acked: true }], [{ armed: true }])).toBe('armed')
     expect(computeRedOwner([crit], [{ armed: true }], new Set(['a']))).toBe('armed')
     expect(armedTone('armed')).toBe('red')
+    // the arena hit flash on our own aircraft belongs to the armed semantics, never beside a critical alert
+    expect(damageTone('armed')).toBe('red')
+    expect(damageTone('critical')).toBe('strong')
+    expect(damageTone('none')).toBe('strong')
     expect(criticalTone('armed')).toBe('strong')
   })
   it('has no red when nothing is armed and no critical alert is open', () => {

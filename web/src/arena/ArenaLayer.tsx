@@ -3,9 +3,10 @@
 // (never live.state, so they stay out of camera framing, the fleet panel and records). Bullets are one InstancedMesh
 // (at most 512 thin tracer capsules, white for this terminal's rounds and g300 for others, toneMapped off) with a
 // short tail; every frame lands on the shared 1/240 s integrator lattice (./ballistics). A hit on one of our
-// aircraft flashes its shell, the only red of the arena because it is damage to our own aircraft (alarm semantics,
-// still under the single-red rule), and throws voxel debris; a shoot-down throws grey voxels. Software rendering
-// keeps the bullets as points and drops the tail and the debris; reduced motion drops the flash and the debris.
+// aircraft flashes its shell, the only red of the arena (damage to our own armed aircraft: damageTone, single-red
+// rule 2 in store/red.ts), and throws voxel debris; a shoot-down throws grey voxels. Software rendering keeps the
+// bullets as points and drops the tail and the debris; reduced motion drops the flash and all debris, remote
+// shoot-downs included (the fx queue itself refuses them).
 // Hidden while Records replays a flight.
 import * as React from 'react'
 import * as THREE from 'three'
@@ -13,7 +14,7 @@ import { useFrame } from '@react-three/fiber'
 import { Html, useGLTF } from '@react-three/drei'
 import { useReplay } from '@/records/replayState'
 import { backendNow } from '@/store/relay'
-import { armedTone, type RedOwner } from '@/store/red'
+import { damageTone, type RedOwner } from '@/store/red'
 import { useRedOwner } from '@/store/selectors'
 import { motionReduced } from '@/ui/motion/tier'
 import { live } from '@/stage/live'
@@ -99,13 +100,14 @@ interface FlashState {
   life: number
 }
 
-/** Imperative effect queue shared by the remote fleet (shoot-downs) and the mark handler (hits). */
-const fx = {
+/** Imperative effect queue shared by the remote fleet (shoot-downs) and the mark handler (hits); refuses every
+ * effect under reduced motion, whoever asks. Exported for tests. */
+export const fx = {
   voxels: [] as Voxel[],
   flashes: [] as FlashState[],
   enabled: true,
   debris(at: THREE.Vector3, n: number, color: THREE.Color, lifeMs: number, speed: number): void {
-    if (!this.enabled || lifeMs <= 0) return
+    if (!this.enabled || lifeMs <= 0 || motionReduced()) return
     const now = performance.now()
     for (let i = 0; i < n; i++) {
       if (this.voxels.length >= MAX_DEBRIS) this.voxels.shift()
@@ -484,7 +486,7 @@ class EffectsView {
 
     fx.flashes = fx.flashes.filter((f) => now - f.born < f.life)
     // damage to our own aircraft: red under the single-red rule, bold g50 while a critical alert owns red
-    const color = armedTone(owner) === 'red' ? token('r500').color : token('g50').color
+    const color = damageTone(owner) === 'red' ? token('r500').color : token('g50').color
     this.shells.forEach((shell, i) => {
       const f = fx.flashes[i]
       const st = f ? live.state.get(f.vehicle) : undefined

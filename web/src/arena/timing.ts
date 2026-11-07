@@ -22,3 +22,12 @@ export const ARENA_TOKENS = {
   hitMark: '--duration-arena-hit-mark',
   hitDir: '--duration-arena-hit-dir',
 } as const
+
+/**
+ * Milliseconds a HUD mark made at `at` stays mounted after `now` (0: unmount it). The overlay unmounts on this
+ * timer rather than on its CSS animation, because reduced and off motion play no animation at all and would
+ * otherwise leave the mark on screen.
+ */
+export function markRemainingMs(at: number, now: number, holdMs: number): number {
+  return Math.max(0, holdMs - Math.max(0, now - at))
+}

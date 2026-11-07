@@ -2,7 +2,8 @@
 // aircraft of this window is possessed, whose four corners jump out when one of our rounds hits; the g50 arc at
 // the stage edge that points towards the shooter when one of our aircraft is hit; and the scoreboard (lieflat
 // table, top right, under the view tools). Values that change with every arena message re-render only when the
-// derived row text changes. Nothing here paints red. Reduced motion shows the marks without movement.
+// derived row text changes. Nothing here paints red. Reduced motion shows the marks without movement; every mark
+// unmounts after its token duration on a timer, so it never outlives the effect when no animation runs.
 import * as React from 'react'
 import * as THREE from 'three'
 import { cn } from '@/lib/utils'
@@ -14,6 +15,7 @@ import { useStage } from '@/stage/store'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/ui/components/ui/table'
 import { useTA } from './copy'
 import { useArena, watchArenaEvents, type ArenaMark } from './store'
+import { ARENA_TOKENS, markRemainingMs, tokenMs } from './timing'
 import './arena.css'
 
 /** Arena overlays are shown: arena on, layer on, not replaying. */
@@ -29,10 +31,15 @@ function usePossessedSim(): string | null {
   return useRelay((s) => s.fleet?.vehicles.find((v) => v.kind === 'sim' && v.possession && v.controller === 'human')?.id ?? null)
 }
 
-/** Latest mark of a kind for a set of aircraft, as React state (re-renders once per mark). */
-function useLatestMark(kind: ArenaMark['kind'], vehicle: string | null): ArenaMark | null {
+/** Latest mark of a kind for a set of aircraft, as React state (re-renders once per mark), cleared after `hold`. */
+function useLatestMark(kind: ArenaMark['kind'], vehicle: string | null, hold: string): ArenaMark | null {
   const [mark, setMark] = React.useState<ArenaMark | null>(null)
   React.useEffect(() => watchArenaEvents(), [])
+  React.useEffect(() => {
+    if (!mark) return
+    const id = window.setTimeout(() => setMark((m) => (m === mark ? null : m)), markRemainingMs(mark.at, performance.now(), tokenMs(hold)))
+    return () => window.clearTimeout(id)
+  }, [mark, hold])
   React.useEffect(() => {
     let last = useArena.getState().marks.at(-1)?.seq ?? 0
     return useArena.subscribe((s) => {
@@ -60,7 +67,7 @@ function Crosshair() {
   const t = useTA()
   const vehicle = usePossessedSim()
   const chase = useStage((s) => s.view === 'chase')
-  const hit = useLatestMark('hit', vehicle)
+  const hit = useLatestMark('hit', vehicle, ARENA_TOKENS.hitMark)
   if (!vehicle || !chase) return null
   return (
     <div className="arena-crosshair" aria-hidden="true" data-arena-crosshair="">
@@ -81,7 +88,7 @@ function Crosshair() {
 
 function HitDirection() {
   const vehicle = usePossessedSim()
-  const taken = useLatestMark('taken', vehicle)
+  const taken = useLatestMark('taken', vehicle, ARENA_TOKENS.hitDir)
   if (!vehicle || !taken || !taken.dir || !rig.camera) return null
   const angle = incomingAngle(taken.dir, rig.camera)
   return (
