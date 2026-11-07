@@ -42,6 +42,27 @@ function DirArrow({ x, y, r, dir }: { x: number; y: number; r: number; dir: 'cw'
   )
 }
 
+/** Placement sketch for S4 (05 §4.5): the aircraft level on a flat surface, side view, with a bubble level. */
+export function LevelDiagram({ still = false, width = 168 }: { still?: boolean; width?: number }) {
+  const t = useTB()
+  const h = 56
+  const label = t(still ? 'bench.diagram.still' : 'bench.diagram.level')
+  return (
+    <svg className="lf-svg bench-layout" width={width} height={h} viewBox={`0 0 ${width} ${h}`} role="img" aria-label={label} data-bench-diagram={still ? 'still' : 'level'}>
+      <line className="arm" x1={8} y1={h - 8} x2={width - 8} y2={h - 8} />
+      <rect className="body" x={width / 2 - 22} y={h - 22} width={44} height={10} rx={3} />
+      <line className="arm" x1={width / 2 - 52} y1={h - 20} x2={width / 2 + 52} y2={h - 20} />
+      <rect className="rotor" x={width / 2 - 62} y={h - 24} width={20} height={4} rx={2} />
+      <rect className="rotor" x={width / 2 + 42} y={h - 24} width={20} height={4} rx={2} />
+      <rect className="body" x={width / 2 - 24} y={8} width={48} height={10} rx={5} />
+      <circle className="rotor" data-state="target" cx={width / 2} cy={13} r={3} />
+      <text className="nose" x={width / 2} y={34} textAnchor="middle">
+        {label}
+      </text>
+    </svg>
+  )
+}
+
 export function MotorLayout({ layout, target = null, spinning = [], done = [], size = 168, className }: MotorLayoutProps) {
   const t = useTB()
   const c = size / 2

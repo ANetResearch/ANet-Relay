@@ -41,7 +41,7 @@ export function VerdictWord({ step }: { step: Pick<ProcedureStep, 'state' | 'ver
   return <span className={cn('text-hud-sub', `bench-tone-${tone}`)}>{t(key)}</span>
 }
 
-function StepRows({ step }: { step: ProcedureStep }) {
+function StepRows({ step, limitsColumn }: { step: ProcedureStep; limitsColumn: boolean }) {
   const t = useTB()
   const lang = useLang()
   const title = `${step.id} ${pickText(lang, step.title_en, step.title_zh)}`
@@ -56,6 +56,7 @@ function StepRows({ step }: { step: ProcedureStep }) {
         <TableCell data-num="" className="py-1 text-[var(--g500)]">
           —
         </TableCell>
+        {limitsColumn ? <TableCell className="py-1 text-[var(--g500)]">—</TableCell> : null}
       </TableRow>
     )
   }
@@ -76,6 +77,7 @@ function StepRows({ step }: { step: ProcedureStep }) {
               {formatValue(m.value, m.unit)}
               {peak ? <span className="block text-[10px] text-[var(--g500)]">{peak}</span> : null}
             </TableCell>
+            {limitsColumn ? <TableCell className="num py-1 align-top text-[var(--g400)]">{limits ?? '—'}</TableCell> : null}
           </TableRow>
         )
       })}
@@ -146,11 +148,12 @@ export function ReportView({ run, className, compact = false }: { run: Procedure
               <TableHead className="cap h-7">{t('bench.report.verdict')}</TableHead>
               <TableHead className="cap h-7">{t('bench.report.metric')}</TableHead>
               <TableHead className="cap h-7 text-right">{t('bench.report.value')}</TableHead>
+              {compact ? null : <TableHead className="cap h-7">{t('bench.report.limits')}</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {run.steps.map((s) => (
-              <StepRows key={s.id} step={s} />
+              <StepRows key={s.id} step={s} limitsColumn={!compact} />
             ))}
           </TableBody>
         </Table>

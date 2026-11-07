@@ -12,10 +12,10 @@ import { Progress } from '@/ui/components/ui/progress'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/components/ui/select'
 import { Switch } from '@/ui/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/ui/components/ui/toggle-group'
-import { Icon, StateIcon } from '@/ui/icons'
+import { Icon, StateIcon, type IconKey } from '@/ui/icons'
 import { Group, TypeToConfirm } from '@/ui/relay'
 import { LiveCharts } from './MiniChart'
-import { MotorLayout } from './MotorLayout'
+import { LevelDiagram, MotorLayout } from './MotorLayout'
 import { ReportView, VerdictWord } from './ReportView'
 import { currentStep, formatValue, guardedAnswer, isActive, levelTone, progress, promptLayout, spinningMotors, stateTone, stepTone } from './model'
 import { useCatalogue, useProcedure } from './useProcedure'
@@ -23,6 +23,16 @@ import { useTB, type KeyB } from './copy'
 import './bench.css'
 
 const HOVER_CHOICES = [10, 15, 20, 30] as const
+
+/** State icon of a step in the list: pending, running / waiting, passed, warning or failed, skipped. */
+function stepIcon(s: Pick<ProcedureStep, 'state' | 'verdict'>): IconKey {
+  if (s.state === 'running' || s.state === 'waiting') return 'pending'
+  if (s.verdict === 'pass') return 'check'
+  if (s.verdict === 'warn') return 'alert'
+  if (s.verdict === 'fail' || s.state === 'aborted') return 'alert.critical'
+  if (s.state === 'skipped') return 'more'
+  return 'chevron.right'
+}
 
 /** Why a procedure cannot start on this aircraft now, or null. */
 export function startBlocker(v: Pick<Vehicle, 'armed' | 'link' | 'controller' | 'possession' | 'crashed'>): KeyB | null {
@@ -132,11 +142,11 @@ function StepList({ run, selected, onSelect }: { run: ProcedureRun; selected: st
     <ol className="bench-steps" aria-label={t('bench.steps')} data-bench-steps="">
       {run.steps.map((s) => {
         const tone = stepTone(s)
-        const icon = s.state === 'running' || s.state === 'waiting' ? 'pending' : s.verdict === 'pass' ? 'check' : s.verdict === 'fail' || s.verdict === 'warn' || s.state === 'aborted' ? 'alert' : 'chevron.right'
+        const icon = stepIcon(s)
         return (
           <li key={s.id}>
             <button type="button" className="bench-step w-full" data-tone={tone} data-selected={s.id === selected ? '' : undefined} data-step={s.id} data-state={s.state} onClick={() => onSelect(s.id)}>
-              <Icon icon={icon} className="bench-step-mark size-3 flex-none" />
+              <StateIcon icon={icon} spring="smooth" className="bench-step-mark size-3 flex-none" />
               <span className="num w-6 flex-none text-[11px] text-[var(--g500)]">{s.id}</span>
               <span className="min-w-0 flex-1 truncate text-hud-sub">{pickText(lang, s.title_en, s.title_zh)}</span>
               <span className="sr-only">{t(`bench.stepState.${s.state}` as KeyB)}</span>
@@ -176,6 +186,7 @@ function PromptCard({ v, run, step, prompt, onRun }: { v: Vehicle; run: Procedur
       <p className="text-ed-value text-[var(--g50)]">{pickText(lang, prompt.text_en, prompt.text_zh)}</p>
       {detail ? <p className="text-hud-sub text-[var(--g400)]">{detail}</p> : null}
       {data.blocking && data.blocking.length ? <p className="text-hud-sub text-[var(--g50)]">{t('bench.blocking', { items: data.blocking.join(', ') })}</p> : null}
+      {prompt.id === 'calibrate_level' || prompt.id === 'calibrate_gyro' ? <LevelDiagram still={prompt.id === 'calibrate_gyro'} /> : null}
       {layout ? (
         <div className="flex items-center gap-3">
           <MotorLayout layout={layout} target={data.motor ?? null} spinning={spinningMotors(v.servo, layout.count)} done={done} size={148} />

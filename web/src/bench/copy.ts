@@ -71,6 +71,8 @@ export const enB = {
   'bench.motorSpinning': 'Spinning',
   'bench.motorChecked': '{n} of {total} checked',
   'bench.blocking': 'Preflight blocks the flight: {items}',
+  'bench.diagram.level': 'Level surface',
+  'bench.diagram.still': 'Level and still',
   'bench.live': 'Live',
 
   // live series
@@ -188,6 +190,8 @@ export const zhB: Record<KeyB, string> = {
   'bench.motorSpinning': '转动中',
   'bench.motorChecked': '已检查 {n} / {total}',
   'bench.blocking': '起飞前检查阻止飞行：{items}',
+  'bench.diagram.level': '水平面',
+  'bench.diagram.still': '水平且静止',
   'bench.live': '实时',
 
   'bench.series.vibration_x': 'X 轴振动',

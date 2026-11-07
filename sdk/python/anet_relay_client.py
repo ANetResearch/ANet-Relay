@@ -696,7 +696,7 @@ class RelayClient:
         skip: list[str] | None = None,
         auto_answer: bool = False,
     ) -> dict:
-        """Start ``full_bench`` | ``preflight_quick`` | ``motor_check`` | ``vibration_check`` | ``hover_tune``.
+        """Start a procedure: full_bench, preflight_quick, motor_check, vibration_check or hover_tune.
 
         Needs control of the aircraft. ``auto_answer`` (simulators only) answers S6 from the servo outputs.
         """
@@ -748,6 +748,10 @@ class RelayClient:
     def test_run_export(self, run_id: int, fmt: str = "md") -> Any:
         """The report as Markdown text (``fmt="md"``) or as a JSON object."""
         return self._get(f"/test-runs/{run_id}/export", fmt=fmt)
+
+    # names of 05 §4.4 (the same calls as procedures() and procedure())
+    procedure_list = procedures
+    procedure_status = procedure
 
     # ------------------------------------------------------------------ simulators (app operations)
 
