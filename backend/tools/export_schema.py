@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from pydantic.json_schema import models_json_schema  # noqa: E402
 
-from relay.api import schemas  # noqa: E402
+from relay.api import schemas, schemas_app  # noqa: E402
 
 DEFAULT_OUT = ROOT / "web" / "src" / "api" / "schema.json"
 
@@ -49,9 +49,10 @@ def _tidy(node: Any, keep_title: bool = False) -> Any:
 
 
 def build() -> dict[str, Any]:
-    models = [(model, "serialization") for model in schemas.EXPORTED.values()]
+    exported = {**schemas.EXPORTED, **schemas_app.EXPORTED}
+    models = [(model, "serialization") for model in exported.values()]
     keys, defs = models_json_schema(models, by_alias=True, ref_template="#/$defs/{model}")
-    properties = {name: keys[(model, "serialization")] for name, model in schemas.EXPORTED.items()}
+    properties = {name: keys[(model, "serialization")] for name, model in exported.items()}
     return _tidy(
         keep_title=True,
         node={

@@ -47,6 +47,12 @@ def history_export(request: Request, sid: int, fmt: str = Query("csv", pattern="
     )
 
 
+@router.get("/history/sessions/{sid}/refly", tags=["records"], responses=ERRORS)
+def history_refly(request: Request, sid: int) -> dict[str, Any]:
+    """How a record can be flown again: plan, path or recorded sticks (04 §4)."""
+    return service(request).refly_options(sid)
+
+
 @router.get("/bridges/{ip}", tags=["network"], dependencies=[Depends(require_operator)], responses=ERRORS)
 def bridge_read(request: Request, ip: str, port: int = Query(80, ge=1, le=65535)) -> dict[str, Any]:
     """Read a bridge's current settings (passwords are never returned)."""

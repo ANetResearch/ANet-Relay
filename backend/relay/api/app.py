@@ -12,10 +12,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from ..app_bridge import AppBridge
 from ..config import API_PREFIX, VERSION
 from ..errors import RelayError, err
 from ..fleet import FleetService
-from . import routes_agents, routes_control, routes_fleet, routes_records, stream
+from . import routes_agents, routes_app, routes_control, routes_fleet, routes_records, stream
 from .origins import ALLOWED_ORIGINS
 
 TRUSTED_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
@@ -55,6 +56,7 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.service = svc
+    app.state.app_bridge = AppBridge()
     app.state.trusted_hosts = set(trusted_hosts)
     app.add_middleware(
         CORSMiddleware,
@@ -106,7 +108,7 @@ def create_app(
             error.message_zh = f"请求无效：{exc.detail}。"
         return JSONResponse(status_code=exc.status_code, content=error.body())
 
-    for module in (routes_fleet, routes_control, routes_agents, routes_records):
+    for module in (routes_fleet, routes_control, routes_agents, routes_records, routes_app):
         app.include_router(module.router, prefix=API_PREFIX)
     app.include_router(stream.router, prefix=API_PREFIX)
     return app

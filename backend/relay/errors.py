@@ -42,6 +42,11 @@ CATALOGUE: dict[str, tuple[int, str, str]] = {
         "The agent session does not exist or its lease has expired.",
         "智能体会话不存在或租约已到期。",
     ),
+    "app_control_disabled": (
+        403,
+        "Agent control of the Relay window is turned off in Settings.",
+        "设置中已关闭智能体对 Relay 窗口的控制。",
+    ),
     "operator_required": (
         403,
         "Only the Relay window can perform this action.",
@@ -112,6 +117,12 @@ CATALOGUE: dict[str, tuple[int, str, str]] = {
         "参数 {name} 回读值为 {readback}，不是 {value}。",
     ),
     "param_timeout": (409, "The autopilot did not confirm parameter {name}.", "飞控未确认参数 {name}。"),
+    "ui_action_failed": (409, "The window could not do that: {error}.", "窗口未能执行该操作：{error}。"),
+    "refly_unavailable": (
+        409,
+        "This record cannot be re-flown in {mode} mode: {reason}.",
+        "这条记录无法以 {mode} 方式再飞：{reason}。",
+    ),
     "scan_running": (409, "A network scan is already running.", "网络扫描已在进行。"),
     "bridge_unknown_firmware": (
         409,
@@ -129,6 +140,12 @@ CATALOGUE: dict[str, tuple[int, str, str]] = {
         "The bridge at {host} did not answer: {reason}.",
         "{host} 的数传无响应：{reason}。",
     ),
+    "ui_unavailable": (
+        503,
+        "No Relay window is connected to receive this command.",
+        "没有已连接的 Relay 窗口可接收该指令。",
+    ),
+    "ui_timeout": (504, "The Relay window did not answer in time.", "Relay 窗口未能及时响应。"),
     "backend_busy": (503, "The fleet service did not answer in time.", "机群服务未能及时响应。"),
     "listen_unavailable": (503, "UDP {port} is not available: {reason}.", "UDP {port} 不可用：{reason}。"),
 }

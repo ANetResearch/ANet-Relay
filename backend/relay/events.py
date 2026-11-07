@@ -74,6 +74,22 @@ TEMPLATES: dict[str, tuple[str, str]] = {
         "{vehicle} 完成 {course}，用时 {total_text}。",
     ),
     "course_aborted": ("{vehicle} {course} aborted: {reason}.", "{vehicle} 的 {course} 已中止：{reason}。"),
+    "app_command": (
+        "{by} ran {action} in the Relay window.",
+        "{by} 在 Relay 窗口执行了 {action}。",
+    ),
+    "refly_started": (
+        "{vehicle} started re-flying record {session_id} ({mode}).",
+        "{vehicle} 开始再飞记录 {session_id}（{mode}）。",
+    ),
+    "refly_finished": (
+        "{vehicle} finished re-flying record {session_id}.",
+        "{vehicle} 完成再飞记录 {session_id}。",
+    ),
+    "refly_failed": (
+        "{vehicle} stopped re-flying record {session_id}: {detail}.",
+        "{vehicle} 的再飞记录 {session_id} 已中止：{detail}。",
+    ),
     "listen_error": ("UDP listen failed: {error}", "UDP 监听失败：{error}"),
 }
 

@@ -56,6 +56,12 @@ REQUIREMENTS = {
     "yaw": "althold",
 }
 SKILL_NAMES = tuple(REQUIREMENTS)
+# Skills only the fleet starts itself; not part of the public catalogue (04 §4).
+INTERNAL_REQUIREMENTS = {"replay": "manual"}
+
+
+def requirement(name: str) -> str:
+    return REQUIREMENTS.get(name) or INTERNAL_REQUIREMENTS[name]
 
 
 class Host(Protocol):
@@ -588,6 +594,72 @@ class Skill:
         if dist <= GOTO_TOLERANCE_M:
             self.finish(f"reached within {dist:.2f} m")
 
+    def _idle(self) -> StickInput:
+        """Neutral sticks while arming: mid throttle where the mode holds altitude, else zero."""
+        hold = self.expect_mode in modes.HOLD_STICK_MODES
+        return StickInput(0.0, 0.0, 0.0, 0.5 if hold else 0.0, source="agent")
+
+    def _tick_replay(self, host: Host, now: float) -> None:
+        """Recorded sticks on the original time line: mode, arm, then play (04 §4)."""
+        samples = self.params["_samples"]
+        speed = float(self.params.get("speed") or 1.0)
+        duration = float(self.params["duration_s"])
+        if self.state == "done":
+            self.out = stick_row(samples[-1])
+            return
+        if self.phase == "start":
+            self.expect_mode = self.params["mode"]
+            self._phase("mode", now)
+        if self.phase == "mode":
+            self.out = self._idle()
+            if self._ensure_mode(host, self.expect_mode, now):
+                self._phase("arm", now)
+            return
+        if self.phase == "arm":
+            self.out = self._idle()
+            if host.armed or self._ensure_armed(host, now):
+                self._phase("play", now)
+            return
+        if not host.armed:
+            self.fail("disarmed", "已上锁")
+            return
+        elapsed = (now - self.phase_t) * speed
+        wanted = self.expect_mode
+        for t, name in self.params.get("_modes") or ():
+            if t <= elapsed:
+                wanted = name
+        if wanted != self.expect_mode:  # the record changed mode here (an autopilot landing, say)
+            self.expect_mode = wanted
+            self.last_try = -1e9
+        if host.mode != self.expect_mode and now - self.last_try >= RETRY_S:
+            self.last_try = now
+            host.driver.set_mode(self.expect_mode)
+        self.out = stick_row(sticks_at(samples, elapsed))
+        if elapsed >= duration:
+            self.finish(f"replayed {duration:.1f} s of sticks")
+
+
+def stick_row(row: tuple[float, ...]) -> StickInput:
+    return StickInput(row[1], row[2], row[3], row[4], source="agent")
+
+
+def sticks_at(samples: list[tuple[float, ...]], t: float) -> tuple[float, ...]:
+    """Linear interpolation of ``(t, roll, pitch, yaw, throttle)`` rows; clamped to the ends."""
+    if t <= samples[0][0]:
+        return samples[0]
+    if t >= samples[-1][0]:
+        return samples[-1]
+    lo, hi = 0, len(samples) - 1
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if samples[mid][0] <= t:
+            lo = mid
+        else:
+            hi = mid
+    a, b = samples[lo], samples[hi]
+    f = (t - a[0]) / (b[0] - a[0]) if b[0] > a[0] else 0.0
+    return (t, *(a[i] + (b[i] - a[i]) * f for i in range(1, 5)))
+
 
 def _wrap(angle: float) -> float:
     return (angle + math.pi) % (2 * math.pi) - math.pi
@@ -640,4 +712,6 @@ def make(
         )
     elif name == "yaw":
         skill.timeout = 6.0 + abs(float(params["deg"])) / 20.0
+    elif name == "replay":
+        skill.timeout = 40.0 + params["_samples"][-1][0] / float(params.get("speed") or 1.0)
     return skill

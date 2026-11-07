@@ -3,7 +3,8 @@
 Server -> client: ``{"type": "hello", ...}`` once, then ``{"type": "fleet", "data": snapshot}`` at 10 Hz
 and ``{"type": "event", "data": event}`` as events happen. Client -> server: ``{"type": "sticks",
 "vehicle", "roll", "pitch", "yaw", "throttle"}`` (needs operator or session auth) and ``{"type": "ping"}``.
-Closing the socket stops every stick stream it was feeding.
+Closing the socket stops every stick stream it was feeding. Operator sockets also carry the application
+channel (04 §3.1): the window sends ``ui_state`` and ``ui_result``, the server pushes ``ui_command``.
 """
 
 from __future__ import annotations
@@ -16,13 +17,16 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
+from ..app_bridge import Connection
 from ..authority import Actor
 from ..config import SNAPSHOT_HZ, VERSION
 from ..errors import RelayError, err
 from .deps import operator_valid
 from .origins import origin_allowed
+from .schemas_app import UiState
 
 router = APIRouter()
 QUEUE_LIMIT = 2000
@@ -67,6 +71,12 @@ async def stream(ws: WebSocket) -> None:
         )
     )
     sender = asyncio.create_task(_send_loop(ws, svc, events))
+    bridge = ws.app.state.app_bridge
+
+    async def push(message: dict[str, Any]) -> None:
+        await ws.send_text(json.dumps(message, ensure_ascii=False))
+
+    link = Connection(conn, loop, push)
     last_error: dict[str, float] = {}
     try:
         while True:
@@ -81,6 +91,8 @@ async def stream(ws: WebSocket) -> None:
                 await ws.send_text(json.dumps({"type": "pong", "t": time.time()}))
             elif kind == "sticks":
                 await _sticks(ws, svc, msg, operator, session, conn, last_error)
+            elif kind in ("ui_state", "ui_result"):
+                await _ui_message(ws, bridge, link, msg, kind, operator, last_error)
             else:
                 await _send_error(ws, err("invalid_request", reason="unknown message type"), last_error)
     except (WebSocketDisconnect, RuntimeError):
@@ -90,6 +102,7 @@ async def stream(ws: WebSocket) -> None:
         sender.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await sender
+        bridge.closed(conn)
         await run_in_threadpool(svc.ws_closed, conn)
 
 
@@ -112,6 +125,29 @@ async def _sticks(ws, svc, msg, operator, session, conn, last_error) -> None:
         await run_in_threadpool(svc.sticks, vehicle, who, msg, conn)
     except RelayError as exc:
         await _send_error(ws, exc, last_error, ref=vehicle)
+
+
+async def _ui_message(ws, bridge, link, msg, kind, operator, last_error) -> None:
+    """``ui_state`` and ``ui_result`` from the Relay window (04 §3.1); operator sockets only."""
+    if not operator:
+        await _send_error(ws, err("operator_required"), last_error)
+        return
+    if kind == "ui_state":
+        try:
+            state = UiState.model_validate(msg.get("data"))
+        except ValidationError as exc:
+            reason = "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors()[:3])
+            await _send_error(ws, err("invalid_request", reason=f"ui_state {reason}"), last_error)
+            return
+        bridge.update(link, state.model_dump(mode="json"))
+        return
+    command_id = msg.get("id")
+    if not isinstance(command_id, str) or not isinstance(msg.get("ok"), bool):
+        await _send_error(ws, err("invalid_request", reason="ui_result needs id and ok"), last_error)
+        return
+    error = msg.get("error")
+    data = msg.get("data")
+    bridge.resolve(command_id, msg["ok"], error if isinstance(error, str) else None, data)
 
 
 async def _send_error(ws: WebSocket, exc: RelayError, last_error: dict[str, float], ref: Any = None) -> None:

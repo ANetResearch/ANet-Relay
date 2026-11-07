@@ -18,6 +18,10 @@ export interface RelaySchema {
   EventMessage: EventMessage
   ErrorMessage: ErrorMessage
   SessionOpened: SessionOpened
+  UiState: UiState
+  UiCommandMessage: UiCommandMessage
+  UiStateMessage: UiStateMessage
+  UiResultMessage: UiResultMessage
 }
 /**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
@@ -491,6 +495,10 @@ export interface Event {
     | 'plan_finished'
     | 'plan_failed'
     | 'plan_cancelled'
+    | 'app_command'
+    | 'refly_started'
+    | 'refly_finished'
+    | 'refly_failed'
   vehicle: string | null
   session: string | null
   text_en: string
@@ -574,4 +582,111 @@ export interface SessionOpened {
   name: string
   token: string
   lease_s: number
+}
+/**
+ * What the Relay window currently shows (04 §3.1).
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "UiState".
+ */
+export interface UiState {
+  lang: 'en' | 'zh'
+  workspace: 'fly' | 'agents' | 'records'
+  selected: string | null
+  view: 'overview' | 'chase' | 'top'
+  inspector: UiInspector
+  dialog: string | null
+  settings_section: string | null
+  copilot_open: boolean
+  prefs: {}
+  gamepads: Gamepad[]
+  possession: PossessionRef[]
+  window: UiWindow
+  record: UiRecord | null
+  version: string | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "UiInspector".
+ */
+export interface UiInspector {
+  open: boolean
+  tab: string | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "Gamepad".
+ */
+export interface Gamepad {
+  index: number
+  id: string
+  name: string | null
+  mapping: string | null
+  connected: boolean
+  vehicle: string | null
+  input: 'gamepad'
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "PossessionRef".
+ */
+export interface PossessionRef {
+  vehicle: string
+  input: string
+  pad: number | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "UiWindow".
+ */
+export interface UiWindow {
+  focused: boolean
+  width: number | null
+  height: number | null
+  fullscreen: boolean
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "UiRecord".
+ */
+export interface UiRecord {
+  session_id: number | null
+  playing: boolean
+  t: number
+}
+/**
+ * Server -> window over the operator WebSocket.
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "UiCommandMessage".
+ */
+export interface UiCommandMessage {
+  type: 'ui_command'
+  id: string
+  action: string
+  args: {}
+  by: string
+}
+/**
+ * Window -> server.
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "UiStateMessage".
+ */
+export interface UiStateMessage {
+  type: 'ui_state'
+  data: UiState
+}
+/**
+ * Window -> server, answering a ui_command.
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "UiResultMessage".
+ */
+export interface UiResultMessage {
+  type: 'ui_result'
+  id: string
+  ok: boolean
+  error: string | null
+  data: {} | null
 }
