@@ -15,6 +15,7 @@ import { t6, useT6 } from '@/stage/copy'
 import { toggleCourseOn } from './CourseHud'
 import { isActive, liveElapsed, presetKey, type CourseDef } from './geometry'
 import { useCourse, watchCourses } from './store'
+import { VoxelLoader } from '@/ui/voxel/VoxelLoader'
 
 /** "Cage loop · 4 rings" for presets, "<name> · 4 rings" for custom courses. */
 export function courseOptionLabel(def: CourseDef, lang: 'en' | 'zh'): string {
@@ -105,6 +106,7 @@ export function CourseControls({ vehicleId }: { vehicleId: string }) {
           <p className="text-hud-sub text-[var(--g400)]">{t('course.needsPosition')}</p>
         ) : null}
         <div className="flex items-center gap-2">
+          {loading && !list.length ? <VoxelLoader size={16} label={t('course.loading')} /> : null}
           <Select
             value={current?.id ?? ''}
             onValueChange={(v: unknown) => typeof v === 'string' && choose(v)}

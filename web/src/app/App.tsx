@@ -20,6 +20,7 @@ import { GamepadHints } from '@/control/GamepadHint'
 import { InputLayer } from '@/control/InputLayer'
 import { AppNotices } from '@/appctl'
 import { useCopilotShell } from '@/copilot/CopilotPanel'
+import { VoxelWipe } from '@/ui/voxel/VoxelWipe'
 
 const Gallery = React.lazy(() => import('@/dev/Gallery').then((m) => ({ default: m.Gallery })))
 const SHOW_GALLERY = typeof location !== 'undefined' && new URLSearchParams(location.search).has('gallery')
@@ -94,6 +95,7 @@ export function App() {
             <ViewBoundary key={workspace}>
               <Workspace />
             </ViewBoundary>
+            <VoxelWipe trigger={workspace} />
           </main>
           <RelayTimeline className={revealed ? 'enter' : ''} />
         </div>

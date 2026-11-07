@@ -23,6 +23,7 @@ import { DRIVING_HUD_H, DrivingHud } from './DrivingHud'
 import { chaseTargetId } from './scene/CameraRig'
 import { StageCanvas } from './scene/StageCanvas'
 import { stagePulse, useStage, type ViewMode } from './store'
+import { StageLoading } from './StageLoading'
 import './stage.css'
 
 export interface StageProps {
@@ -223,6 +224,7 @@ export function Stage({ children }: StageProps) {
     >
       <StageCanvas onModelError={() => setModelFailed(true)}>{children}</StageCanvas>
       <div className="stage-overlay">
+        <StageLoading />
         {replaying ? (
           <ReplayBadge />
         ) : (

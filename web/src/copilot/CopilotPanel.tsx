@@ -13,6 +13,7 @@ import { useCT, type ControlKey } from '@/control/strings'
 import { useCopilot, type CopilotItem } from './store'
 import { cpt, useCPT, type CopilotKey } from './strings'
 import { toolLabel } from './toolLabels'
+import { VoxelLoader } from '@/ui/voxel/VoxelLoader'
 import './copilot.css'
 
 export const MOD = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl+'
@@ -404,7 +405,11 @@ export function CopilotBody() {
       <div className="min-h-0 flex-1 overflow-y-auto">
         {!desktop ? (
           <p className="px-3 py-4 text-hud-sub text-[var(--g400)]">{t('cp.desktopOnly')}</p>
-        ) : !config?.configured || !config.hasKey ? (
+        ) : config === null ? (
+          <div className="px-3 py-4" data-copilot-loading="">
+            <VoxelLoader size={24} />
+          </div>
+        ) : !config.configured || !config.hasKey ? (
           <Setup />
         ) : items.length === 0 ? (
           <Empty />

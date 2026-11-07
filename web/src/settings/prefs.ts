@@ -6,6 +6,7 @@ import { create } from 'zustand'
 import { api } from '@/api'
 import { sanitizeProfiles, type PadProfile } from '@/control/devices'
 import { FEELS, NO_INVERT, type AxisInvert, type ControlFeel, type StickMode } from '@/control/shaping'
+import { DEFAULT_BOOT_MODE, parseBootMode, writeBootMode, type BootMode } from '@/app/bootFilm'
 
 export type Units = 'm' | 'ft'
 export type StartView = 'overview' | 'chase' | 'top'
@@ -23,6 +24,8 @@ export interface Prefs {
   throttleDetent: boolean
   /** learned transmitter / generic controller mappings by device id (at most 8) */
   padProfiles: Record<string, PadProfile>
+  /** WP-A: Settings > General > Opening sequence (05 §2.1) */
+  bootMode: BootMode
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -36,6 +39,7 @@ export const DEFAULT_PREFS: Prefs = {
   invert: NO_INVERT,
   throttleDetent: true,
   padProfiles: {},
+  bootMode: DEFAULT_BOOT_MODE,
 }
 export const DEADZONE_RANGE = [0.04, 0.15] as const
 export const EXPO_RANGE = [0, 0.6] as const
@@ -58,6 +62,7 @@ export function sanitizePrefs(raw: unknown): Prefs {
     invert: sanitizeInvert(r.invert),
     throttleDetent: typeof r.throttleDetent === 'boolean' ? r.throttleDetent : DEFAULT_PREFS.throttleDetent,
     padProfiles: sanitizeProfiles(r.padProfiles),
+    bootMode: parseBootMode(r.bootMode) ?? DEFAULT_PREFS.bootMode,
   }
 }
 
@@ -89,6 +94,11 @@ function saveLocal(p: Prefs): void {
 }
 
 export const usePrefs = create<Prefs>()(() => (typeof localStorage === 'undefined' ? { ...DEFAULT_PREFS } : loadLocal()))
+
+// WP-A (05 §2.1): the opening runs before the backend answers, so the setting is mirrored into relay.boot.mode
+usePrefs.subscribe((p, prev) => {
+  if (p.bootMode !== prev.bootMode) writeBootMode(typeof localStorage === 'undefined' ? null : localStorage, p.bootMode)
+})
 
 /** Other keys of the backend `ui` object are kept when the window writes its preferences. */
 let backendUi: Record<string, unknown> = {}

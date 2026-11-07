@@ -1,10 +1,15 @@
 // app://relay/ serves web/dist from inside the asar. A standard, secure scheme gives
 // the renderer a stable origin (app://relay) instead of file://, so absolute asset
-// paths, ES modules, fonts and fetch() behave as on a web server.
+// paths, ES modules, fonts and fetch() behave as on a web server. Byte ranges are
+// answered here (206 / 416, electron/range.mjs): the boot films (05 §2.2) are read by
+// <video> with Range requests, and the file loader behind net.fetch is asked for the
+// whole file.
 import { net, protocol } from "electron";
 import crypto from "node:crypto";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+
+import { rangeResponse } from "./range.mjs";
 
 export const SCHEME = "app";
 export const APP_HOST = "relay";
@@ -74,7 +79,13 @@ export function handleScheme(root) {
     headers.set("X-Content-Type-Options", "nosniff");
     if (!file.endsWith(".html")) {
       headers.set("Content-Security-Policy", csp());
-      return new Response(res.body, { status: 200, headers });
+      headers.set("Accept-Ranges", "bytes");
+      const range = request.headers.get("range");
+      if (!range) return new Response(request.method === "HEAD" ? null : res.body, { status: 200, headers });
+      const r = rangeResponse(new Uint8Array(await res.arrayBuffer()), range);
+      for (const [k, v] of Object.entries(r.headers)) headers.set(k, v);
+      if (r.status === 416) headers.delete("Content-Type");
+      return new Response(request.method === "HEAD" ? null : r.body, { status: r.status, headers });
     }
     const html = await res.text();
     headers.delete("Content-Length");

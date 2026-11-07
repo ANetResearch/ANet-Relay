@@ -1,0 +1,41 @@
+/* Voxel loaders (05 §2.5). Faces in Graphite only: top g200, left g400, right g600. The loop runs only while the
+   component holds a loop slot (data-loop="on", ui/motion/budget.ts); reduced and off motion show the static cube. */
+.voxel-loader { display: inline-flex; align-items: center; gap: 8px; color: var(--g400); }
+.voxel-loader[data-size="40"] { flex-direction: column; gap: 10px; }
+.voxel-loader svg { display: block; flex: none; overflow: visible; }
+.voxel-loader .vx-top { fill: var(--g200); }
+.voxel-loader .vx-left { fill: var(--g400); }
+.voxel-loader .vx-right { fill: var(--g600); }
+.voxel-loader .vx { transform-box: view-box; }
+.voxel-caption { font-size: 11px; line-height: 16px; color: var(--g400); }
+
+/* build voxel by voxel (first 40 % of the cycle), hold, tear down in the same order */
+.voxel-loader[data-loop="on"] .vx {
+  opacity: 0.14;
+  animation: vx-build var(--voxel-cycle) var(--ease-smooth-out) infinite;
+  animation-delay: calc(var(--voxel-cycle) * var(--d, 0));
+}
+@keyframes vx-build {
+  0% { opacity: 0.14; transform: translateY(-2px); }
+  8% { opacity: 1; transform: none; }
+  50% { opacity: 1; transform: none; }
+  58% { opacity: 0.14; transform: none; }
+  100% { opacity: 0.14; transform: none; }
+}
+
+/* StageLoading exit: the voxels scatter outward and fade */
+.voxel-loader[data-scatter] .vx { animation: vx-scatter var(--voxel-scatter) var(--ease-smooth-out) forwards; }
+@keyframes vx-scatter {
+  to { opacity: 0; transform: translate(calc(var(--sx, 0) * 12px), calc(var(--sy, 0) * 12px)); }
+}
+
+html:is([data-motion="reduced"], [data-motion="off"]) .voxel-loader .vx { animation: none; opacity: 1; transform: none; }
+
+/* VoxelWipe: one canvas over the content area, never over the top bar */
+.voxel-wipe { position: absolute; inset: 0; z-index: var(--z-rails); pointer-events: none; display: block; }
+.voxel-wipe[hidden] { display: none; }
+
+/* StageLoading: centred in the stage, under the stage overlays' controls */
+.stage-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.stage-loading .voxel-caption { transition: opacity var(--voxel-scatter) var(--ease-smooth-out); }
+.stage-loading[data-out] .voxel-caption { opacity: 0; }

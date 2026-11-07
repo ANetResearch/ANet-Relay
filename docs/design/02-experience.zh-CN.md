@@ -504,7 +504,10 @@ General（语言、单位 m / ft、启动时视角）· Safety（安全区尺寸
 
 | 动效 | 触发 | 属性 | 时长 / 缓动 | reduced-motion |
 |---|---|---|---|---|
-| 启动 | 应用启动 | §15 | §15 | 直接显示 |
+| 启动（开屏，v0.3.0） | 应用启动 | 05 §2.3：体素组字、斜切入片、影片、等待、体素揭开；设置 → General → `Opening sequence`（Full / Short / Minimal） | Full ≈ 5.6 s、Short ≈ 3.2 s、Minimal = §15（1200 ms）；`--boot-*` token | 不加载影片；标识与字标直接出现，300 ms 后揭开，总 ≤ 400 ms |
+| 体素载入 `VoxelLoader` | 面板级加载（记录列表、回放、参数表、航线、Copilot 会话） | 3 × 3 × 3 体素逐块点亮再熄灭（transform + opacity），占一个循环名额 | `--voxel-cycle` 1200 循环 | 静态立方体 |
+| 体素擦除 `VoxelWipe` | 工作区切换、打开回放 | 内容区内 16 px 斜向体素波，`g850`→透明 | `--voxel-wipe` 300 | 关闭 |
+| 舞台载入 `StageLoading` | 三维舞台首次挂载、GLB 载入 | 40 px `VoxelLoader` + `Loading aircraft model`，就绪后体素散开淡出 | `--voxel-scatter` 350 | 无散开（软件渲染同） |
 | 面板入场 | 启动完成 | translateY 6→0、opacity | fast、smooth-out、stagger 40 | 无 |
 | 卡片选中 | 点击 | 背景 | quick | 同 |
 | 附身框 | 附身 / 释放 | 外框 opacity | quick | 同 |

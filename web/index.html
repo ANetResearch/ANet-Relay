@@ -8,7 +8,9 @@
     <title>ANet Relay</title>
     <link rel="icon" type="image/png" href="./brand/favicon-32.png" />
     <!-- First frame (02 §15): g950 window, the ANet mark revealed left to right, RELAY under it, a 160 x 1 progress
-         hairline 64 above the bottom. These rules run before any script; app/boot.ts takes over the same nodes. -->
+         hairline 64 above the bottom. These rules run before any script; app/boot.ts takes over the same nodes.
+         v0.3 (05 §2): for the Full and Short openings (html[data-boot="film"]) act 0 is the bare g950 window; the
+         mark and the hairline wait for app/bootCinema.ts, which adds #boot-film and #boot-voxels and data-film. -->
     <style>
       /*BOOT_TOKENS*/
       html, body { margin: 0; height: 100%; background: var(--g950); }
@@ -32,10 +34,18 @@
         #boot-mask, #boot-mask .boot-bar > i { transition-duration: 0ms; }
       }
       html[data-motion="off"] #boot-mask .boot-logo, html[data-motion="off"] #boot-mask .boot-word, html[data-motion="off"] #boot-mask .boot-bar { animation: none; opacity: 1; clip-path: none; letter-spacing: 0.42em; }
+      html[data-boot="film"]:not([data-motion="reduced"]):not([data-motion="off"]) #boot-mask:not([data-film]) :is(.boot-mark, .boot-bar) { visibility: hidden; animation: none; }
     </style>
     <script>
       // Language and motion before first paint: the persisted language picks the boot copy; ?motion=off freezes motion.
+      // The opening setting (relay.boot.mode, mirrored by Settings) picks the first frame: Minimal draws the v0.2
+      // mark at once, Full and Short leave act 0 bare for the film.
       (function () {
+        try {
+          document.documentElement.dataset.boot = localStorage.getItem('relay.boot.mode') === 'minimal' ? 'minimal' : 'film'
+        } catch (e) {
+          document.documentElement.dataset.boot = 'film'
+        }
         try {
           var q = new URLSearchParams(location.search)
           var l = q.get('lang') || localStorage.getItem('relay.lang')

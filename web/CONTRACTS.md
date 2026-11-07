@@ -223,7 +223,8 @@ directory, so nobody edits the shell or the shared store for them.
 - **What:** preferences that only the window uses, persisted in the backend settings under `ui` (so they survive a
   reinstall of the window) and cached in localStorage `relay.prefs` for the first frame.
 - **Shape:** `{ units: 'm' | 'ft'; startView: 'overview' | 'chase' | 'top'; chaseOnCourse: boolean; padDeadzone:
-  number /* 0.04..0.15, default 0.08 */; padExpo: number /* 0..0.6, default 0.3 */ }`.
+  number /* 0.04..0.15, default 0.08 */; padExpo: number /* 0..0.6, default 0.3 */; bootMode: 'full' | 'short' |
+  'minimal' /* v0.3 WP-A, default 'short'; mirrored into localStorage relay.boot.mode for the next boot */ }`.
 - **API:** `usePrefs((p) => p.padDeadzone)`, `usePrefs.getState()` in loops, `setPrefs(patch)` to write (debounced
   PUT /settings). WP7's pads popover and the Controllers page of Settings edit the same two values through it; the
   stage reads `startView` once at mount and `chaseOnCourse` when a course starts. `formatLength(m, units)` and
@@ -379,3 +380,21 @@ Everything below lives in `src/stage/` and `src/course/`. Placeholder exports an
   modes, before sticks flow). `setPadLearning(pad, on)` (InputLayer) takes a controller out of flight while the
   mapping wizard runs.
 - Hotkeys added in the Fly workspace: `z` (throttle to the hover point), `h` (hover assist), `x` (held: fire).
+
+## 9. v0.3.0 WP-A additions (opening, voxel loaders)
+
+Design: `docs/design/05-v030.zh-CN.md` §2. Use these instead of a spinner or a "Loading…" line for panel-level
+loading; buttons keep `Spinner`.
+
+- **`ui/voxel/VoxelLoader.tsx`**: `<VoxelLoader size={16 | 24 | 40} label? caption? />`, a 3 x 3 x 3 voxel cube
+  that builds and tears down in a loop while it holds a loop slot (`ui/motion/budget.ts` `useLoopSlot()`, at most two
+  on screen) and is static otherwise and in reduced motion. `role="status"`, named "Loading" unless `label` is given.
+- **`ui/voxel/VoxelWipe.tsx`**: `<VoxelWipe trigger={key} />` inside a positioned container: a 16 px g850 voxel
+  wave over that container when `trigger` changes (workspace switch in `App.tsx`, replay open in Records).
+- **`stage/StageLoading.tsx`** and **`stage/loading.ts`** (`useStageModel`, `markStageModelReady()`): the stage's
+  model loader; the scene marks the model ready (GLB, fallback airframe or the no-WebGL notice).
+- **Opening**: `app/bootFilm.ts` (pure timeline, plan and act machine), `app/bootCinema.ts` (DOM layers
+  `#boot-film`, `#boot-voxels` inside `#boot-mask`), `app/boot.css`. Durations are the `--boot-*` and `--voxel-*`
+  tokens in `styles/motion/ext-tokens.css`; JS reads them with `ui/motion/tokens.ts` `msToken()`.
+- **Pending (outside WP-A's directories):** the pre-flight list's first poll (`control/PreflightList.tsx`,
+  `pf.loading`) should show `<VoxelLoader size={24} />` in place of its text line.

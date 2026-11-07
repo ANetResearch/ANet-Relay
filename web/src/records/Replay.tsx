@@ -21,6 +21,7 @@ import { indexAt, recordDomain, type RecordDetail, type RecordSummary } from './
 import { useRecordsCtl } from './ctl'
 import { exitReplay, setReplay, useReplay, type ReplayFrame } from './replayState'
 import { StageView } from './StageView'
+import { VoxelLoader } from '@/ui/voxel/VoxelLoader'
 
 const SPEEDS = [1, 4, 16] as const
 const COURSE_RINGS: Record<string, [AnyKey, number]> = { 'cage-loop': ['course.cageLoop', 4], slalom: ['course.slalom', 6], climb: ['course.climb', 5] }
@@ -221,7 +222,7 @@ export function Replay({ record, focusT }: { record: RecordSummary; focusT: numb
     const err = poll.error
     return (
       <div className="px-4 py-6 text-hud-sub text-[var(--g400)]">
-        {err ? t('records.loadFailed', { reason: err instanceof RelayApiError ? err.text(lang) : String(err) }) : t('records.loading')}
+        {err ? t('records.loadFailed', { reason: err instanceof RelayApiError ? err.text(lang) : String(err) }) : <VoxelLoader size={24} label={t('records.loading')} caption={t('records.loading')} />}
       </div>
     )
   }

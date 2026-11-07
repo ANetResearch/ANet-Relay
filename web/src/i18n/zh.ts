@@ -92,6 +92,19 @@ export const zh: Record<MessageKey, string> = {
   'boot.lost': 'Relay 与后端的连接已中断。',
   'boot.lostBody': '杆量已停止发送。飞机按各自的失控保护处理。',
   'boot.fixture': '演示数据 · 未连接后端',
+
+  // WP-A 开屏与体素载入（05 §2）
+  'boot.ind.backend': '后端',
+  'boot.ind.health': '健康检查',
+  'boot.ind.stream': '数据流',
+  'set.opening': '开屏动画',
+  'set.opening.full': '完整',
+  'set.opening.short': '简短',
+  'set.opening.minimal': '极简',
+  'set.openingHint': '每次更新后首次启动播放完整版。按任意键或单击可跳过。',
+  'voxel.loading': '正在载入',
+  'stage.loadingModel': '正在载入机体模型',
+
   'app.viewFailed': '此视图已停止工作。',
   'app.viewFailedBody': '全部急停与窗口其余部分不受影响。重新加载此视图以继续。',
   'app.reloadView': '重新加载视图',
