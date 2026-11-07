@@ -10,6 +10,7 @@ import { useUi } from '@/store/ui'
 import { autoBindTarget, possessedBy, type SourceKey } from './bindings'
 import type { EngineActions, EngineNotice } from './engine'
 import { ct } from './strings'
+import { sendFire } from '@/arena/store'
 
 /** Window events for the stage (WP6): touchpad view cycle and the selection-ring pulse of a newly bound pad. */
 export const VIEW_CYCLE_EVENT = 'relay:view-cycle'
@@ -74,6 +75,8 @@ export const engineActions: EngineActions = {
   moveSelection,
   viewCycle: () => window.dispatchEvent(new CustomEvent(VIEW_CYCLE_EVENT)),
   notice,
+  // WP-D arena: the fire hook goes over the stream (05 §7.4)
+  fire: (vehicle, on) => void sendFire(vehicle, on),
 }
 
 async function waitForVehicle(id: string, timeoutMs = 4000): Promise<boolean> {

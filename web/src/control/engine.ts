@@ -47,6 +47,8 @@ import type { AwaitReason, HintCard, HoldKind, HoldState } from './store'
 /** Axis change that counts as "moved a stick" after a pause (raw units). */
 export const RESUME_THRESHOLD = 0.2
 const PENDING_MS = 1500
+/** WP-D arena: a held trigger is refreshed this often; the backend releases it 300 ms after the last (05 §7.4). */
+export const FIRE_REFRESH_MS = 100
 
 export type EngineNotice =
   | { kind: 'realArm' }
@@ -65,6 +67,8 @@ export interface EngineActions {
   moveSelection(delta: 1 | -1): void
   viewCycle(): void
   notice(n: EngineNotice): void
+  /** WP-D arena: hold-type fire input of a simulator (R1 on a pad, X on the keyboard); WP-C adds the same hook */
+  fire?(vehicle: string, on: boolean): void
 }
 
 export interface EngineDeps {
@@ -150,6 +154,9 @@ export class InputEngine {
   private pending = new Map<SourceKey, { vehicle: string; until: number }>()
   private releasing = new Set<string>()
   private hintSeq = 0
+  // WP-D arena fire (05 §7.4): X held for the window source; vehicle -> last refresh
+  private fireKeyHeld = false
+  private firing = new Map<string, number>()
 
   constructor(private deps: EngineDeps) {}
 
@@ -166,7 +173,14 @@ export class InputEngine {
     this.activity++
   }
 
+  /** WP-D arena: X pressed (true) for the window source; the key-up arrives through keyUp('x'). */
+  fireKey(on: boolean): void {
+    this.fireKeyHeld = on
+    if (on) this.activity++
+  }
+
   keyUp(k: string): void {
+    if (k === 'x') this.fireKeyHeld = false
     // R / F integrate by key time, not by tick count: a short tap between two slow ticks still moves the throttle
     if (k === 'r' || k === 'f') {
       if (!this.paused) this.integrateThrottle(this.deps.now())
@@ -314,6 +328,8 @@ export class InputEngine {
       }
     }
 
+    this.fireTick(now, vehicles, frames)
+
     // possessions that ended: stop and forget
     for (const id of [...this.known.keys()]) {
       if (driven.has(id)) continue
@@ -357,8 +373,51 @@ export class InputEngine {
     }
   }
 
+  // ------------------------------------------------------------------ WP-D arena fire (05 §7.4)
+  // R1 alone on the controller that flies the aircraft (L1 + R1 stays the arm chord), X for the window source.
+  // Only while frames are being sent (focus, link, no resume wait), simulators only; WP-C binds R1 / X in its
+  // own mapping, so this block is reconciled with that one at merge.
+
+  private fireTick(now: number, vehicles: readonly Vehicle[], frames: EngineOutput['frames']): void {
+    const fire = this.deps.act.fire
+    if (!fire) return
+    for (const v of vehicles) {
+      const f = frames.get(v.id)
+      let held = false
+      if (f && f.sending && v.kind === 'sim') {
+        if (isWindowSource(f.source)) held = this.fireKeyHeld
+        else {
+          const r = this.slots.find((s) => s.index === Number(f.source.slice(4)))?.reading
+          held = Boolean(r && r.pressed.r1 && !r.pressed.l1)
+        }
+      }
+      const last = this.firing.get(v.id)
+      if (held) {
+        if (last === undefined || now - last >= FIRE_REFRESH_MS) {
+          fire(v.id, true)
+          this.firing.set(v.id, now)
+        }
+      } else if (last !== undefined) {
+        fire(v.id, false)
+        this.firing.delete(v.id)
+      }
+    }
+    for (const id of [...this.firing.keys()]) {
+      if (frames.has(id)) continue
+      fire(id, false)
+      this.firing.delete(id)
+    }
+  }
+
+  private releaseFire(): void {
+    this.fireKeyHeld = false
+    for (const id of this.firing.keys()) this.deps.act.fire?.(id, false)
+    this.firing.clear()
+  }
+
   /** Window lost focus: stop everything human now. */
   blur(): void {
+    this.releaseFire()
     this.paused = true
     this.held.clear()
     this.throttleKeys.clear()
@@ -372,6 +431,7 @@ export class InputEngine {
 
   /** Release everything this engine sends (unmount). */
   dispose(): void {
+    this.releaseFire()
     for (const id of this.sending) this.deps.cancel(id)
     this.sending.clear()
   }

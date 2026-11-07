@@ -14,6 +14,7 @@ import { useRelay } from '@/store/relay'
 import { useUi } from '@/store/ui'
 import { Icon } from '@/ui/icons'
 import { isActive } from '@/course/geometry'
+import { ArenaHud } from '@/arena/ArenaHud'
 import { t6, useT6 } from './copy'
 import { live, startLive } from './live'
 import { framingExtras } from './scene/CameraRig'
@@ -228,6 +229,8 @@ export function Stage({ children }: StageProps) {
             <ViewTools top={topShift} />
             <HudStrip width={w} bottom={stripBottom} />
             <StickPanel bottom={sticksBottom} />
+            {/* LAN arena (WP-D): crosshair, hit direction, scoreboard under the view tools (28 + 2 x 2 + 8) */}
+            <ArenaHud boardTop={topShift + 40} />
           </>
         )}
       </div>

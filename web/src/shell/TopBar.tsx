@@ -17,6 +17,7 @@ import { stopAll } from './actions'
 import { AlertCenter } from './AlertCenter'
 import { MOD } from './commands'
 import { CopilotButton } from '@/copilot/CopilotPanel'
+import { ArenaToggle } from '@/arena/ArenaToggle'
 
 function WorkspaceSwitch() {
   const t = useT()
@@ -185,6 +186,7 @@ export function TopBar() {
         <FleetSummary />
         <span className="h-4 w-px bg-[var(--g800)]" aria-hidden="true" />
         <InputDevices />
+        <ArenaToggle />
         <CopilotButton />
         <LangSwitch />
         <StopAllButton />

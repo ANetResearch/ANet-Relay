@@ -128,6 +128,7 @@ export const zh: Record<MessageKey, string> = {
   'stage.layer.course': '航线',
   'stage.layer.labels': '标签',
   'stage.layer.trails': '轨迹',
+  'stage.layer.arena': '联机',
   'stage.hud.roll': '横滚',
   'stage.hud.pitch': '俯仰',
   'stage.hud.yaw': '偏航',

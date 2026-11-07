@@ -1,6 +1,8 @@
 // Public surface of the API layer. Import types and helpers from '@/api', never from the generated file.
 export type { Fleet, Vehicle, Alert, Hello, Health, ErrorBody, FlightHealthView, HealthItem } from './types'
 export type { RelayEvent, EventKind } from './events'
+// LAN arena (05 §7.5, WP-D)
+export type { ArenaView } from './types'
 export { api, request, setTransport, httpTransport, RelayApiError, toApiError } from './rest'
 export type { RestTransport, Method, Auth, StickFrame, PossessInput, Ok, SkillName, PlanAction, PlanStep } from './rest'
 export { env, readEnv, setEnv, normalizeApiBase, streamUrlFor } from './env'

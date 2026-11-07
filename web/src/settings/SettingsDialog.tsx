@@ -21,6 +21,7 @@ import { t8, useT8, type AnyKey } from '@/fleet/copy'
 import { CopyButton, openExternal } from '@/agents/CopyButton'
 import { applyBackendUi, DEADZONE_RANGE, EXPO_RANGE, setPrefs, usePrefs, type StartView, type Units } from './prefs'
 import { CopilotSettings } from '@/copilot/CopilotSettings'
+import { ArenaSettings } from '@/arena/ArenaSettings'
 import './settings.css'
 
 export interface SettingsDialogProps {
@@ -41,6 +42,10 @@ interface BackendSettings {
   listen_port: number
   bridge_port: number
   stick_timeout_s: number
+  // LAN arena (05 §7, WP-D)
+  peer_callsign?: string
+  peer_port?: number
+  arena_auto_respawn?: boolean
   restart_fields?: string[]
   data_dir?: string | null
   ui?: Record<string, unknown>
@@ -331,6 +336,7 @@ function Network({ s, save }: { s: BackendSettings; save(p: Partial<BackendSetti
       <Row label={t('set.autoParams')}>
         <Switch checked={s.auto_params} onCheckedChange={(v) => void save({ auto_params: v })} aria-label={t('set.autoParams')} />
       </Row>
+      <ArenaSettings s={s} save={save} />
     </>
   )
 }

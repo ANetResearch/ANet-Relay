@@ -201,6 +201,16 @@ export function InputLayer() {
         },
       }),
       registerHotkey({ combo: 'p', workspace: 'fly', handler: toggleKeyboardPossession }),
+      // WP-D arena: X held fires the window-driven simulator (released through the keyup listener)
+      registerHotkey({
+        combo: 'x',
+        workspace: 'fly',
+        repeat: true,
+        handler: () => {
+          if (!windowDriven()) return false
+          engine.fireKey(true)
+        },
+      }),
     ]
 
     const timer = setInterval(() => publish(engine.tick()), TICK_MS)

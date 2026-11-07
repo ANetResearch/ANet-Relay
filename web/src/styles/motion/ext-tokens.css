@@ -16,6 +16,10 @@
     --duration-chart-slow: 1200ms;        /* editorial large chart entrance (lieflat enterSlow) */
     --duration-instant: 0s;               /* Base UI parts in reduced, off and data-instant */
     --duration-epsilon: 0.01ms;           /* JS recipes in reduced (transitionend still fires) */
+    /* LAN arena (05 §7.5, WP-D); the hit flash uses --duration-micro and hit debris --duration-medium */
+    --duration-arena-trail: 40ms;         /* bullet tracer tail, as a span of flight time */
+    --duration-arena-hit-mark: 120ms;     /* crosshair corners jump out on a confirmed hit */
+    --duration-arena-hit-dir: 200ms;      /* screen-edge arc towards the shooter after a hit taken */
   }
   html[data-tier="S"] { --telemetry-text-interval: 250ms; }   /* Tier S text <= 4 Hz (ADR-029) */
 }

@@ -2,7 +2,7 @@
 // Reconnects with capped exponential backoff and jitter. Sticks are never queued across a reconnect: a frame that
 // cannot be sent now is dropped (the backend stops human sticks when the socket closes, 03 §10.3 / H2), and each
 // vehicle is limited to one frame per 20 ms (50 Hz); within a window the latest frame wins.
-import type { Fleet, Hello } from './types'
+import type { ArenaView, Fleet, Hello } from './types'
 import type { RelayEvent } from './events'
 
 export type StreamState = 'idle' | 'connecting' | 'open' | 'closed'
@@ -23,6 +23,8 @@ export interface StreamHandlers {
   onFleet?(f: Fleet): void
   onEvent?(e: RelayEvent): void
   onUiCommand?(c: UiCommandMessage): void
+  /** LAN arena view, 20 Hz apart from the fleet snapshot (05 §7.5, WP-D) */
+  onArena?(a: ArenaView): void
   onState?(s: StreamState, info: { attempt: number; nextRetryMs: number | null }): void
 }
 
@@ -53,6 +55,7 @@ export type StreamMessage =
   | { type: 'fleet'; fleet: Fleet }
   | { type: 'event'; event: RelayEvent }
   | { type: 'ui_command'; command: UiCommandMessage }
+  | { type: 'arena'; arena: ArenaView }
   | { type: 'other' }
 
 /** Tolerant envelope parser: {type|kind, data|fleet|event|...payload}. */
@@ -85,6 +88,11 @@ export function parseMessage(raw: unknown): StreamMessage {
   if (type === 'event') {
     const e = (m.data ?? m.event ?? m) as RelayEvent
     if (e && typeof e.seq === 'number') return { type: 'event', event: e }
+  }
+  // LAN arena (05 §7.5, WP-D)
+  if (type === 'arena') {
+    const a = m.data as ArenaView | undefined
+    if (a && typeof a.enabled === 'boolean' && Array.isArray(a.peers) && Array.isArray(a.shots) && a.local && typeof a.local === 'object') return { type: 'arena', arena: a }
   }
   return { type: 'other' }
 }
@@ -220,6 +228,7 @@ export class RelayStream {
       else if (m.type === 'fleet') this.handlers.onFleet?.(m.fleet)
       else if (m.type === 'event') this.handlers.onEvent?.(m.event)
       else if (m.type === 'ui_command') this.handlers.onUiCommand?.(m.command)
+      else if (m.type === 'arena') this.handlers.onArena?.(m.arena)
     }
     sock.onerror = () => {
       /* onclose follows */

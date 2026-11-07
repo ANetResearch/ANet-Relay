@@ -78,6 +78,7 @@ export function ViewTools({ top }: { top: number }) {
     { k: 'course', key: 'stage.layer.course' },
     { k: 'labels', key: 'stage.layer.labels' },
     { k: 'trails', key: 'stage.layer.trails' },
+    { k: 'arena', key: 'stage.layer.arena' },
   ]
   const safetyShown = layers.safety === 'on' || (layers.safety === 'auto' && [...live.targets.values()].some((x) => x.kind !== 'slot'))
   return (

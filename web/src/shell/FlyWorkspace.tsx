@@ -15,6 +15,7 @@ import { FleetPanel } from '@/fleet/FleetPanel'
 import { Inspector } from '@/inspector/Inspector'
 import { Stage } from '@/stage/Stage'
 import { CourseLayer } from '@/course/CourseLayer'
+import { ArenaLayer } from '@/arena/ArenaLayer'
 import { CourseFinishCard, CourseHud } from '@/course/CourseHud'
 import { VideoPip } from '@/video/VideoPip'
 import { useLayoutMode, type LayoutMode } from './layout'
@@ -47,6 +48,7 @@ function StageFrame() {
     <div className="relative h-full overflow-hidden rounded-[var(--radius)] bg-[var(--g950)]" data-stage-frame="">
       <Stage>
         <CourseLayer />
+        <ArenaLayer />
       </Stage>
       <div className="pointer-events-none absolute inset-0">
         <div className="pointer-events-auto absolute top-4 left-1/2 -translate-x-1/2">
