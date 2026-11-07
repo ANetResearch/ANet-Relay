@@ -27,7 +27,30 @@ const STATIC_DANGER = {
   device_velocity: "motion",
   device_param_set: "param",
   device_mode: "motion",
+  device_procedure_start: "motion", // WP-B: a bench procedure may spin motors and fly (05 §4)
 };
+
+/** WP-B (05 §4.3): the danger of answering a bench prompt follows the operation the prompt starts. */
+const PROMPT_DANGER = {
+  props_removed: "motor",
+  motor_check: "motor", // every answer but none moves on to spinning the next motor
+  arm_start: "arm",
+  calibrate_gyro: "calibrate",
+  calibrate_level: "calibrate",
+  calibrate_baro: "calibrate",
+  apply_param: "param",
+};
+
+/** The prompt of the waiting step of a vehicle's bench run, or null. */
+export async function waitingPrompt(relay, vehicle, step) {
+  try {
+    const run = await relay.call("GET", `/vehicles/${enc(vehicle)}/procedure`);
+    const s = (run?.steps ?? []).find((x) => x.id === (step ?? run?.step));
+    return s?.state === "waiting" ? (s.prompt ?? null) : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Raw commands that move an aircraft (backend fleet_device.MOTION_COMMANDS): approved like any motion. */
 const MOTION_COMMANDS = new Set(["DO_SET_MODE", "NAV_TAKEOFF", "NAV_LAND", "NAV_RETURN_TO_LAUNCH", "NAV_LOITER_UNLIM", "DO_REPOSITION", "MISSION_START", "DO_PAUSE_CONTINUE"]);
@@ -68,6 +91,12 @@ export function dangerResolver(relay) {
   };
   const danger = async (name, args) => {
     if (name === "device_arm") return args.force ? "force_arm" : "arm";
+    if (name === "device_procedure_answer") {
+      // "keep" and "skip" start nothing; every other answer takes the level of the prompt's operation
+      if (args.answer === "keep" || args.answer === "skip") return null;
+      const prompt = await waitingPrompt(relay, args.vehicle, args.step);
+      return prompt ? (PROMPT_DANGER[prompt.id] ?? null) : null;
+    }
     if (name === "device_command") {
       const e = await entry(args.command);
       return e ? rawLevel(e, args.params) : "raw"; // unknown or unreadable: dangerous
@@ -268,5 +297,52 @@ export function deviceTools(relay, danger = dangerResolver(relay)) {
     defineTool("device_disarm", "Disarm", "Disarm the motors (refused while flying; use relay_land).", Type.Object({ vehicle: VID }), claimed((p) => call("POST", `${v(p)}/arm`, { arm: false }))),
     defineTool("device_mode", "Set flight mode", "Switch the flight mode by name (see device_modes).", Type.Object({ vehicle: VID, name: Type.String() }), claimed((p) => call("POST", `${v(p)}/mode`, { name: p.name })),
     ),
+    // bench procedures (WP-B, 05 §4): the run is driven step by step; prompts marked operator_only are answered
+    // by the person at the Relay window, and the approval in the chat supplies a prompt's confirm word.
+    defineTool("device_procedure_list", "Bench procedures", "The bench procedures (full_bench, preflight_quick, motor_check, vibration_check, hover_tune) with their steps and estimated duration.", Type.Object({}), () =>
+      call("GET", "/procedures"),
+    ),
+    defineTool(
+      "device_procedure_start",
+      "Start bench procedure",
+      "Start a bench procedure on a disarmed aircraft on the ground. Steps that spin motors or fly ask a prompt first; flight steps take off to 0.6 m and land by themselves. auto_answer (simulators only) answers the motor check from the servo outputs.",
+      Type.Object({
+        vehicle: VID,
+        procedure: Type.Union(["full_bench", "preflight_quick", "motor_check", "vibration_check", "hover_tune"].map((s) => Type.Literal(s))),
+        hover_s: opt(num("Hover length of S9, 5..60 s", { minimum: 5, maximum: 60 })),
+        auto_answer: opt(Type.Boolean()),
+      }),
+      claimed((p) => {
+        const options = {};
+        if (p.hover_s !== undefined) options.hover_s = p.hover_s;
+        if (p.auto_answer) options.auto_answer = true;
+        return call("POST", `${v(p)}/procedure`, { procedure: p.procedure, options });
+      }),
+    ),
+    defineTool("device_procedure_status", "Bench procedure status", "The current or most recent bench run: state, current step and its prompt (answers, operator_only), and per step the verdict, metrics, findings and suggested parameter changes.", Type.Object({ vehicle: VID }), async (p) => {
+      const run = await call("GET", `${v(p)}/procedure`);
+      for (const s of run?.steps ?? []) delete s.live; // the live chart series are for the window
+      return run;
+    }),
+    defineTool(
+      "device_procedure_answer",
+      "Answer bench prompt",
+      "Answer the waiting prompt of a bench step with one of prompt.answers[].id. Prompts with operator_only: true are for the person at the Relay window: tell the operator instead of answering.",
+      Type.Object({ vehicle: VID, step: Type.String({ description: "Waiting step id, e.g. S4" }), answer: Type.String() }),
+      claimed(async (p) => {
+        const body = { step: p.step, answer: p.answer };
+        const prompt = await waitingPrompt(relay, p.vehicle, p.step);
+        if (prompt?.confirm_word) body.confirm = prompt.confirm_word;
+        return call("POST", `${v(p)}/procedure/answer`, body);
+      }),
+    ),
+    defineTool("device_procedure_abort", "Abort bench procedure", "Abort the running bench procedure: motor tests stop and an airborne aircraft lands.", Type.Object({ vehicle: VID }), claimed((p) => call("POST", `${v(p)}/procedure/abort`), false)),
+    defineTool("device_test_runs", "Bench reports", "Saved bench reports, newest first, optionally for one aircraft.", Type.Object({ vehicle: opt(VID), limit: opt(Type.Integer({ minimum: 1, maximum: 200 })) }), (p) => {
+      const q = new URLSearchParams();
+      if (p.vehicle) q.set("vehicle", p.vehicle);
+      q.set("limit", String(p.limit ?? 20));
+      return call("GET", `/test-runs?${q}`);
+    }),
+    defineTool("device_test_run", "Bench report", "One saved bench report with every step, metric, finding and suggestion.", Type.Object({ run_id: Type.Integer() }), (p) => call("GET", `/test-runs/${enc(p.run_id)}`)),
   ];
 }
