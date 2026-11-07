@@ -396,5 +396,5 @@ loading; buttons keep `Spinner`.
 - **Opening**: `app/bootFilm.ts` (pure timeline, plan and act machine), `app/bootCinema.ts` (DOM layers
   `#boot-film`, `#boot-voxels` inside `#boot-mask`), `app/boot.css`. Durations are the `--boot-*` and `--voxel-*`
   tokens in `styles/motion/ext-tokens.css`; JS reads them with `ui/motion/tokens.ts` `msToken()`.
-- **Pending (outside WP-A's directories):** the pre-flight list's first poll (`control/PreflightList.tsx`,
-  `pf.loading`) should show `<VoxelLoader size={24} />` in place of its text line.
+- The pre-flight list's first poll (`control/PreflightList.tsx`) and a saved bench report loading
+  (`bench/ReportView.tsx`) show `<VoxelLoader size={24} />` (wired at integration).

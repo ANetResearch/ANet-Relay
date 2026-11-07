@@ -11,6 +11,7 @@ import { Button } from '@/ui/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/ui/components/ui/table'
 import { Icon } from '@/ui/icons'
 import { SimTag } from '@/ui/relay'
+import { VoxelLoader } from '@/ui/voxel/VoxelLoader'
 import { counts, elapsed, formatNumber, formatValue, levelTone, reportFile, stateTone } from './model'
 import { useTB, type BenchKey, type KeyB } from './copy'
 
@@ -230,7 +231,13 @@ export function SavedReport({ runId }: { runId: number }) {
       alive = false
     }
   }, [runId, lang])
-  if (state.id !== runId || (!state.run && !state.error)) return <p className="px-3 py-3 text-hud-sub text-[var(--g500)]">{t('bench.records.loading')}</p>
+  if (state.id !== runId || (!state.run && !state.error)) {
+    return (
+      <div className="px-3 py-3" data-bench-report-loading="">
+        <VoxelLoader size={24} label={t('bench.records.loading')} />
+      </div>
+    )
+  }
   if (!state.run) return <p className="px-3 py-3 text-hud-sub text-[var(--g50)]">{t('bench.records.failed', { reason: state.error ?? '' })}</p>
   return <ReportView run={state.run} className="py-3" />
 }

@@ -10,6 +10,7 @@ import { useVehicleField } from '@/store/selectors'
 import { Button } from '@/ui/components/ui/button'
 import { Icon, type IconKey } from '@/ui/icons'
 import { Group } from '@/ui/relay'
+import { VoxelLoader } from '@/ui/voxel/VoxelLoader'
 import { useCT, type ControlKey } from './strings'
 
 export interface PreflightItem {
@@ -124,7 +125,13 @@ export function PreflightList({ vehicleId, kind, blocking }: { vehicleId: string
       key={`${vehicleId}-${kind}`}
     >
       {items === null ? (
-        <p className="px-3 text-hud-sub text-[var(--g500)]">{error ? ct('pf.error') : ct('pf.loading')}</p>
+        error ? (
+          <p className="px-3 text-hud-sub text-[var(--g500)]">{ct('pf.error')}</p>
+        ) : (
+          <div className="px-3 py-1" data-preflight-loading="">
+            <VoxelLoader size={24} label={ct('pf.loading')} />
+          </div>
+        )
       ) : (
         <ul className="flex flex-col" data-preflight-list="">
           {items.map((it) => (
