@@ -448,7 +448,7 @@ interface Alert { id: string; vehicle: string | null; level: "info" | "warn" | "
 - electron-builder：appId `org.agentnetwork.relay`，productName `ANet Relay`，`extraResources: backend`；mac：target zip（arm64、x64 分别构建），`identity: null` 后执行 ad-hoc 签名（`codesign --force --deep -s -`），否则 Apple Silicon 上下载的未签名应用会被报"已损坏"；linux：tar.gz + AppImage；win（S 级）：nsis。
 - GitHub Actions：
   - `ci.yml`（push / PR 到 main，ubuntu）：后端 ruff + pytest；web tsc + oxlint + vitest + build；快照类型一致性检查。
-  - `release.yml`（推送 `v*` 标签）：矩阵 macos-14（arm64）、macos-13（x64）、ubuntu-22.04（x64）、windows-2022（S 级，失败不阻断）：构建后端 → 构建前端 → electron-builder → 产物 `ANet-Relay-<ver>-mac-arm64.zip`、`…-mac-x64.zip`、`…-linux-x64.tar.gz`、`…-linux-x64.AppImage`（、`…-win-x64.exe`）+ `SHA256SUMS.txt` → 上传到同名 Release（发布说明取 `CHANGELOG.md` 对应节）。
+  - `release.yml`（推送 `v*` 标签）：矩阵 macos-15（arm64）、macos-15-intel（x64）、ubuntu-22.04（x64）、windows-2022（S 级，失败不阻断）：构建后端 → 构建前端 → electron-builder → 产物 `ANet-Relay-<ver>-mac-arm64.zip`、`…-mac-x64.zip`、`…-linux-x64.tar.gz`、`…-linux-x64.AppImage`（、`…-win-x64.exe`）+ `SHA256SUMS.txt` → 上传到同名 Release（发布说明取 `CHANGELOG.md` 对应节）。
   - 若推送 `.github/workflows` 需要的令牌权限不足，退路：本机构建 Linux 包上传，macOS 包由负责人在 Mac 上 `npm run dist:mac` 后上传（README 写明）。
 - README（参照 ANet4D）：居中横幅图（应用截图合成，1600 × 600）、"ANet Relay" 标题、一句定位、徽章（Release、CI、License、ANet4D）、链接行（Download · Agent API · Hardware guide · ANet4D · ANet）、语言切换；正文：Capabilities 表、Download（各平台、首次打开说明）、Quick start（开发）、Connect your aircraft（配网摘要）、Fly（附身、接力、穿环）、For agents（REST、SDK、MCP 片段）、Feature tour（截图）、Safety、License、Acknowledgements。中文 README 同构。
 

@@ -1,12 +1,12 @@
 // Live feed of the stage. A store subscription (outside React) turns every snapshot into placement targets; the
-// frame loop smooths towards them. While Records replays a flight (records/replay.ts, CONTRACTS §5) the only
+// frame loop smooths towards them. While Records replays a flight (records/replayState.ts, CONTRACTS §5) the only
 // target is the replayed aircraft at the cursor.
 // Also holds the per-aircraft smoothed scene state other layers read (course guide line, camera framing).
 import * as THREE from 'three'
 import type { Fleet, Vehicle } from '@/api'
 import { api } from '@/api'
 import { useRelay } from '@/store/relay'
-import { useReplay, type ReplayState } from '@/records/replay'
+import { useReplay, type ReplayState } from '@/records/replayState'
 import { create } from 'zustand'
 import { fallbackSpawn, frameOffsets, framesUsed, NO_OFFSETS, place, slotPosition, slotRow, type FrameOffsets, type PlaceKind, type SlotRow } from './placement'
 

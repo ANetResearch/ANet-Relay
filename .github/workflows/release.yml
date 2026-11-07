@@ -32,8 +32,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { label: mac-arm64, runner: macos-14, platform: mac, arch: arm64, optional: false }
-          # macos-13 has been retired by GitHub; macos-15-intel is the remaining x64 macOS image.
+          - { label: mac-arm64, runner: macos-15, platform: mac, arch: arm64, optional: false }
+          # macos-13 and macos-14 have been retired by GitHub; macos-15 is arm64, macos-15-intel x64.
           - { label: mac-x64, runner: macos-15-intel, platform: mac, arch: x64, optional: false }
           - { label: linux-x64, runner: ubuntu-22.04, platform: linux, arch: x64, optional: false }
           - { label: win-x64, runner: windows-2022, platform: win, arch: x64, optional: true }

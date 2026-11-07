@@ -18,7 +18,7 @@ import { usePoll } from '@/inspector/usePoll'
 import { useLength } from '@/settings/prefs'
 import { ControlTrack, EventTrack, LineChart, makeScale, TimeAxis, useNearestEvent, useWidth } from './Charts'
 import { indexAt, recordDomain, type RecordDetail, type RecordSummary } from './model'
-import { exitReplay, setReplay, useReplay, type ReplayFrame } from './replay'
+import { exitReplay, setReplay, useReplay, type ReplayFrame } from './replayState'
 import { StageView } from './StageView'
 
 const SPEEDS = [1, 4, 16] as const

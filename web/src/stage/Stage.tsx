@@ -1,11 +1,11 @@
 // The three-dimensional stage (02 §4.4, §6). Scene in ./scene, HUD overlays in ./Overlays. Owns the view hotkey C,
 // the view commands, the stage reaction to the input layer's window events (touchpad view cycle, pad-bound ripple),
-// the start view and chase-on-course preferences, and the replay presentation of records/replay.ts.
+// the start view and chase-on-course preferences, and the replay presentation of records/replayState.ts.
 // Contract: web/CONTRACTS.md#stage.
 import * as React from 'react'
 import type { ReactNode } from 'react'
 import { clock } from '@/lib/format'
-import { useReplay } from '@/records/replay'
+import { useReplay } from '@/records/replayState'
 import { usePrefs } from '@/settings/prefs'
 import { registerCommands } from '@/shell/commands'
 import { registerHotkey } from '@/shell/keyboard'

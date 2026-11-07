@@ -96,3 +96,8 @@ jobs:
         run: for f in electron/*.mjs electron/*.cjs scripts/*.mjs scripts/*.cjs; do node --check "$f"; done
       - name: Release notes section exists for package.json version
         run: node scripts/release-assets.mjs notes "$(node -p "require('./package.json').version")" "$RUNNER_TEMP/notes.md"
+      - name: No paths or module names that collide on case-insensitive file systems
+        run: |
+          # macOS and Windows builds resolve Replay.tsx and replay.ts to the same module.
+          dupes="$(git ls-files | sed -E 's/\.(tsx|ts|mjs|cjs|js)$//' | tr '[:upper:]' '[:lower:]' | sort | uniq -d)"
+          if [ -n "$dupes" ]; then echo "Case-colliding paths:" >&2; echo "$dupes" >&2; exit 1; fi

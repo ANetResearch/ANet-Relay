@@ -194,7 +194,7 @@ These are not fully pinned in 03; the shell implements the tolerant reading belo
 Appended by WP8. These are small stores and hooks other work packages read or write; each lives inside a WP8
 directory, so nobody edits the shell or the shared store for them.
 
-### records/replay.ts: `useReplay` (read by WP6, written by WP8)
+### records/replayState.ts: `useReplay` (read by WP6, written by WP8)
 - **What:** the replay state of the stage (02 §13). While `active`, the Records workspace mounts `<Stage />` in its
   replay viewport (the Fly workspace is not mounted then, so there is only ever one stage) and moves the cursor.
 - **Shape:** `{ active: boolean; recordId: number | null; vehicleId: string | null; label: string; kind: 'real' |
