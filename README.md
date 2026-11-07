@@ -58,8 +58,9 @@ Packages for every release are on the [Releases](https://github.com/ANetResearch
 | macOS, Apple silicon | `ANet-Relay-<version>-mac-arm64.dmg` or `.zip` |
 | macOS, Intel | `ANet-Relay-<version>-mac-x64.dmg` or `.zip` |
 | Linux x64 | `ANet-Relay-<version>-linux-x64.AppImage` or `.tar.gz` |
+| Windows x64 | `ANet-Relay-<version>-win-x64.exe` (installer) |
 
-Verify downloads against `SHA256SUMS.txt`. The macOS build is signed with a Developer ID and notarized by Apple: drag it to Applications and open it.
+Verify downloads against `SHA256SUMS.txt`. The macOS build is signed with a Developer ID and notarized by Apple: drag it to Applications and open it. The Windows installer is not code-signed yet; when SmartScreen warns, choose More info → Run anyway.
 
 The application bundles its backend; no Python or Node installation is needed to run it.
 

@@ -58,8 +58,9 @@ ANet Relay 是面向局域网 Wi-Fi 小型无人机机群的桌面地面站，�
 | macOS，Apple 芯片 | `ANet-Relay-<版本>-mac-arm64.dmg` 或 `.zip` |
 | macOS，Intel | `ANet-Relay-<版本>-mac-x64.dmg` 或 `.zip` |
 | Linux x64 | `ANet-Relay-<版本>-linux-x64.AppImage` 或 `.tar.gz` |
+| Windows x64 | `ANet-Relay-<版本>-win-x64.exe`（安装程序） |
 
-请用 `SHA256SUMS.txt` 校验下载文件。macOS 版本使用 Developer ID 签名并经 Apple 公证，下载后拖入“应用程序”即可直接打开。
+请用 `SHA256SUMS.txt` 校验下载文件。macOS 版本使用 Developer ID 签名并经 Apple 公证，下载后拖入“应用程序”即可直接打开。Windows 安装程序暂未进行代码签名，SmartScreen 提示时选择“更多信息 → 仍要运行”。
 
 应用自带后端，运行时无需安装 Python 或 Node。
 

@@ -54,6 +54,8 @@ first signed and notarized macOS build.
 - A PX4 aircraft that has landed takes off again from a skill, plan or re-fly
   instead of being refused in LAND.
 - The Copilot window picks up endpoint settings saved in the main window at once.
+- The Windows build: the build scripts no longer pass Python code through cmd.exe,
+  which split it on spaces; a Windows installer is published for the first time.
 
 ### Downloads
 
@@ -62,9 +64,12 @@ first signed and notarized macOS build.
 | macOS (Apple silicon) | `ANet-Relay-0.2.1-mac-arm64.dmg`, `ANet-Relay-0.2.1-mac-arm64.zip` |
 | macOS (Intel) | `ANet-Relay-0.2.1-mac-x64.dmg`, `ANet-Relay-0.2.1-mac-x64.zip` |
 | Linux x64 | `ANet-Relay-0.2.1-linux-x64.AppImage`, `ANet-Relay-0.2.1-linux-x64.tar.gz` |
+| Windows x64 | `ANet-Relay-0.2.1-win-x64.exe` |
 
 Verify downloads against `SHA256SUMS.txt`. The macOS build is signed and
-notarized: drag it to Applications and open it.
+notarized: drag it to Applications and open it. The Windows installer is new in
+this release and not code-signed; when SmartScreen warns, choose More info → Run
+anyway.
 
 ### Known limitations
 
