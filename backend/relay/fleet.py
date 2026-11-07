@@ -519,7 +519,12 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
                 continue
             for msg in msgs:
                 self._on_message(v, msg, now)
-        self.arena.tick(now)  # LAN arena (WP-D): fire, bullets and hits right after the simulators stepped
+        # LAN arena (WP-D): fire, bullets and hits right after the simulators stepped; it keeps to its own
+        # wall-time budget, and a failure in it never skips the stick, watchdog and stop path below
+        try:
+            self.arena.tick(now)
+        except Exception:
+            log.exception("arena tick failed")
         if now >= self._next["stick"]:
             self._next["stick"] = max(self._next["stick"] + 1.0 / STICK_HZ, now)
             for v in list(self.vehicles.values()):

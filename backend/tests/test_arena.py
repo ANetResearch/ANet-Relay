@@ -203,9 +203,9 @@ def test_manual_reset_revives_and_auto_respawn_can_be_off(svc, stepper):
 # ---------------------------------------------------------------------------- peers
 
 
-def _peer_state(seat=3, n=2, seq=1, mono=1000):
+def _peer_state(seat=3, n=2, seq=1, mono=1000, hp=100):
     craft = tuple(
-        wire.Aircraft(i + 1, wire.ARMED, 100, (2.0 * i, 0.0, 1.0), (0.0, 1.0, 0.0), (0.0, 0.0, 0.5), 0.5, 24)
+        wire.Aircraft(i + 1, wire.ARMED, hp, (2.0 * i, 0.0, 1.0), (0.0, 1.0, 0.0), (0.0, 0.0, 0.5), 0.5, 24)
         for i in range(n)
     )
     return wire.encode_state(seq, PEER, mono, wire.State("Bravo", seat, None, 0, 0, 0, craft))
@@ -286,7 +286,7 @@ def test_hit_reports_score_our_shots_and_peers_join_and_leave(svc, stepper):
     join(svc, stepper)
     session, agent = take_off(svc, stepper, ids)
     peers, sent = stub_peers(svc)
-    feed(svc, peers, _peer_state())
+    feed(svc, peers, _peer_state(hp=20))  # one more hit downs either of Bravo's aircraft
     stepper.run(0.1, [session])
     assert kinds(svc, "peer_joined")[0]["text_en"] == "Bravo joined the arena."
     svc.fire("sim-1", agent, True)
@@ -315,6 +315,117 @@ def test_hit_reports_score_our_shots_and_peers_join_and_leave(svc, stepper):
     feed(svc, peers, wire.encode_bye(9, PEER, 2000))
     stepper.run(0.1, [session])
     assert kinds(svc, "peer_left")[0]["data"]["reason"] == "bye" and not svc.arena_snapshot()["peers"]
+
+
+def test_hits_are_accepted_once_per_bullet_and_only_from_the_target_owner(svc, stepper):
+    ids = boot(svc, stepper, 1)
+    join(svc, stepper)
+    session, agent = take_off(svc, stepper, ids)
+    peers, sent = stub_peers(svc)
+    feed(svc, peers, _peer_state(n=1))  # Bravo flies SIM-1 only, at full hit points
+    other = PEER + 1
+    feed(svc, peers, wire.encode_state(1, other, 0, wire.State("Charlie", 4, None, 0, 0, 0, ())), "10.9.9.10")
+    stepper.run(0.1, [session])
+    svc.fire("sim-1", agent, True)
+    stepper.run(0.05, [session])
+    (shot,) = sent["shot"]
+
+    def hit(seq, target=1, damage=20, down=False, sender=PEER, ip="10.9.9.9"):
+        h = wire.Hit(svc.arena.instance, shot.bullet, target, damage, down, (0, 0, 1))
+        feed(svc, peers, wire.encode_hit(seq, sender, 1000 + seq, h), ip)
+
+    hit(2, target=2)  # Bravo has no SIM-2
+    hit(3, sender=other, ip="10.9.9.10")  # Charlie does not own Bravo's aircraft
+    stepper.run(0.05, [session])
+    assert svc.arena.score.view() == {"hits": 0, "downs": 0, "deaths": 0}
+    hit(4, damage=200, down=True)  # damage clamped; 80 HP left, so not a shoot-down
+    for seq in range(5, 10):  # replays with fresh sequence numbers
+        hit(seq, down=True)
+    stepper.run(0.1, [session])
+    assert svc.arena.score.view() == {"hits": 1, "downs": 0, "deaths": 0}
+    (event,) = [e for e in kinds(svc, "arena_hit") if e["data"]["side"] == "hit"]
+    assert event["data"]["damage"] == 20 and event["data"]["down"] is False
+    assert not kinds(svc, "arena_down")
+
+
+def test_a_backdated_or_rapid_remote_shot_never_stalls_the_fleet_thread(svc, stepper):
+    ids = boot(svc, stepper, 1)
+    join(svc, stepper)
+    session, _ = take_off(svc, stepper, ids)
+    peers, _ = stub_peers(svc)
+    feed(svc, peers, _peer_state(n=1))
+    stepper.run(0.1, [session])
+    centre = svc.arena._centre(svc.vehicles["sim-1"])
+    far = (centre[0] + 50.0, centre[1], centre[2] + 5.0)
+    # 2.4 s backdated: older than MAX_SHOT_AGE_S, so dropped instead of replaying 576 steps
+    feed(svc, peers, wire.encode_shot(2, PEER, 3400, wire.Shot(1, 1, 1000, far, (0.0, 35.0, 0.0))))
+    stepper.run(0.01, [session])
+    assert not [b for b in svc.arena.bullets if b.owner == PEER] and peers.counters["late_shot"] == 1
+    # one aircraft cannot fire faster than REMOTE_FIRE_RATE, however many SHOT packets arrive
+    for i in range(40):
+        shot = wire.Shot(1, 100 + i, 3400, far, (0.0, 35.0, 0.0))
+        feed(svc, peers, wire.encode_shot(10 + i, PEER, 3400, shot))
+    stepper.run(0.01, [session])
+    remote = [b for b in svc.arena.bullets if b.owner == PEER]
+    assert len(remote) == int(game.REMOTE_FIRE_RATE)
+
+
+def test_bullet_flight_keeps_to_its_step_and_time_budget(svc, stepper, monkeypatch):
+    ids = boot(svc, stepper, 1)
+    join(svc, stepper)
+    arena = svc.arena
+    sims = {vid: svc.vehicles[vid] for vid in ids}
+    centres = {vid: arena._centre(v) for vid, v in sims.items()}
+    now = svc.clock()
+    far = (500.0, 500.0, 50.0)
+    b = game.Bullet(PEER, 1, 1, far, (0.0, 35.0, 0.0), now - 0.4)
+    arena.bullets = [b]
+    arena._fly(sims, centres, now - 0.005, now)
+    assert b.steps == game.CATCHUP_STEPS  # the catch-up is spread over later ticks
+    arena._fly(sims, centres, now, now + 0.005)
+    assert b.steps == 2 * game.CATCHUP_STEPS
+    # a tick that ran out of wall time leaves the rest for later; a bullet too far behind is dropped
+    stale = game.Bullet(PEER, 1, 2, far, (0.0, 35.0, 0.0), now - game.MAX_LAG_S - 0.1)
+    arena.bullets = [b, stale]
+    monkeypatch.setattr(game, "FLY_BUDGET_S", -1.0)
+    before = b.steps
+    arena._fly(sims, centres, now, now + 0.01)
+    assert b.steps == before and arena.bullets == [b] and arena.late_bullets == 1
+
+
+def test_a_failing_arena_tick_never_stops_the_control_loop(svc, stepper, monkeypatch):
+    (vid,) = boot(svc, stepper, 1)
+
+    def broken(now):
+        raise RuntimeError("arena")
+
+    monkeypatch.setattr(svc.arena, "tick", broken)
+    seen = []
+    monkeypatch.setattr(svc, "_stick_tick", lambda v, now: seen.append(v.id))
+    stepper.run(0.1)
+    assert seen and set(seen) == {vid}
+
+
+def test_reset_clears_a_shoot_down_while_the_arena_is_off(svc, stepper):
+    (vid,) = boot(svc, stepper)
+    join(svc, stepper)
+    v = svc.vehicles[vid]
+    gun = svc.arena.guns[vid]
+    v.driver.sim.shoot_down(game.SHOT_DOWN)
+    gun.down_at = svc.clock()
+    svc.update_settings({"peer_enabled": False})
+    stepper.run(0.5)
+    assert svc.arena.is_down(vid)  # the wreck is still the arena's: no crash alert for it
+    assert not [a for a in svc.fleet()["alerts"] if a["code"] == "crashed"]
+    svc.reset_sim(vid)
+    stepper.run(0.1)
+    assert not svc.arena.is_down(vid) and gun.hp == game.MAX_HP
+    # a later genuine crash raises the critical alert again
+    v.driver.sim.quad.s.crashed = True
+    v.state["crashed"] = True
+    stepper.run(0.5)
+    assert not svc.arena.is_down(vid)
+    assert [a for a in svc.fleet()["alerts"] if a["code"] == "crashed"]
 
 
 def test_seat_conflict_smaller_instance_keeps_the_seat(svc, stepper):

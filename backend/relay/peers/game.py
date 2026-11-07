@@ -10,6 +10,13 @@ on its aircraft with HIT packets. Effects of a hit go through ``Quad.impulse`` a
 
 Bullets are kept in arena coordinates, so a seat change never moves one in flight. Remote aircraft and bullets
 are converted into the local frame only for the view.
+
+LAN input never sets the fleet thread's pace: a remote shot is accepted only when it is younger than
+``MAX_SHOT_AGE_S`` and its aircraft keeps under ``REMOTE_FIRE_RATE``; each bullet catches up at most
+``CATCHUP_STEPS`` per tick, the whole flight work of a tick stops at ``FLY_BUDGET_S`` of wall time (the rest
+continues on the next tick) and a bullet more than ``MAX_LAG_S`` behind is dropped. A HIT is accepted once
+per bullet, only from the terminal that owns the target, with the damage clamped and the shoot-down checked
+against the target's hit points.
 """
 
 from __future__ import annotations
@@ -18,6 +25,7 @@ import logging
 import math
 import secrets
 import socket
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,6 +55,12 @@ STATE_SHOT_COPIES = 3
 REMOTE_BULLETS_PER_PEER = 64
 MAX_BULLETS = 512
 SHOT_DOWN = "Shot down"
+# remote input bounds (fleet-thread budget; see the module notes)
+MAX_SHOT_AGE_S = 0.3
+REMOTE_FIRE_RATE = 12.0  # per remote aircraft; a terminal fires 8 rounds per second at most
+CATCHUP_STEPS = 48
+MAX_LAG_S = 0.5
+FLY_BUDGET_S = 0.002
 ID_FILE = "peer-id"
 
 
@@ -161,6 +175,10 @@ class Arena:
     _next_view: float = 0.0
     _last_tick: float | None = None
     _port: int | None = None
+    _shot_rate: dict[tuple[int, int], tuple[float, float]] = field(default_factory=dict)  # (tokens, at)
+    _target_hp: dict[tuple[int, int], int] = field(default_factory=dict)  # remote aircraft hit points
+    late_bullets: int = 0
+    _fly_turn: int = 0
 
     def __post_init__(self) -> None:
         if not self.instance:
@@ -220,6 +238,8 @@ class Arena:
         self.seat_at = None
         self.bullets.clear()
         self._pending.clear()
+        self._shot_rate.clear()
+        self._target_hp.clear()
         self._port = None
         for gun in self.guns.values():
             gun.fire_until = 0.0
@@ -281,7 +301,9 @@ class Arena:
         for vid in [k for k in self.guns if k not in sims]:
             del self.guns[vid]
         for vid in sims:
-            self.guns.setdefault(vid, Gun())
+            gun = self.guns.setdefault(vid, Gun())
+            if gun.down and not sims[vid].driver.sim.quad.s.crashed:
+                self._revive(gun)  # reset by the operator, also while the arena is off
         if not self.enabled:
             return
         if self.seat is None and self.seat_at is not None and now >= self.seat_at:
@@ -325,10 +347,15 @@ class Arena:
             )
         for peer, reason in result.left:
             self.bullets = [b for b in self.bullets if b.owner != peer.instance]
+            for table in (self._shot_rate, self._target_hp):
+                for key in [k for k in table if k[0] == peer.instance]:
+                    del table[key]
             self.fleet.events.emit(
                 "peer_left", data={"peer": peer.key, "callsign": peer.callsign, "reason": reason}
             )
         for peer in result.states:
+            for a in peer.aircraft.values():
+                self._target_hp[(peer.instance, a.index)] = a.hp
             # two terminals on one seat: the smaller instance keeps it, the other moves on (05 §7.2)
             if (
                 self.seat is not None
@@ -400,8 +427,17 @@ class Arena:
         self.bullets.append(b)
 
     def _remote_shot(self, peer: Any, shot: wire.Shot, age: float, now: float) -> None:
-        if not 0.0 <= age < bal.TTL_S:
+        if not 0.0 <= age <= MAX_SHOT_AGE_S:
+            if self.peers is not None:
+                self.peers.counters["late_shot"] += 1
             return
+        key = (peer.instance, shot.shooter)
+        tokens, at = self._shot_rate.get(key, (REMOTE_FIRE_RATE, now))
+        tokens = min(REMOTE_FIRE_RATE, tokens + max(0.0, now - at) * REMOTE_FIRE_RATE)
+        if tokens < 1.0:
+            self._shot_rate[key] = (tokens, now)
+            return
+        self._shot_rate[key] = (tokens - 1.0, now)
         if sum(1 for b in self.bullets if b.owner == peer.instance) >= REMOTE_BULLETS_PER_PEER:
             return
         self._add_bullet(Bullet(peer.instance, shot.shooter, shot.bullet, shot.p, shot.v, now - age))
@@ -410,10 +446,25 @@ class Arena:
 
     def _fly(self, sims: dict[str, Vehicle], centres: dict[str, Any], last: float, now: float) -> None:
         span = max(1e-9, now - last)
-        keep: list[Bullet] = []
-        for b in self.bullets:
-            alive = True
-            while alive and b.t0 + (b.steps + 1) * bal.DT <= now:
+        dead: set[int] = set()
+        deadline = time.perf_counter() + FLY_BUDGET_S
+        # this terminal's rounds first (they decide our own score); remote ones take turns at what is left
+        own = [b for b in self.bullets if b.owner == self.instance]
+        remote = [b for b in self.bullets if b.owner != self.instance]
+        if remote:
+            k = self._fly_turn % len(remote)
+            remote = remote[k:] + remote[:k]
+            self._fly_turn += 1
+        for b in own + remote:
+            if now - (b.t0 + b.steps * bal.DT) > MAX_LAG_S:
+                self.late_bullets += 1  # too far behind to mean anything any more
+                dead.add(id(b))
+                continue
+            if time.perf_counter() > deadline:
+                continue  # the rest of the flight work waits for the next tick
+            budget = CATCHUP_STEPS
+            while budget > 0 and b.t0 + (b.steps + 1) * bal.DT <= now:
+                budget -= 1
                 ts = b.t0 + b.steps * bal.DT
                 p0 = b.p
                 b.p, b.v = bal.step(b.p, b.v)
@@ -423,12 +474,13 @@ class Arena:
                     vid, frac = hit
                     point = tuple(p0[i] + (b.p[i] - p0[i]) * frac for i in range(3))
                     self._hit(sims[vid], b, point, centres[vid], now)  # type: ignore[arg-type]
-                    alive = False
-                elif b.steps >= bal.TTL_STEPS or b.p[2] <= 0.0:
-                    alive = False
-            if alive:
-                keep.append(b)
-        self.bullets = keep
+                    dead.add(id(b))
+                    break
+                if b.steps >= bal.TTL_STEPS or b.p[2] <= 0.0:
+                    dead.add(id(b))
+                    break
+        if dead:
+            self.bullets = [b for b in self.bullets if id(b) not in dead]
 
     def _sweep(
         self,
@@ -539,15 +591,30 @@ class Arena:
         return (key, call, f"{call} / SIM-{b.shooter}", f"{call} / SIM-{b.shooter}")
 
     def _remote_hit(self, peer: Any, hit: wire.Hit) -> None:
-        """A peer reports that one of our bullets hit its aircraft (it owns the target, so it decides)."""
+        """A peer reports that one of our bullets hit its aircraft (it owns the target, so it decides).
+
+        Accepted once per bullet and only for an aircraft the sending terminal flies; the damage is clamped
+        and a shoot-down needs the target's hit points (its last STATE, less the hits since) to reach zero."""
+        target = (peer.instance, hit.target)
+        if hit.target not in peer.aircraft:
+            return
+        hp = self._target_hp.get(target, MAX_HP)
+        if hp <= 0:
+            return  # already down: no further hits
+        damage = max(0, min(bal.DAMAGE, hit.damage))
+        left = max(0, hp - damage)
+        self._target_hp[target] = left  # every terminal's hits on it, so the shoot-down check follows them
         if hit.shooter_instance != self.instance:
             return
-        shooter = next((i for bid, i in self._own_shots if bid == hit.bullet), None)
-        if shooter is None:
-            return  # not a bullet this terminal fired recently
+        entry = next((e for e in self._own_shots if e[0] == hit.bullet), None)
+        if entry is None:
+            return  # not a bullet this terminal fired recently, or one already reported
+        self._own_shots.remove(entry)
+        shooter = entry[1]
+        down = bool(hit.down) and left == 0
         self.bullets = [b for b in self.bullets if not (b.owner == self.instance and b.bullet == hit.bullet)]
         self.score.hits += 1
-        if hit.down:
+        if down:
             self.score.downs += 1
         vid = f"sim-{shooter}"
         v = self.fleet.vehicles.get(vid)
@@ -558,8 +625,8 @@ class Arena:
             "target": f"{peer.key}/sim-{hit.target}",
             "target_callsign": peer.callsign,
             "shooter": vid,
-            "damage": hit.damage,
-            "down": hit.down,
+            "damage": damage,
+            "down": down,
             "point": self._local(hit.point),
         }
         self.fleet.events.emit(
@@ -568,7 +635,7 @@ class Arena:
             data={**data, "detail_en": f"hit {target}", "detail_zh": f"命中 {target}"},
             labels={"vehicle": label},
         )
-        if hit.down:
+        if down:
             self.fleet.events.emit(
                 "arena_down",
                 vid if v is not None else None,
