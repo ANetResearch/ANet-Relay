@@ -123,6 +123,7 @@ All paths are under `/api/v1`. Bodies are JSON.
 | `POST /vehicles/{id}/course/start` | controller | `{course_id}` (default `cage-loop`) |
 | `POST /vehicles/{id}/course/stop` | controller | Abort the course |
 | `POST /vehicles/{id}/stop` | controller | Emergency stop |
+| `POST /sims/{id}/assist` | controller or operator | `{on}`: hover assist of a simulated aircraft (below); `sim_only` for a real aircraft |
 
 ### Skills
 
@@ -242,6 +243,12 @@ Stick frames older than 0.8 s stop being sent, so the aircraft never flies on st
 
 `course/start` places the course at the vehicle's origin and returns it, including `rings` in the vehicle's frame: `c` (centre `[x, y, z]`), `yaw_deg` (compass heading of the ring normal) and `r` (radius). The clock starts at take-off. A ring counts when the aircraft crosses its plane inside the radius, in order. The vehicle's `course` field reports `next`, `total`, `splits`, `elapsed_s` and `best_s`; events `ring_passed` and `course_finished` mark progress. `course_sim.py` flies 0.35 m before and after each ring along its normal.
 
+### Simulator hover assist
+
+Every simulated aircraft has `hover_assist` (default: setting `sim_hover_assist`, on). On, it flies as before: ALT_HOLD holds height, LOITER holds position, GUIDED, RTL and LAND are autonomous. Off, it is a racing quad without barometer or position source: the attitude still self-levels, but the throttle is thrust (no height hold, no tilt or voltage compensation, the hover point rises as the battery sags), ground effect, motor lag, turbulence (setting `sim_turbulence`, 0–1) and propeller wake act, the aircraft reports no barometer and no position estimate (`capabilities.althold` and `position` false), and ALT_HOLD, LOITER, GUIDED, RTL and AUTO are refused with `Mode requires hover assist`. LAND stays as the failsafe and descends open loop. The switch is allowed armed and in flight: off moves an airborne aircraft to STABILIZE with a 0.3 s thrust ramp; on enters ALT_HOLD at the present height.
+
+`POST /sims {count, autopilot, position, hover_assist}` sets it at creation; `POST /sims/{id}/assist {on}` switches it (the operator, the controlling session, or any session while nobody controls the aircraft and the operator allows app control). The snapshot carries `vehicle.sim = {hover_assist, turbulence}` (null on real aircraft); event `sim_assist_changed` reports a change. MCP: `app_sim_assist`; SDK: `sim_assist(id, on)` and `add_sims(count, autopilot, hover_assist)`.
+
 ## 6. WebSocket `/api/v1/stream`
 
 Server → client:
@@ -273,6 +280,7 @@ Each event is `{seq, t, kind, vehicle, session, text_en, text_zh, data}`. The ki
 | `course_started` / `ring_passed` / `course_finished` / `course_aborted` | Ring courses |
 | `stop` / `stop_all` | Emergency stops |
 | `refly_started` / `refly_finished` / `refly_failed` | Re-fly |
+| `sim_assist_changed` | Hover assist of a simulated aircraft switched (`data.hover_assist`) |
 | `device_command` / `motor_test` / `motor_test_stopped` / `actuator_set` / `rc_override` / `message_interval` / `home_set` / `rebooting` / `calibration_started` / `terminated` | Device-level operations |
 | `app_command` | An interface action run by a session or the operator (`data.action`, `data.by`) |
 
@@ -373,7 +381,7 @@ If Relay is not on port 8765, add `"--base", "http://127.0.0.1:<port>"`. The des
 | `command(id, command, params, frame, use_int, confirm, timeout_s)` · `motor_test(id, motor, throttle_pct, seconds, confirm)` · `motors_stop(id)` · `actuator(id, index, value, pwm, seconds, confirm)` · `rc(id, channels, axes)` | Raw commands, motors, actuators, RC override |
 | `message_interval(id, message, hz)` · `request_message(id, message)` · `reboot(id, confirm)` · `calibrate(id, sensor, confirm)` · `set_home(id, here, lat, lon, alt)` · `terminate(id, confirm)` | Message rates, reboot, calibration, home, flight termination |
 | `app()` · `ui_state()` · `gamepads()` · `app_actions()` · `ui(action, **args)` | App and window state, interface actions |
-| `scan_network(networks)` · `connect_vehicle(host, port)` · `remove_vehicle(id)` · `add_sims(count, autopilot)` · `remove_sims(ids)` · `settings()` · `update_settings(**patch)` · `ack_alert(id)` · `stop_all()` | App operations: made as the session when one is open, otherwise with the operator token |
+| `scan_network(networks)` · `connect_vehicle(host, port)` · `remove_vehicle(id)` · `add_sims(count, autopilot, hover_assist)` · `remove_sims(ids)` · `sim_assist(id, on)` · `settings()` · `update_settings(**patch)` · `ack_alert(id)` · `stop_all()` | App operations: made as the session when one is open, otherwise with the operator token |
 
 `sdk/python/examples/device_tour.py` shows the device-level interface on a simulator: the device overview and raw command catalogue, single-motor tests with the output PWM read back, then an `attitude` hold after take-off and a landing.
 
