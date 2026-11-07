@@ -22,6 +22,9 @@ export interface RelaySchema {
   UiCommandMessage: UiCommandMessage
   UiStateMessage: UiStateMessage
   UiResultMessage: UiResultMessage
+  ProcedureCatalogue: ProcedureCatalogue
+  ProcedureRun: ProcedureRun
+  TestRuns: TestRuns
 }
 /**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
@@ -128,6 +131,7 @@ export interface Vehicle {
   course: CourseRunView | null
   record_session: number | null
   sim: SimView | null
+  procedure: ProcedureBrief | null
 }
 /**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
@@ -449,6 +453,23 @@ export interface SimView {
   turbulence: number
 }
 /**
+ * The aircraft's bench procedure run, current or last (WP-B, 05 §4.4).
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ProcedureBrief".
+ */
+export interface ProcedureBrief {
+  run_id: number
+  procedure: string
+  state: 'running' | 'waiting' | 'passed' | 'warned' | 'failed' | 'aborted'
+  /**
+   * step id while the run is active
+   */
+  step: string | null
+  index: number
+  total: number
+}
+/**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
  * via the `definition` "Alert".
  */
@@ -527,6 +548,11 @@ export interface Event {
     | 'refly_finished'
     | 'refly_failed'
     | 'sim_assist_changed'
+    | 'procedure_started'
+    | 'procedure_step'
+    | 'procedure_waiting'
+    | 'procedure_finished'
+    | 'procedure_aborted'
   vehicle: string | null
   session: string | null
   text_en: string
@@ -718,4 +744,217 @@ export interface UiResultMessage {
   ok: boolean
   error: string | null
   data: {} | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ProcedureCatalogue".
+ */
+export interface ProcedureCatalogue {
+  procedures: ProcedureEntry[]
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ProcedureEntry".
+ */
+export interface ProcedureEntry {
+  id: string
+  title_en: string
+  title_zh: string
+  steps: CatalogueStep[]
+  /**
+   * rough duration in seconds
+   */
+  est_s: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "CatalogueStep".
+ */
+export interface CatalogueStep {
+  id: string
+  title_en: string
+  title_zh: string
+  kind: 'auto' | 'operator' | 'operator_device' | 'device' | 'flight'
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ProcedureRun".
+ */
+export interface ProcedureRun {
+  run_id: number
+  procedure: string
+  title_en: string
+  title_zh: string
+  vehicle: string
+  label: string | null
+  kind: ('real' | 'sim') | null
+  host: string | null
+  autopilot: string | null
+  firmware: string | null
+  simulated: boolean
+  state: 'running' | 'waiting' | 'passed' | 'warned' | 'failed' | 'aborted'
+  step: string | null
+  index: number
+  total: number
+  verdict: ('pass' | 'warn' | 'fail') | null
+  reason: string | null
+  reason_en: string | null
+  reason_zh: string | null
+  paused: boolean
+  by: RunActor
+  options: {}
+  steps: ProcedureStep[]
+  started: number
+  ended: number | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "RunActor".
+ */
+export interface RunActor {
+  kind: 'operator' | 'session'
+  name: string | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ProcedureStep".
+ */
+export interface ProcedureStep {
+  id: string
+  title_en: string
+  title_zh: string
+  description_en: string
+  description_zh: string
+  kind: 'auto' | 'operator' | 'operator_device' | 'device' | 'flight'
+  state: 'pending' | 'running' | 'waiting' | 'done' | 'skipped' | 'aborted'
+  verdict: ('pass' | 'warn' | 'fail' | 'skipped') | null
+  metrics: ProcedureMetric[]
+  findings: ProcedureFinding[]
+  suggestions: ProcedureSuggestion[]
+  prompt: ProcedurePrompt | null
+  activity_en: string | null
+  activity_zh: string | null
+  /**
+   * recent points, 5 Hz
+   */
+  live: {
+    [k: string]: (number | null)[] | undefined
+  } | null
+  started: number | null
+  ended: number | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ProcedureMetric".
+ */
+export interface ProcedureMetric {
+  key: string
+  label_en: string
+  label_zh: string
+  value: number | string | null
+  unit: string
+  level: 'ok' | 'warn' | 'bad' | 'na' | 'info'
+  mean: number | null
+  peak: number | null
+  warn: number | null
+  bad: number | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ProcedureFinding".
+ */
+export interface ProcedureFinding {
+  code: string
+  level: 'info' | 'warn' | 'fail'
+  text_en: string
+  text_zh: string
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ProcedureSuggestion".
+ */
+export interface ProcedureSuggestion {
+  kind: 'param' | 'relay'
+  name: string
+  current: number | null
+  suggested: number | null
+  direction: 'increase' | 'decrease' | 'set'
+  change_pct: number | null
+  reason_en: string
+  reason_zh: string
+  state: 'proposed' | 'applied' | 'kept' | 'failed' | 'unavailable'
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ProcedurePrompt".
+ */
+export interface ProcedurePrompt {
+  /**
+   * props_removed, motor_check, calibrate_gyro, arm_start, apply_param, paused, ...
+   */
+  id: string
+  text_en: string
+  text_zh: string
+  detail_en: string | null
+  detail_zh: string | null
+  answers: PromptAnswer[]
+  /**
+   * word the answer must carry on this aircraft, if any
+   */
+  confirm_word: string | null
+  /**
+   * only the operator (the Relay window) may answer
+   */
+  operator_only: boolean
+  /**
+   * motor layout, motor, sensor, item to apply, blocking checks
+   */
+  data: {}
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "PromptAnswer".
+ */
+export interface PromptAnswer {
+  id: string
+  label_en: string
+  label_zh: string
+  tone: 'primary' | 'default' | 'danger'
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TestRuns".
+ */
+export interface TestRuns {
+  runs: TestRunSummary[]
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TestRunSummary".
+ */
+export interface TestRunSummary {
+  run_id: number
+  vehicle: string
+  host: string | null
+  label: string | null
+  kind: ('real' | 'sim') | null
+  procedure: string
+  title_en: string | null
+  title_zh: string | null
+  state: 'running' | 'waiting' | 'passed' | 'warned' | 'failed' | 'aborted'
+  verdict: ('pass' | 'warn' | 'fail') | null
+  started: number
+  ended: number | null
+  counts: TestRunCounts
+  total: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TestRunCounts".
+ */
+export interface TestRunCounts {
+  pass: number
+  warn: number
+  fail: number
+  skipped: number
 }

@@ -77,6 +77,35 @@ def test_sdk_flight_and_errors(base):
     assert not any(s["name"] == "sdk-test" for s in RelayClient(base).request("GET", "/sessions")["sessions"])
 
 
+def test_sdk_runs_a_bench_procedure(base):
+    """WP-B: an agent runs motor_check on a simulator through the SDK and reads the saved report."""
+    relay = RelayClient(base)
+    relay.open_session("sdk-bench")
+    try:
+        assert {p["id"] for p in relay.procedure_list()} >= {"full_bench", "motor_check"}
+        relay.claim("sim-2")
+        started = relay.procedure_start("sim-2", "motor_check", auto_answer=True)
+        assert started["procedure"] == "motor_check" and started["by"]["kind"] == "session"
+        view = relay.wait_procedure("sim-2", timeout=30)
+        assert view["state"] == "waiting" and view["step"] == "S6"
+        prompt = next(s for s in view["steps"] if s["id"] == "S6")["prompt"]
+        assert prompt["id"] == "props_removed" and prompt["operator_only"] is False
+        relay.procedure_answer("sim-2", "S6", "confirm")
+        view = relay.wait_procedure("sim-2", timeout=30, waiting=False)
+        assert view["state"] == "passed", view
+        assert relay.procedure_status("sim-2")["run_id"] == view["run_id"]
+        runs = relay.test_runs("sim-2")
+        assert runs[0]["run_id"] == view["run_id"] and runs[0]["counts"]["pass"] == 3
+        assert relay.test_run(view["run_id"])["steps"][1]["id"] == "S6"
+        assert "| S6 " in relay.test_run_export(view["run_id"], "md")
+        with pytest.raises(RelayError) as exc:
+            relay.procedure_abort("sim-2")
+        assert exc.value.code == "no_procedure"
+        relay.unclaim("sim-2")
+    finally:
+        relay.close()
+
+
 def test_sdk_stream_and_handback(base):
     relay = RelayClient(base)
     operator = RelayClient(base, operator_token=OP)

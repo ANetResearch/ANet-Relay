@@ -168,6 +168,30 @@ CATALOGUE: dict[str, tuple[int, str, str]] = {
     "ui_timeout": (504, "The Relay window did not answer in time.", "Relay 窗口未能及时响应。"),
     "backend_busy": (503, "The fleet service did not answer in time.", "机群服务未能及时响应。"),
     "listen_unavailable": (503, "UDP {port} is not available: {reason}.", "UDP {port} 不可用：{reason}。"),
+    # bench procedures (WP-B, 05 §4.4)
+    "procedure_unknown": (404, "There is no procedure named {procedure}.", "没有名为 {procedure} 的流程。"),
+    "procedure_running": (
+        409,
+        "A procedure is already running on this aircraft.",
+        "这架飞机已有流程在运行。",
+    ),
+    "procedure_not_found": (
+        404,
+        "No procedure has run on aircraft {vehicle}.",
+        "飞机 {vehicle} 尚未运行过流程。",
+    ),
+    "no_procedure": (409, "No procedure is running on this aircraft.", "这架飞机没有正在运行的流程。"),
+    "procedure_step_mismatch": (
+        409,
+        "The procedure is at step {current}, not {step}.",
+        "流程当前处于 {current}，不是 {step}。",
+    ),
+    "procedure_not_waiting": (
+        409,
+        "Step {step} is not waiting for an answer.",
+        "步骤 {step} 未在等待回答。",
+    ),
+    "test_run_not_found": (404, "There is no bench report {run}.", "没有编号为 {run} 的标定报告。"),
 }
 
 

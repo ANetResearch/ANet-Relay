@@ -1,5 +1,5 @@
 // Inspector (02 §11): header 64 (name with double-click rename, kind tag, controller pill; address · firmware ·
-// sysid), tabs 36 (Overview · Control · Telemetry · Parameters · Log). Rendered in the right panel or inside the
+// sysid), tabs 36 (Overview · Control · Bench · Telemetry · Parameters · Log). Rendered in the right panel or inside the
 // compact sheet below 1200 px. The Control tab body is WP7's ControlTab. Contract: CONTRACTS.md#inspector.
 import * as React from 'react'
 import { api } from '@/api'
@@ -18,6 +18,7 @@ import { OverviewTab } from './OverviewTab'
 import { TelemetryTab } from './TelemetryTab'
 import { ParametersTab } from './ParametersTab'
 import { LogTab } from './LogTab'
+import { BenchTab } from '@/bench/BenchTab' // WP-B
 import './inspector.css'
 
 export interface InspectorProps {
@@ -123,9 +124,10 @@ function NoSelection({ gone }: { gone: boolean }) {
   )
 }
 
-const TAB_KEYS: Record<InspectorTab, 'insp.tab.overview' | 'insp.tab.control' | 'insp.tab.telemetry' | 'insp.tab.parameters' | 'insp.tab.log'> = {
+const TAB_KEYS: Record<InspectorTab, 'insp.tab.overview' | 'insp.tab.control' | 'insp.tab.bench' | 'insp.tab.telemetry' | 'insp.tab.parameters' | 'insp.tab.log'> = {
   overview: 'insp.tab.overview',
   control: 'insp.tab.control',
+  bench: 'insp.tab.bench', // WP-B
   telemetry: 'insp.tab.telemetry',
   parameters: 'insp.tab.parameters',
   log: 'insp.tab.log',
@@ -139,7 +141,8 @@ function Body({ id }: { id: string }) {
   const own = tab === 'parameters'
   return (
     <Tabs value={tab} onValueChange={(v) => setTab(v as InspectorTab)} className="min-h-0 flex-1 gap-0">
-      <TabsList variant="line" className="h-9 w-full shrink-0 justify-between gap-2 rounded-none border-b border-[var(--border)] px-3">
+      {/* six tabs (WP-B added Bench): the row scrolls sideways rather than clipping in the narrowest panel */}
+      <TabsList variant="line" className="insp-tabs h-9 w-full shrink-0 justify-between gap-2 overflow-x-auto rounded-none border-b border-[var(--border)] px-3">
         {INSPECTOR_TABS.map((k) => (
           <TabsTrigger key={k} value={k} className="line-tab flex-none px-0" data-inspector-tab={k}>
             {t(TAB_KEYS[k])}
@@ -157,6 +160,9 @@ function Body({ id }: { id: string }) {
           </TabsContent>
           <TabsContent value="control" className="py-3">
             <ControlTab vehicleId={id} />
+          </TabsContent>
+          <TabsContent value="bench" className="py-3">
+            <BenchTab vehicleId={id} />
           </TabsContent>
           <TabsContent value="telemetry" className="py-3">
             <TelemetryTab vehicleId={id} />

@@ -194,6 +194,30 @@ test("device tools claim, send the confirm word and report the result", async ()
   assert.equal(cmd.body.confirm, "REBOOT");
 });
 
+test("bench prompts: the danger follows the prompt and the answer carries its confirm word (WP-B)", async () => {
+  const run = (prompt) => ({ step: "S4", steps: [{ id: "S4", state: "waiting", prompt, live: { t: [1] } }] });
+  let prompt = { id: "calibrate_gyro", confirm_word: "CALIBRATE", operator_only: false };
+  const relay = stubRelay({
+    "GET /vehicles/real-1": REAL,
+    "POST /vehicles/real-1/claim": {},
+    "GET /vehicles/real-1/procedure": () => run(prompt),
+    "POST /vehicles/real-1/procedure/answer": { state: "running" },
+  });
+  const danger = dangerResolver(relay);
+  assert.equal(await danger("device_procedure_answer", { vehicle: "real-1", step: "S4", answer: "start" }), "calibrate");
+  assert.equal(await danger("device_procedure_answer", { vehicle: "real-1", step: "S4", answer: "skip" }), null);
+  assert.equal(await danger("device_procedure_start", { vehicle: "real-1" }), "motion");
+  assert.equal(await danger("device_procedure_status", { vehicle: "real-1" }), null);
+  const tools = Object.fromEntries(toolsFor(relay, "all").map((t) => [t.name, t]));
+  await tools.device_procedure_answer.execute("1", { vehicle: "real-1", step: "S4", answer: "start" });
+  const post = relay.calls.find((c) => c.path === "/vehicles/real-1/procedure/answer");
+  assert.deepEqual(post.body, { step: "S4", answer: "start", confirm: "CALIBRATE" });
+  const status = await tools.device_procedure_status.execute("2", { vehicle: "real-1" });
+  assert.doesNotMatch(status.content[0].text, /"live"/);
+  prompt = { id: "arm_start", confirm_word: "ARM", operator_only: false };
+  assert.equal(await danger("device_procedure_answer", { vehicle: "real-1", step: "S4", answer: "start" }), "arm");
+});
+
 test("a person who possesses the aircraft blocks device writes", async () => {
   const relay = stubRelay({ "GET /vehicles/sim-1": { ...SIM, possession: { input: "keyboard" } } });
   const tools = Object.fromEntries(toolsFor(relay, "all").map((t) => [t.name, t]));

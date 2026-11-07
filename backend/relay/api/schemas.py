@@ -252,6 +252,17 @@ class SimView(_Model):
     turbulence: float = Field(description="turbulence strength 0..1 (acts only with hover assist off)")
 
 
+class ProcedureBrief(_Model):
+    """The aircraft's bench procedure run, current or last (WP-B, 05 §4.4)."""
+
+    run_id: int
+    procedure: str
+    state: Literal["running", "waiting", "passed", "warned", "failed", "aborted"]
+    step: str | None = Field(description="step id while the run is active")
+    index: int
+    total: int
+
+
 class Vehicle(_Model):
     id: str
     kind: Literal["real", "sim"]
@@ -299,6 +310,7 @@ class Vehicle(_Model):
     course: CourseRunView | None
     record_session: int | None
     sim: SimView | None
+    procedure: ProcedureBrief | None = None  # bench procedure (WP-B)
 
 
 class Alert(_Model):
@@ -381,6 +393,12 @@ EventKind = Literal[
     "refly_finished",
     "refly_failed",
     "sim_assist_changed",
+    # bench procedures (WP-B, 05 §4.4)
+    "procedure_started",
+    "procedure_step",
+    "procedure_waiting",
+    "procedure_finished",
+    "procedure_aborted",
 ]
 
 

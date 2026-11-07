@@ -16,6 +16,8 @@ import { useLength } from '@/settings/prefs'
 import { dayKey, groupByDay, recordFor, type RecordSummary } from './model'
 import { useRecordsCtl } from './ctl'
 import { Replay } from './Replay'
+import { BenchReportsGroup } from '@/bench/BenchReports' // WP-B
+import { SavedReport } from '@/bench/ReportView' // WP-B
 import './records.css'
 
 export interface RecordsWorkspaceProps {
@@ -70,6 +72,7 @@ export function RecordsWorkspace({ focus }: RecordsWorkspaceProps) {
   const records = list.data?.sessions ?? null
   const [q, setQ] = React.useState('')
   const [selectedId, setSelectedId] = React.useState<number | null>(null)
+  const [benchId, setBenchId] = React.useState<number | null>(null) // WP-B: a selected bench report
   const [focusT, setFocusT] = React.useState<number | null>(null)
 
   // a timeline click selects the record covering that moment and places the cursor there
@@ -79,6 +82,7 @@ export function RecordsWorkspace({ focus }: RecordsWorkspaceProps) {
     const r = recordFor(records, focus.vehicle, focus.t)
     if (r) {
       setSelectedId(r.id)
+      setBenchId(null)
       setFocusT(focus.t)
     }
   }
@@ -89,6 +93,7 @@ export function RecordsWorkspace({ focus }: RecordsWorkspaceProps) {
   if (openReq && appliedOpen !== openReq) {
     setAppliedOpen(openReq)
     setSelectedId(openReq.id)
+    setBenchId(null)
     setFocusT(null)
   }
 
@@ -114,6 +119,14 @@ export function RecordsWorkspace({ focus }: RecordsWorkspaceProps) {
           <Icon icon="cmd.search" className="pointer-events-none absolute top-1/2 left-5 size-3.5 -translate-y-[calc(50%+4px)] text-[var(--g500)]" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('records.search')} aria-label={t('records.search')} className="h-7 pl-7 text-[12px]" />
         </div>
+        <BenchReportsGroup
+          selectedId={benchId}
+          query={q}
+          onSelect={(id) => {
+            setBenchId(id)
+            setSelectedId(null)
+          }}
+        />
         {listError ? (
           <p className="px-3 py-3 text-hud-sub text-[var(--g50)]">{t('records.listFailed', { reason: listError })}</p>
         ) : records && records.length === 0 ? (
@@ -136,6 +149,7 @@ export function RecordsWorkspace({ focus }: RecordsWorkspaceProps) {
                       selected={r.id === selectedId}
                       onSelect={() => {
                         setSelectedId(r.id)
+                        setBenchId(null)
                         setFocusT(null)
                       }}
                     />
@@ -147,7 +161,11 @@ export function RecordsWorkspace({ focus }: RecordsWorkspaceProps) {
         )}
       </section>
       <section className={cn('l1 flex min-w-0 flex-1 flex-col overflow-hidden rounded-[var(--radius)]')} aria-live="polite">
-        {selected ? (
+        {benchId !== null ? (
+          <ScrollArea className="min-h-0 flex-1">
+            <SavedReport key={benchId} runId={benchId} />
+          </ScrollArea>
+        ) : selected ? (
           <Replay key={selected.id} record={selected} focusT={focusT} />
         ) : (
           <EmptyState title={t('records.title')} body={t('records.select')} width={260} />

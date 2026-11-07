@@ -22,6 +22,7 @@ import { ActionsBlock, PlanBlock } from './FlightActions'
 import { MotorTest } from './MotorTest'
 import { PreflightList } from './PreflightList'
 import { Sticks } from './Sticks'
+import { BenchEntry } from '@/bench/BenchEntry' // WP-B
 import { useAwaiting, useHold, useInputPaused, usePadDisconnected } from './store'
 import { useCT, h5Key } from './strings'
 import './control.css'
@@ -240,6 +241,7 @@ export function ControlTab({ vehicleId }: ControlTabProps) {
       <PossessBlock v={v} />
       <ArmBlock v={v} />
       <PreflightList vehicleId={v.id} kind={v.kind} blocking={v.preflight.blocking.length} />
+      <BenchEntry vehicleId={v.id} />
       <ModeBlock v={v} />
       <ActionsBlock v={v} />
       <PlanBlock v={v} />

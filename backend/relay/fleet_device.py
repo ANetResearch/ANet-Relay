@@ -135,6 +135,7 @@ class DeviceOps:
 
     def _device_tick(self, v: Any, now: float) -> None:
         """Deferred actions (restoring an output, the next motor of a sequence), 50 Hz on the fleet thread."""
+        self._procedure_tick(v, now)  # type: ignore[attr-defined]  # bench procedure (WP-B, 05 §4.3)
         if v.deferred:
             due = [item for item in v.deferred if item[0] <= now]
             v.deferred = [item for item in v.deferred if item[0] > now]

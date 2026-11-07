@@ -124,6 +124,21 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     "listen_error": ("UDP listen failed: {error}", "UDP 监听失败：{error}"),
     # WP-C simulator flight model (05 §5.2).
     "sim_assist_changed": ("{vehicle} hover assist {detail}.", "{vehicle} 悬停辅助{detail}。"),
+    # bench procedures (WP-B, 05 §4.4)
+    "procedure_started": ("{vehicle} started {title_en}.", "{vehicle} 开始{title_zh}。"),
+    "procedure_step": (
+        "{vehicle} {title_en}: {step} {step_en} {verdict_en}.",
+        "{vehicle} {title_zh}：{step} {step_zh}{verdict_zh}。",
+    ),
+    "procedure_waiting": (
+        "{vehicle} {title_en} waits at {step} {step_en}: {prompt_en}",
+        "{vehicle} {title_zh}在 {step} {step_zh}等待：{prompt_zh}",
+    ),
+    "procedure_finished": ("{vehicle} {title_en} {verdict_en}.", "{vehicle} {title_zh}完成：{verdict_zh}。"),
+    "procedure_aborted": (
+        "{vehicle} {title_en} aborted: {detail}.",
+        "{vehicle} {title_zh}已中止：{detail}。",
+    ),
 }
 
 INPUT_LABELS = {"keyboard": ("keyboard", "键盘"), "screen": ("on-screen sticks", "屏幕摇杆")}

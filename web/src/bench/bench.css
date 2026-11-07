@@ -1,0 +1,63 @@
+/* Bench tab, Control entry and Records bench reports (WP-B, 05 §4.5). Colours only through theme.css tokens; the
+   charts and tables use the lieflat roles of lf.css. The inspector panel is 320 to 440 wide: the step list and
+   the step panel stack below 400 and sit side by side above it (container query on the tab). */
+@layer components {
+  .insp-tabs { scrollbar-width: none; }
+  .insp-tabs::-webkit-scrollbar { display: none; }
+
+  .bench { container-type: inline-size; container-name: bench; display: flex; flex-direction: column; gap: 16px; }
+  .bench-split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  @container bench (min-width: 400px) {
+    .bench-split { grid-template-columns: 132px minmax(0, 1fr); }
+  }
+
+  .bench-steps { display: flex; flex-direction: column; }
+  .bench-step { display: flex; min-height: 24px; align-items: center; gap: 8px; padding: 2px 12px; border-radius: 4px; text-align: left;
+    color: var(--g300); outline: none; transition: background-color var(--duration-quick) var(--ease-smooth-out); }
+  .bench-step:hover { background: oklch(from var(--g850) l c h / 0.55); }
+  .bench-step:focus-visible { box-shadow: 0 0 0 2px oklch(from var(--g50) l c h / 0.25); }
+  .bench-step[data-selected] { background: var(--g850); color: var(--g50); }
+  .bench-step[data-tone="active"] { color: var(--g50); }
+  .bench-step[data-tone="bad"] .bench-step-mark { color: var(--r400); }
+  .bench-step[data-tone="muted"] { color: var(--g500); }
+  @container bench (min-width: 400px) {
+    .bench-step { padding: 2px 8px; }
+  }
+
+  .bench-tone-ok { color: var(--g300); }
+  .bench-tone-warn { color: var(--g50); font-weight: 560; }
+  .bench-tone-bad { color: var(--r400); font-weight: 560; }
+  .bench-tone-muted { color: var(--g500); }
+  .bench-tone-active { color: var(--g50); }
+
+  .bench-prompt { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--g700);
+    background: var(--g900); }
+
+  /* motor layout diagram: the spinning motor carries a slow pulse ring; reduced motion shows it still */
+  .bench-layout .arm { stroke: var(--lf-grid); stroke-width: 1.5; }
+  .bench-layout .body { fill: var(--g850); stroke: var(--g600); stroke-width: 1; }
+  .bench-layout .rotor { fill: var(--g900); stroke: var(--g500); stroke-width: 1; }
+  .bench-layout .rotor[data-state="target"] { stroke: var(--g50); stroke-width: 1.5; }
+  .bench-layout .rotor[data-state="spinning"] { fill: var(--lf-hero); stroke: var(--lf-hero); }
+  .bench-layout .rotor[data-state="done"] { stroke: var(--g300); }
+  .bench-layout .dir { fill: none; stroke: var(--g400); stroke-width: 1; }
+  .bench-layout .dir-head { fill: var(--g400); }
+  .bench-layout .num { fill: var(--g100); font: 600 10px/1 var(--font-mono); }
+  .bench-layout .rotor[data-state="spinning"] + .num { fill: var(--white); }
+  .bench-layout .nose { fill: var(--g400); font: 500 9px/1 var(--font-sans); }
+  .bench-layout .pulse { fill: none; stroke: var(--lf-hero); stroke-width: 1; transform-box: fill-box; transform-origin: center;
+    animation: bench-pulse var(--duration-bench-pulse) var(--ease-smooth-out) infinite; }
+  @keyframes bench-pulse { from { opacity: 0.9; transform: scale(1); } to { opacity: 0; transform: scale(1.6); } }
+  html:is([data-motion="reduced"], [data-motion="off"]) .bench-layout .pulse { animation: none; opacity: 0.6; }
+
+  .bench-chart .lf-line { stroke-width: 1.25; }
+  .bench-chart .zero { stroke: var(--lf-grid); stroke-width: 1; }
+  html:is([data-motion="reduced"], [data-motion="off"]) .bench-step { transition: none; }
+
+  .bench-report-row { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border-radius: var(--radius); border: 1px solid transparent;
+    text-align: left; outline: none; transition: background-color var(--duration-quick) var(--ease-smooth-out); }
+  .bench-report-row:hover { background: oklch(from var(--g850) l c h / 0.55); }
+  .bench-report-row[data-selected] { background: var(--g850); border-color: var(--border); }
+  .bench-report-row:focus-visible { box-shadow: 0 0 0 2px oklch(from var(--g50) l c h / 0.25); }
+  html:is([data-motion="reduced"], [data-motion="off"]) .bench-report-row { transition: none; }
+}

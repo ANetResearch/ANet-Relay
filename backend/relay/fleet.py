@@ -73,6 +73,7 @@ from .mav.mavlink import M, Parser
 from .mav.params import ESSENTIAL, NamedReads, ParamFetch, normalise, same_value, type_name
 from .model import INPUT_KINDS, Calibration, Capability, Confirmed, Signs, StickInput
 from .netinfo import local_networks, on_bridge_ap, scan_hosts
+from .procedures import ProcedureOps
 from .sessions import Session, SessionManager
 from .sim.autopilot import ARDUPILOT, PX4, SimAutopilot
 
@@ -188,6 +189,7 @@ class Vehicle:
         self.motor_until = 0.0  # clock time until which a motor test may still be spinning
         self.deferred: list[tuple[float, Callable[[Any], None]]] = []
         self.refly: dict[str, Any] | None = None  # the re-fly in progress (04 §4)
+        self.procedure: Any = None  # bench procedure run, current or last (WP-B, 05 §4.3)
         self.health = FlightHealth()
         self.position_lost_since: float | None = None
         self.course_clear_at: float | None = None
@@ -334,7 +336,7 @@ class Vehicle:
         return auth.controller(self.auth, claim is not None and sessions.alive(claim.session_id))
 
 
-class FleetService(DeviceOps, SimOps):
+class FleetService(DeviceOps, SimOps, ProcedureOps):
     def __init__(
         self,
         settings: Settings | None = None,
@@ -1331,6 +1333,7 @@ class FleetService(DeviceOps, SimOps):
     def _remove(self, v: Vehicle) -> None:
         now = self.clock()
         wall = self.wall()
+        self._procedure_removed(v)  # bench procedure (WP-B)
         self._stop_control(v, "removed", now)
         if v.kind == "real":
             v.driver.pace(now + 1.0)  # flush pending release frames
@@ -2764,6 +2767,7 @@ class FleetService(DeviceOps, SimOps):
             "sim": self._sim_view(v),  # WP-C (05 §5.2)
             "course": None if v.course is None else v.course.view(now),
             "record_session": v.record_session,
+            "procedure": self._procedure_brief(v),  # bench procedure (WP-B, 05 §4.4)
         }
 
     def _build_snapshot(self, now: float) -> None:

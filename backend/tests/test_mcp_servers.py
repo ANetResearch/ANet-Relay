@@ -294,6 +294,27 @@ DEVICE_CASES = [
         {"name": "LOITER"},
     ),
     ("device_claim", {"vehicle": "sim-1"}, "POST", "/vehicles/sim-1/claim", {}),
+    # bench procedures (WP-B, 05 §4)
+    ("device_procedure_list", {}, "GET", "/procedures", None),
+    (
+        "device_procedure_start",
+        {"vehicle": "sim-1", "procedure": "motor_check", "options": {"auto_answer": True}},
+        "POST",
+        "/vehicles/sim-1/procedure",
+        {"procedure": "motor_check", "options": {"auto_answer": True}},
+    ),
+    ("device_procedure_status", {"vehicle": "sim-1"}, "GET", "/vehicles/sim-1/procedure", None),
+    (
+        "device_procedure_answer",
+        {"vehicle": "sim-1", "step": "S6", "answer": "confirm", "confirm": "MOTOR"},
+        "POST",
+        "/vehicles/sim-1/procedure/answer",
+        {"step": "S6", "answer": "confirm", "confirm": "MOTOR"},
+    ),
+    ("device_procedure_abort", {"vehicle": "sim-1"}, "POST", "/vehicles/sim-1/procedure/abort", {}),
+    ("device_test_runs", {"vehicle": "sim-1"}, "GET", "/test-runs", None),
+    ("device_test_run", {"run_id": 3}, "GET", "/test-runs/3", None),
+    ("device_test_run", {"run_id": 3, "fmt": "md"}, "GET", "/test-runs/3/export", None),
 ]
 
 
@@ -307,6 +328,18 @@ def test_device_tool_requests(stub, tool, args, method, path, body):
     req = last(stub)
     assert (req["method"], req["path"]) == (method, path)
     assert req["body"] == body and req["session"] == "tok1" and req["operator"] is None
+
+
+def test_device_procedure_status_drops_the_live_series(stub):
+    server = make(device_mcp, stub)
+    stub.responses["/vehicles/sim-1/procedure"] = {
+        "run_id": 1,
+        "state": "running",
+        "steps": [{"id": "S9", "live": {"alt": [0.1, 0.2]}, "metrics": []}],
+    }
+    out = text(call(server, "device_procedure_status", {"vehicle": "sim-1"}))
+    assert out["steps"] == [{"id": "S9", "metrics": []}]
+    assert "operator_only" in device_mcp.INSTRUCTIONS
 
 
 def test_device_skills_and_derived(stub):

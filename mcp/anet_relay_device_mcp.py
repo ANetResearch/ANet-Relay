@@ -37,7 +37,11 @@ INSTRUCTIONS = (
     "CALIBRATE (disarmed only), TERMINATE (real and simulated). A missing word fails with confirm_required "
     "and detail.confirm names the word; a needed disarm fails with must_be_disarmed. Never use a confirm "
     "word unless the operator asked for that operation. Remove propellers before any motor test on a real "
-    "aircraft. device_commands lists the raw commands device_command accepts."
+    "aircraft. device_commands lists the raw commands device_command accepts. "
+    # WP-B: bench procedures (05 §4)
+    "Bench procedures (device_procedure_*) run calibration and stability checks step by step; poll "
+    "device_procedure_status and answer the waiting prompt. Prompts with operator_only=true must be "
+    "answered by the person at the Relay window: tell the operator and wait, never guess."
 )
 
 CONFIRM_MOTOR = "MOTOR on real aircraft (simulators need no word); the aircraft must be disarmed"
@@ -125,6 +129,118 @@ def _unclaim(r: RelayClient, a: dict) -> dict:
 
 
 SECONDS10 = {"type": "number", "exclusiveMinimum": 0, "maximum": 10, "description": "duration in seconds"}
+
+# ---------------------------------------------------------------------------- bench procedures (WP-B, 05 §4)
+
+PROCEDURE_IDS = ["full_bench", "preflight_quick", "motor_check", "vibration_check", "hover_tune"]
+
+
+def _procedure_post(result: Any, _a: dict) -> Any:
+    """Drop the live mini-chart series: they are for the Relay window, not for the model."""
+    if isinstance(result, dict):
+        for step in result.get("steps") or []:
+            step.pop("live", None)
+    return result
+
+
+def _test_run(r: RelayClient, a: dict) -> Any:
+    run_id = int(a["run_id"])
+    if a.get("fmt") == "md":
+        return r.request("GET", f"/test-runs/{run_id}/export", None, auth="session", query={"fmt": "md"})
+    return r.request("GET", f"/test-runs/{run_id}", None, auth="session")
+
+
+def procedure_tools() -> list[Tool]:
+    return [
+        http_tool(
+            "device_procedure_list",
+            "Catalogue of bench procedures: id, titles, steps (S1..S12 with kind auto, operator, "
+            "operator_device, device or flight) and an estimated duration in seconds.",
+            "GET",
+            "/procedures",
+            read_only=True,
+        ),
+        _t(
+            "device_procedure_start",
+            "Start a bench procedure on an aircraft this session controls (device_claim first). The aircraft "
+            "must be disarmed and on the ground. Steps that spin motors or fly ask a prompt first; flight "
+            "steps take off to 0.6 m and land by themselves. auto_answer (simulators only) answers the motor "
+            "check from the servo outputs.",
+            "POST",
+            "/vehicles/{vehicle}/procedure",
+            {
+                "procedure": {"type": "string", "enum": PROCEDURE_IDS},
+                "options": {
+                    "type": "object",
+                    "properties": {
+                        "hover_s": {"type": "number", "minimum": 5, "maximum": 60},
+                        "skip": {"type": "array", "items": {"type": "string"}, "description": "step ids"},
+                        "auto_answer": {"type": "boolean", "default": False},
+                    },
+                },
+            },
+            ["procedure"],
+            destructive=True,
+            post=_procedure_post,
+        ),
+        _t(
+            "device_procedure_status",
+            "The current or most recent run: state (running, waiting, passed, warned, failed, aborted), the "
+            "current step and its prompt (answers, confirm_word, operator_only), and per step the verdict, "
+            "metrics, findings and suggested parameter changes. Suggestions are never written automatically.",
+            "GET",
+            "/vehicles/{vehicle}/procedure",
+            read_only=True,
+            post=_procedure_post,
+        ),
+        _t(
+            "device_procedure_answer",
+            "Answer the prompt of the waiting step. answer is one of prompt.answers[].id. On real aircraft "
+            "the prompt's confirm_word is required (MOTOR, ARM, CALIBRATE, or the parameter name), and "
+            "operator_only prompts (stick directions, motor order, propellers) refuse agents with "
+            "operator_required: ask the operator instead.",
+            "POST",
+            "/vehicles/{vehicle}/procedure/answer",
+            {
+                "step": {"type": "string", "description": "id of the waiting step, e.g. S6"},
+                "answer": {"type": "string"},
+                "confirm": {"type": "string", "description": "the prompt's confirm_word, when it has one"},
+            },
+            ["step", "answer"],
+            destructive=True,
+            post=_procedure_post,
+        ),
+        _t(
+            "device_procedure_abort",
+            "Abort the running procedure: motor tests stop and an airborne aircraft lands.",
+            "POST",
+            "/vehicles/{vehicle}/procedure/abort",
+            post=_procedure_post,
+        ),
+        http_tool(
+            "device_test_runs",
+            "Saved bench reports, newest first: run_id, procedure, state, verdict, step counts.",
+            "GET",
+            "/test-runs",
+            {
+                "vehicle": {"type": "string", "description": "aircraft id or address (optional)"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 20},
+            },
+            read_only=True,
+        ),
+        schema_tool(
+            "device_test_run",
+            "One saved bench report with every step, metric, finding, suggestion and the parameter baseline. "
+            "fmt=md returns the Markdown report instead.",
+            {
+                "run_id": {"type": "integer"},
+                "fmt": {"type": "string", "enum": ["json", "md"], "default": "json"},
+            },
+            ["run_id"],
+            handler=_test_run,
+            read_only=True,
+        ),
+    ]
 
 
 def build_tools() -> list[Tool]:
@@ -496,6 +612,7 @@ def build_tools() -> list[Tool]:
             },
             ["seconds"],
         ),
+        *procedure_tools(),
     ]
 
 

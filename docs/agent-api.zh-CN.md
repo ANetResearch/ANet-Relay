@@ -231,6 +231,25 @@ POST /api/v1/vehicles/sim-1/plan
 
 窗口未连接返回 503 `ui_unavailable`，5 s 内无应答返回 504 `ui_timeout`，动作本身被拒绝返回 409 `ui_action_failed`。机群、网络、设置与告警等应用操作使用第 5 节与 OpenAPI 中已有的路径（`/discover`、`/vehicles`、`/sims`、`/stop-all`、`/network/retry`、`/bridges/{ip}`、`/alerts/{id}/ack`、`/courses/{id}`、`/settings`），权限按第 4 节的"应用操作"级别。
 
+### 标定流程
+
+标定流程在一架飞机上逐步执行校准与稳定性检查，并保存报告（S1 链路与固件、S2 电池静息、S3 参数基线、S4 传感器校准、S5 杆向、S6 电机顺序与转向、S7 地面振动、S8 装桨确认、S9 悬停测试、S10 阶跃响应、S11 悬停学习、S12 报告）。流程：`full_bench`（S1–S12）、`preflight_quick`（S1、S2、S7、悬停 10 秒的 S9、S12）、`motor_check`（S1、S6、S12）、`vibration_check`（S1、S7、悬停 20 秒的 S9、S12）与 `hover_tune`（S1、S8–S12）。流程只能在已上锁、位于地面的飞机上启动，并需要该飞机的控制权（认领，或操作员附身）。
+
+| 方法与路径 | 鉴权 | 用途 |
+|---|---|---|
+| `GET /procedures` | – | 流程目录：`{procedures: [{id, title_en, title_zh, steps: [{id, title_en, title_zh, kind}], est_s}]}`；`kind` 为 `auto`、`operator`、`operator_device`、`device` 或 `flight` |
+| `POST /vehicles/{id}/procedure` | 控制者 | `{procedure, options: {hover_s 5–60, skip: [步骤 id], auto_answer}}`；`auto_answer`（仅模拟机）由舵机输出自动回答 S6；S12 不可跳过 → 返回运行视图 |
+| `GET /vehicles/{id}/procedure` | – | 当前运行，否则为最近保存的一次：`state`（`running`、`waiting`、`passed`、`warned`、`failed`、`aborted`）、`step`、`index`、`total`、`paused`、`reason`，以及每步的 `state`、`verdict`、`metrics`（值、单位、等级、窗口内 `mean` / `peak`、`warn` / `bad` 门限）、`findings`、`suggestions`、`prompt`、`live`（当前步骤的最近数据点，5 Hz） |
+| `POST /vehicles/{id}/procedure/answer` | 控制者或操作员 | `{step, answer, confirm?}`：回答等待中的提示；`answer` 取自 `prompt.answers[].id` |
+| `POST /vehicles/{id}/procedure/abort` | 控制者或操作员 | 中止：电机测试停止，空中的飞机降落 |
+| `GET /test-runs?vehicle=&limit=` | – | 已保存的报告，按时间倒序，含判定计数；`vehicle` 匹配飞机 id 或地址 |
+| `GET /test-runs/{run_id}` | – | 单份报告，含全部步骤、参数基线与修改记录 |
+| `GET /test-runs/{run_id}/export?fmt=md\|json` | – | 以 Markdown（中英文表格，UTC 时间）或 JSON 下载报告 |
+
+等待中的步骤带有 `prompt`：`{id, text_en, text_zh, detail_en, detail_zh, answers, confirm_word, operator_only, data}`。真机上 `confirm_word` 沿用设备级规则：S6、S7 转动电机前为 `MOTOR`（已拆桨、油门不超过 30 %、不超过 5 秒、已上锁；一次确认覆盖该步骤的全部电机），S4 每项校准为 `CALIBRATE`，S9 起飞前为 `ARM`，S11 写入参数前为该参数名（写入后回读校验）。`operator_only: true` 的提示（真机上的 S5、S6、S8 与 S7 拆桨确认）拒绝会话，返回 403 `operator_required`：必须由人在 Relay 窗口确认。模拟机上智能体可以回答全部提示。
+
+流程由机群主循环推进，而不是由调用方推进：轮询 `GET .../procedure`（或订阅事件），在 `state` 为 `waiting` 时回答。以下情况流程中止：急停（急停优先，之后不再由流程降落）、链路丢失、坠毁、失去认领，以及在飞行步骤之外解锁或上锁。会话启动的流程在有人附身期间暂停，控制权交还且飞机上锁后从当前步骤开头继续。飞行步骤起飞至 0.6 m、保持在安全区内并自行降落；S10 在定高模式下对横滚、俯仰、偏航施加短时阶跃杆量。建议的参数修改（S10 速率环增益、S11 悬停油门）从不自动写入：S11 逐项询问。
+
 ### 飞行健康
 
 每架飞机带有 `health`：最近 5 秒的滚动诊断，在检查器 概览 → 飞行健康 中显示。`state` 为 `ok`、`warn`、`bad` 或 `idle`（未解锁）；`items` 列出 `{key, level, value, unit, detail}`，包括 `oscillation`（横滚、俯仰角速度均方根，°/s）、`lean`（摇杆回中时保持的倾角）、`yaw_drift`、`alt_hold`（定高时垂直速度离散度）、`hover_throttle`、`motors`（各电机平均输出差、触顶比例）、`vibration`（峰值、加速度计削波）、`battery_sag`（每节压降）、`link` 和 `stick_stream`（手动飞行时 Relay 窗口发出的杆量更新）。飞行类项目在空中 1.5 秒后才评估，此前 `level` 为 `na`。各项含义与调整方法见 [`flight-tuning.zh-CN.md`](flight-tuning.zh-CN.md)。
@@ -283,6 +302,7 @@ POST /api/v1/vehicles/sim-1/plan
 | `sim_assist_changed` | 模拟机悬停辅助已切换（`data.hover_assist`） |
 | `device_command` / `motor_test` / `motor_test_stopped` / `actuator_set` / `rc_override` / `message_interval` / `home_set` / `rebooting` / `calibration_started` / `terminated` | 设备级操作 |
 | `app_command` | 会话或操作员执行的界面动作（`data.action`、`data.by`） |
+| `procedure_started` / `procedure_step` / `procedure_waiting` / `procedure_finished` / `procedure_aborted` | 标定流程，带 `data.run_id`、`data.step`、`data.verdict` 或 `data.reason` |
 
 完整列表见 `web/src/api/schema.json`（`EventKind`）。错误使用统一结构，`code` 在各版本间保持稳定：
 
@@ -295,8 +315,8 @@ POST /api/v1/vehicles/sim-1/plan
 | 400 | `invalid_request`、`confirm_required`、`outside_safety_volume`、`unknown_mode`、`command_not_allowed` |
 | 401 | `auth_required`、`session_expired`（重新打开会话） |
 | 403 | `operator_required`、`session_required`、`untrusted_host`、`app_control_disabled` |
-| 404 | `vehicle_not_found`、`course_not_found`、`unknown_skill`、`param_not_found`、`record_not_found` |
-| 409 | `not_claimed`、`claimed_by_other`、`possessed_by_human`、`claim_suspended`、`preflight_blocked`、`arm_rejected`、`mode_rejected`、`not_armed`、`crashed`、`capability_missing`、`no_position_estimate`、`not_airborne`、`no_plan`、`must_be_disarmed`、`message_not_seen`、`refly_unavailable`、`ui_action_failed` |
+| 404 | `vehicle_not_found`、`course_not_found`、`unknown_skill`、`param_not_found`、`record_not_found`、`procedure_unknown`、`procedure_not_found`、`test_run_not_found` |
+| 409 | `not_claimed`、`claimed_by_other`、`possessed_by_human`、`claim_suspended`、`preflight_blocked`、`arm_rejected`、`mode_rejected`、`not_armed`、`crashed`、`capability_missing`、`no_position_estimate`、`not_airborne`、`no_plan`、`must_be_disarmed`、`message_not_seen`、`refly_unavailable`、`ui_action_failed`、`procedure_running`、`no_procedure`、`procedure_step_mismatch`、`procedure_not_waiting` |
 | 429 | `rate_limited` |
 | 503 | `link_not_ready`、`backend_busy`、`ui_unavailable` |
 | 504 | `ui_timeout` |
@@ -308,7 +328,7 @@ Relay 提供三套基于 stdio 的 Model Context Protocol 服务（JSON-RPC 2.0�
 | 服务 | 文件 | 工具 | 面向 |
 |---|---|---|---|
 | `anet-relay` | `mcp/anet_relay_mcp.py` | 20 个 `relay_*` | 飞行：机群、认领、解锁、模式、技能、动作序列、短时杆量、再飞、穿环航线、急停 |
-| `anet-relay-device` | `mcp/anet_relay_device_mcp.py` | 29 个 `device_*` | 设备级：设备总览、MAVLink 消息、参数读写、原始指令、单电机测试、执行器、遥控覆盖、消息频率、重启、校准、home、姿态与速度控制、飞行终止 |
+| `anet-relay-device` | `mcp/anet_relay_device_mcp.py` | 36 个 `device_*` | 设备级：设备总览、MAVLink 消息、参数读写、原始指令、单电机测试、执行器、遥控覆盖、消息频率、重启、校准、home、姿态与速度控制、飞行终止、标定流程与报告 |
 | `anet-relay-app` | `mcp/anet_relay_app_mcp.py` | 41 个 `app_*` | 应用控制：应用与窗口状态、手柄、语言、工作区、选择飞机、检查器、对话框、截图、扫描网络、连接与移除飞机、模拟机、设置、告警、记录与导出、再飞来源、附身、Copilot 窗口、全部急停 |
 
 每套服务在启动时打开一个智能体会话，名称取 `--name`（缺省分别为 `mcp`、`mcp-device`、`mcp-app`），自动续租，并在客户端断开时关闭会话；Relay 重启后，服务在下一次调用时重新打开会话，此时需要重新认领。认领属于会话：用某一套服务控制飞机时，请用同一套服务的认领工具（`relay_claim` 或 `device_claim`）。工具参数在发往 Relay 之前校验，缺少或多余的参数以 `invalid arguments` 返回。失败以 `isError: true` 的工具结果返回，并附错误码，模型可据此应对（例如遇到 `possessed_by_human` 时等待）。
@@ -380,6 +400,7 @@ Relay 不在 8765 端口运行时，追加 `"--base", "http://127.0.0.1:<port>"`
 | `device(id)` · `message(id, name)` · `param(id, name)` · `params_read(id, names)` · `set_param(id, name, value)` · `commands()` | 设备读取与写参数 |
 | `command(id, command, params, frame, use_int, confirm, timeout_s)` · `motor_test(id, motor, throttle_pct, seconds, confirm)` · `motors_stop(id)` · `actuator(id, index, value, pwm, seconds, confirm)` · `rc(id, channels, axes)` | 原始指令、电机、执行器、遥控覆盖 |
 | `message_interval(id, message, hz)` · `request_message(id, message)` · `reboot(id, confirm)` · `calibrate(id, sensor, confirm)` · `set_home(id, here, lat, lon, alt)` · `terminate(id, confirm)` | 消息频率、重启、校准、home、飞行终止 |
+| `procedures()` · `procedure_start(id, procedure, hover_s, skip, auto_answer)` · `procedure(id)` · `procedure_answer(id, step, answer, confirm)` · `procedure_abort(id)` · `wait_procedure(id, timeout, waiting=True)` · `test_runs(id)` · `test_run(run_id)` · `test_run_export(run_id, fmt)` | 标定流程与报告 |
 | `app()` · `ui_state()` · `gamepads()` · `app_actions()` · `ui(action, **args)` | 应用与窗口状态、界面动作 |
 | `scan_network(networks)` · `connect_vehicle(host, port)` · `remove_vehicle(id)` · `add_sims(count, autopilot, hover_assist)` · `remove_sims(ids)` · `sim_assist(id, on)` · `settings()` · `update_settings(**patch)` · `ack_alert(id)` · `stop_all()` | 应用操作：打开会话时以会话身份调用，否则使用操作员令牌 |
 

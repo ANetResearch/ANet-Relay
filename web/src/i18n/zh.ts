@@ -161,6 +161,7 @@ export const zh: Record<MessageKey, string> = {
 
   'insp.tab.overview': '概览',
   'insp.tab.control': '控制',
+  'insp.tab.bench': '标定', // WP-B
   'insp.tab.telemetry': '遥测',
   'insp.tab.parameters': '参数',
   'insp.tab.log': '日志',

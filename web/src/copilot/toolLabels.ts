@@ -45,6 +45,14 @@ export const TOOL_LABELS: Record<string, readonly [en: string, zh: string]> = {
   device_arm: ['Arm', '解锁'],
   device_disarm: ['Disarm', '上锁'],
   device_mode: ['Set flight mode', '切换飞行模式'],
+  // device: bench procedures (WP-B)
+  device_procedure_list: ['Bench procedures', '标定流程目录'],
+  device_procedure_start: ['Start bench procedure', '启动标定流程'],
+  device_procedure_status: ['Bench procedure status', '标定流程状态'],
+  device_procedure_answer: ['Answer bench prompt', '回答标定提示'],
+  device_procedure_abort: ['Abort bench procedure', '中止标定流程'],
+  device_test_runs: ['Bench reports', '标定报告'],
+  device_test_run: ['Bench report', '标定报告详情'],
   // application
   app_set_language: ['Set language', '切换语言'],
   app_set_workspace: ['Open workspace', '打开工作区'],

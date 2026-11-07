@@ -682,6 +682,77 @@ class RelayClient:
             return {"plan": self.wait_plan(vehicle_id, started["plan"]["id"], timeout)}
         return started
 
+    # ------------------------------------------------------------------ bench procedures (05 §4)
+
+    def procedures(self) -> list[dict]:
+        """The catalogue: ``[{id, title_en, title_zh, steps, est_s}]``."""
+        return self._get("/procedures")["procedures"]
+
+    def procedure_start(
+        self,
+        vehicle_id: str,
+        procedure: str,
+        hover_s: float | None = None,
+        skip: list[str] | None = None,
+        auto_answer: bool = False,
+    ) -> dict:
+        """Start a procedure: full_bench, preflight_quick, motor_check, vibration_check or hover_tune.
+
+        Needs control of the aircraft. ``auto_answer`` (simulators only) answers S6 from the servo outputs.
+        """
+        options: dict[str, Any] = {}
+        if hover_s is not None:
+            options["hover_s"] = hover_s
+        if skip:
+            options["skip"] = skip
+        if auto_answer:
+            options["auto_answer"] = True
+        return self._post(f"/vehicles/{vehicle_id}/procedure", {"procedure": procedure, "options": options})
+
+    def procedure(self, vehicle_id: str) -> dict:
+        """The current or most recent run: steps, the waiting prompt, metrics, findings, suggestions."""
+        return self._get(f"/vehicles/{vehicle_id}/procedure")
+
+    def procedure_answer(
+        self, vehicle_id: str, step: str, answer: str, confirm: str | None = None, value: Any = None
+    ) -> dict:
+        """Answer the waiting prompt of ``step``. Prompts marked ``operator_only`` refuse agents."""
+        body: dict[str, Any] = {"step": step, "answer": answer}
+        if confirm is not None:
+            body["confirm"] = confirm
+        if value is not None:
+            body["value"] = value
+        return self._post(f"/vehicles/{vehicle_id}/procedure/answer", body)
+
+    def procedure_abort(self, vehicle_id: str) -> dict:
+        """Abort the run: motors stop, an airborne aircraft lands."""
+        return self._post(f"/vehicles/{vehicle_id}/procedure/abort")
+
+    def wait_procedure(self, vehicle_id: str, timeout: float = 600.0, waiting: bool = True) -> dict:
+        """Poll until the run ends (or, with ``waiting``, until a prompt waits for an answer)."""
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            view = self.procedure(vehicle_id)
+            if view["state"] not in ("running", "waiting") or (waiting and view["state"] == "waiting"):
+                return view
+            time.sleep(0.5)
+        raise RelayError("timeout", 0, f"the procedure did not finish in {timeout:g} s")
+
+    def test_runs(self, vehicle_id: str | None = None, limit: int = 50) -> list[dict]:
+        """Saved bench reports, newest first (``vehicle_id`` matches the id or the address)."""
+        return self._get("/test-runs", vehicle=vehicle_id, limit=limit)["runs"]
+
+    def test_run(self, run_id: int) -> dict:
+        return self._get(f"/test-runs/{run_id}")
+
+    def test_run_export(self, run_id: int, fmt: str = "md") -> Any:
+        """The report as Markdown text (``fmt="md"``) or as a JSON object."""
+        return self._get(f"/test-runs/{run_id}/export", fmt=fmt)
+
+    # names of 05 §4.4 (the same calls as procedures() and procedure())
+    procedure_list = procedures
+    procedure_status = procedure
+
     # ------------------------------------------------------------------ simulators (app operations)
 
     def add_sims(

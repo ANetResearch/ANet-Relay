@@ -22,6 +22,7 @@ from . import (
     routes_control,
     routes_device,
     routes_fleet,
+    routes_procedures,
     routes_records,
     stream,
 )
@@ -118,5 +119,6 @@ def create_app(
 
     for module in (routes_fleet, routes_control, routes_device, routes_agents, routes_records, routes_app):
         app.include_router(module.router, prefix=API_PREFIX)
+    app.include_router(routes_procedures.router, prefix=API_PREFIX)  # bench procedures (WP-B)
     app.include_router(stream.router, prefix=API_PREFIX)
     return app
