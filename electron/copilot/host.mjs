@@ -178,6 +178,7 @@ export function createCopilotHost({ copilotWindow, mainWindow, relayBase, langua
     const agentKey = (c) => JSON.stringify([c.api, c.baseUrl, c.model, decryptKey(c), c.toolScope]);
     if (agentKey(current) !== agentKey(next)) await dispose();
     copilotWindow.setOpacity(clampOpacity(next.opacity) / 100);
+    emit({ type: "config" }); // the floating window may be open while Settings > Copilot is edited in the main window
     return publicView(next);
   });
 

@@ -58,13 +58,13 @@ export function useCopilotEvents(): void {
     const b = bridge()
     if (!b) return
     const apply = useCopilot.getState().apply
-    const off = b.onEvent((e: CopilotEvent) => apply(e))
-    const offWin = b.onWindowState((s) => useCopilot.getState().setOpen(s.visible))
     const refresh = () => b.getConfig().then((cfg) => useCopilot.getState().setConfig(cfg), () => {})
+    const off = b.onEvent((e: CopilotEvent) => (e.type === 'config' ? void refresh() : apply(e)))
+    const offWin = b.onWindowState((s) => useCopilot.getState().setOpen(s.visible))
     void refresh()
     b.getState().then((s) => useCopilot.setState({ busy: s.busy }), () => {})
     b.getWindowState().then((s) => useCopilot.getState().setOpen(s.visible), () => {})
-    // the endpoint may be changed in the main window's settings while this window stays open
+    // the main process announces saved settings ('config'); focus covers a change made while this page reloaded
     window.addEventListener('focus', refresh)
     return () => {
       off()

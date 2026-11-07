@@ -5,7 +5,8 @@
 Tools are named ``app_*``. Interface actions (language, workspace, selection, view, dialogs, gamepads,
 possession, records, Copilot window, screenshots) are forwarded to the open Relay window through
 ``POST /app/ui`` (04 §3); the rest wrap the existing fleet, network, settings, alert and record routes.
-Calls marked operator-only need the operator token (--operator-token or RELAY_OPERATOR_TOKEN).
+Fleet, network, settings and alert calls are app operations: an agent session may run them while
+agents_app_control is on (the default); the operator token (--operator-token) is never required for them.
 """
 
 from __future__ import annotations
@@ -36,13 +37,14 @@ INSTRUCTIONS = (
     "not answer within 5 s, ui_action_failed (409) when the action itself is refused, and "
     "app_control_disabled (403) when the operator switched off agent control of the app in Settings. "
     "Every action is visible to the person: a notice 'session <name> ...' appears in the window. "
-    "Start with app_status and app_ui_state. Tools marked operator-only need the operator token. "
+    "Start with app_status and app_ui_state. Fleet, network, settings and alert tools are app operations: "
+    "they work while agents_app_control is on and fail with app_control_disabled (403) when it is off. "
     "Safety: app_possess takes manual control of an aircraft as the operator and displaces agents; use it "
     "only when asked. app_stop_all cuts the motors of every aircraft. app_remove_vehicle and the sim "
     "tools change the fleet. Flight and device control live in the anet-relay and anet-relay-device servers."
 )
 
-OPERATOR = "Operator-only: needs the operator token. "
+APP = "App operation (needs agents_app_control). "
 LANG = {"type": "string", "enum": ["en", "zh"], "description": "en English, zh Simplified Chinese"}
 
 
@@ -73,9 +75,7 @@ def ui_tool(
 def _ui_call(r: RelayClient, action: str, args: dict) -> dict:
     """Like ``RelayClient.ui`` but keeps explicit nulls (select_vehicle with null clears the selection)."""
     body = {"action": action, "args": args}
-    if r.session_id:
-        return r.request("POST", "/app/ui", body, auth="session")
-    return r.request("POST", "/app/ui", body, auth="operator")
+    return r.request("POST", "/app/ui", body, auth="session")
 
 
 def _screenshot(r: RelayClient, a: dict):
@@ -88,7 +88,7 @@ def _screenshot(r: RelayClient, a: dict):
 
 
 def _settings_set(r: RelayClient, a: dict) -> dict:
-    return r.request("PUT", "/settings", a["settings"], auth="operator")
+    return r.request("PUT", "/settings", a["settings"])
 
 
 def _export(r: RelayClient, a: dict) -> Any:
@@ -292,7 +292,7 @@ def build_tools() -> list[Tool]:
         ),
         http_tool(
             "app_scan_network",
-            OPERATOR + "Scan the local networks for Relay-compatible aircraft and bridges now. Found "
+            APP + "Scan the local networks for Relay-compatible aircraft and bridges now. Found "
             "aircraft join the fleet; follow progress in app_status (scan) and relay_events.",
             "POST",
             "/discover",
@@ -304,11 +304,10 @@ def build_tools() -> list[Tool]:
                 },
                 "http_port": {"type": "integer", "minimum": 1, "maximum": 65535, "default": 80},
             },
-            auth="operator",
         ),
         http_tool(
             "app_connect_address",
-            OPERATOR + "Connect an aircraft by host name or IP address.",
+            APP + "Connect an aircraft by host name or IP address.",
             "POST",
             "/vehicles",
             {
@@ -316,21 +315,19 @@ def build_tools() -> list[Tool]:
                 "port": {"type": "integer", "minimum": 1, "maximum": 65535},
             },
             ["host"],
-            auth="operator",
         ),
         http_tool(
             "app_remove_vehicle",
-            OPERATOR + "Remove an aircraft from the fleet (its link is closed; simulators are deleted).",
+            APP + "Remove an aircraft from the fleet (its link is closed; simulators are deleted).",
             "DELETE",
             "/vehicles/{vehicle}",
             {"vehicle": VID},
             ["vehicle"],
-            auth="operator",
             destructive=True,
         ),
         http_tool(
             "app_sims_add",
-            OPERATOR + "Add simulated aircraft (1..8).",
+            APP + "Add simulated aircraft (1..8).",
             "POST",
             "/sims",
             {
@@ -342,11 +339,10 @@ def build_tools() -> list[Tool]:
                     "description": "false: no position estimate (barometer only)",
                 },
             },
-            auth="operator",
         ),
         http_tool(
             "app_sims_remove",
-            OPERATOR + "Remove the given simulators, or all of them when `id` is omitted.",
+            APP + "Remove the given simulators, or all of them when `id` is omitted.",
             "DELETE",
             "/sims",
             {
@@ -356,17 +352,15 @@ def build_tools() -> list[Tool]:
                     "description": "simulator ids, e.g. sim-2",
                 }
             },
-            auth="operator",
             destructive=True,
         ),
         http_tool(
             "app_sim_reset",
-            OPERATOR + "Reset a simulator to the ground at its start position.",
+            APP + "Reset a simulator to the ground at its start position.",
             "POST",
             "/sims/{vehicle}/reset",
             {"vehicle": VID},
             ["vehicle"],
-            auth="operator",
         ),
         http_tool(
             "app_settings_get",
@@ -377,9 +371,9 @@ def build_tools() -> list[Tool]:
         ),
         schema_tool(
             "app_settings_set",
-            OPERATOR + "Update application settings; send only the keys to change (see app_settings_get "
-            "for names and types). Setting agents_app_control to false locks agent sessions out of the "
-            "interface tools, and only the operator can undo it.",
+            APP + "Update application settings; send only the keys to change (see app_settings_get "
+            "for names and types). agents_app_control is granted and withdrawn by the operator in the "
+            "window only; a change to it from an agent fails with operator_required.",
             {"settings": {"type": "object", "minProperties": 1, "description": "settings keys to change"}},
             ["settings"],
             handler=_settings_set,
@@ -389,20 +383,18 @@ def build_tools() -> list[Tool]:
         ),
         http_tool(
             "app_alert_ack",
-            OPERATOR + "Acknowledge one alert.",
+            APP + "Acknowledge one alert.",
             "POST",
             "/alerts/{alert_id}/ack",
             {"alert_id": {"type": "string", "description": "id from app_alerts_list"}},
             ["alert_id"],
-            auth="operator",
         ),
         http_tool(
             "app_stop_all",
-            OPERATOR + "EMERGENCY STOP FOR THE WHOLE FLEET: throttle to zero and disarm every aircraft. "
+            APP + "EMERGENCY STOP FOR THE WHOLE FLEET: throttle to zero and disarm every aircraft. "
             "Airborne aircraft fall. Only in a genuine emergency.",
             "POST",
             "/stop-all",
-            auth="operator",
             destructive=True,
         ),
         http_tool(

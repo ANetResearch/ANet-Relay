@@ -64,6 +64,7 @@ export type CopilotEvent =
   | { type: 'approval'; id: string; toolCallId: string; tool: string; vehicle: string; label: string; request: Record<string, unknown> }
   | { type: 'approval_closed'; id: string; approved: boolean; reason?: string }
   | { type: 'error'; error: string }
+  | { type: 'config' }
 
 export type CopilotWindowAction = 'show' | 'hide' | 'toggle'
 

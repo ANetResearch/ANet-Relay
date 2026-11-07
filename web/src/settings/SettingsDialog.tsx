@@ -36,6 +36,7 @@ interface BackendSettings {
   possess_mode: 'auto' | 'stabilize' | 'althold' | string
   airborne_alert: boolean
   auto_params: boolean
+  agents_app_control: boolean
   retention_days: number
   listen_port: number
   bridge_port: number
@@ -243,6 +244,9 @@ function Safety({ s, save }: { s: BackendSettings; save(p: Partial<BackendSettin
       </Row>
       <Row label={t('set.airborneAlert')}>
         <Switch checked={s.airborne_alert} onCheckedChange={(v) => void save({ airborne_alert: v })} aria-label={t('set.airborneAlert')} />
+      </Row>
+      <Row label={t('set.agentsAppControl')} hint={t('set.agentsAppControlHint')}>
+        <Switch checked={s.agents_app_control} onCheckedChange={(v) => void save({ agents_app_control: v })} aria-label={t('set.agentsAppControl')} data-agents-app-control="" />
       </Row>
       <Row label={t('set.stickTimeout')} hint={t('set.stickTimeoutHint')}>
         <ReadOnly value={`${s.stick_timeout_s.toFixed(1)} s`} />

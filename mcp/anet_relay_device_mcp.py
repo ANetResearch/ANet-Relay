@@ -210,8 +210,8 @@ def build_tools() -> list[Tool]:
         ),
         _t(
             "device_param_set",
-            "Write one parameter. Operator-only: needs the operator token (--operator-token or "
-            "RELAY_OPERATOR_TOKEN). confirm must equal the parameter name.",
+            "Write one parameter. Needs control of the aircraft (device_claim first). confirm must equal "
+            "the parameter name. Read the old value first and report it.",
             "POST",
             "/vehicles/{vehicle}/params",
             {
@@ -220,7 +220,6 @@ def build_tools() -> list[Tool]:
                 "confirm": {"type": "string", "description": "must equal `name`"},
             },
             ["name", "value", "confirm"],
-            auth="operator",
         ),
         _t(
             "device_params_refresh",

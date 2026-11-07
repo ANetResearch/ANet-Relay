@@ -346,15 +346,12 @@ def test_device_skills_and_derived(stub):
     assert msgs["messages"]["ATTITUDE"] == {"hz": 10, "age_s": 0.1, "count": 5}
 
 
-def test_device_param_set_needs_operator_token(stub):
+def test_device_param_set_runs_as_the_session(stub):
     server = make(device_mcp, stub)
     args = {"vehicle": "sim-1", "name": "A", "value": 1, "confirm": "A"}
-    result = call(server, "device_param_set", args)
-    assert result["isError"] is True and text(result)["error"] == "operator_required"
-    assert not stub.requests
-    server = make(device_mcp, stub, token="op")
     assert call(server, "device_param_set", args)["isError"] is False
-    assert last(stub)["operator"] == "op" and last(stub)["session"] is None
+    req = last(stub)
+    assert req["path"] == "/vehicles/sim-1/params" and req["session"] == "tok1" and req["operator"] is None
 
 
 def test_errors_map_and_session_reopens(stub):
@@ -433,7 +430,7 @@ APP_REST = [
         "POST",
         "/discover",
         {"networks": ["10.0.0.0/24"]},
-        "op",
+        None,
     ),
     (
         "app_connect_address",
@@ -441,19 +438,19 @@ APP_REST = [
         "POST",
         "/vehicles",
         {"host": "10.0.0.5", "port": 14550},
-        "op",
+        None,
     ),
-    ("app_remove_vehicle", {"vehicle": "real-1"}, "DELETE", "/vehicles/real-1", None, "op"),
+    ("app_remove_vehicle", {"vehicle": "real-1"}, "DELETE", "/vehicles/real-1", None, None),
     (
         "app_sims_add",
         {"count": 2, "autopilot": "px4"},
         "POST",
         "/sims",
         {"count": 2, "autopilot": "px4"},
-        "op",
+        None,
     ),
-    ("app_sims_remove", {"id": ["sim-2", "sim-3"]}, "DELETE", "/sims", None, "op"),
-    ("app_sim_reset", {"vehicle": "sim-1"}, "POST", "/sims/sim-1/reset", {}, "op"),
+    ("app_sims_remove", {"id": ["sim-2", "sim-3"]}, "DELETE", "/sims", None, None),
+    ("app_sim_reset", {"vehicle": "sim-1"}, "POST", "/sims/sim-1/reset", {}, None),
     ("app_settings_get", {}, "GET", "/settings", None, None),
     (
         "app_settings_set",
@@ -461,11 +458,11 @@ APP_REST = [
         "PUT",
         "/settings",
         {"agents_app_control": False},
-        "op",
+        None,
     ),
     ("app_alerts_list", {}, "GET", "/alerts", None, None),
-    ("app_alert_ack", {"alert_id": "a1"}, "POST", "/alerts/a1/ack", {}, "op"),
-    ("app_stop_all", {}, "POST", "/stop-all", {}, "op"),
+    ("app_alert_ack", {"alert_id": "a1"}, "POST", "/alerts/a1/ack", {}, None),
+    ("app_stop_all", {}, "POST", "/stop-all", {}, None),
     ("app_network", {}, "GET", "/network", None, None),
     ("app_records_list", {"limit": 5}, "GET", "/history/sessions", None, None),
     ("app_record_detail", {"session_id": 3}, "GET", "/history/sessions/3", None, None),

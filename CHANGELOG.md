@@ -5,6 +5,76 @@ All notable changes to ANet Relay are documented in this file. The format follow
 [Semantic Versioning](https://semver.org/). Each release section is published as the
 GitHub Release notes for its tag.
 
+## [0.2.1] - 2026-11-07
+
+A device-level interface down to single motors, application control for agents,
+re-fly from past flights, three MCP servers, Copilot in a floating window, and the
+first signed and notarized macOS build.
+
+### Added
+
+- Device-level API: device overview (motors and outputs, RC, frame, sensors,
+  estimator, vibration, home, message rates), the newest frame of any MAVLink
+  message, parameters read by name, a catalogue of raw MAVLink commands, single-
+  and all-motor tests, actuator outputs, RC channel override, message intervals,
+  reboot, sensor calibration, home and flight termination. Hazardous operations
+  need a confirm word (`MOTOR`, `FORCE`, `REBOOT`, `CALIBRATE`, `TERMINATE`) on a
+  real aircraft; termination needs it on every aircraft.
+- Skills `sticks` (a timed stick hold), `attitude` (`SET_ATTITUDE_TARGET`) and
+  `velocity`, also usable as plan steps.
+- Application control: `GET /app`, `/app/ui`, `/app/gamepads`, `/app/actions` and
+  `POST /app/ui` run interface actions in the open window (language, workspace,
+  selection, view, inspector, dialogs, preferences, controller bindings,
+  possession, records and replay, the Copilot window, screenshots). Agent sessions
+  may also scan the network, connect and remove aircraft, manage simulators,
+  change settings, acknowledge alerts and stop all while the `agents_app_control`
+  setting is on (the default); only the operator grants or withdraws it.
+- Re-fly: every record now stores its sticks and their source. `GET
+  /history/sessions/{id}/refly` lists what a flight offers and `POST
+  /vehicles/{id}/refly` flies it again as its plan, its track or its recorded
+  sticks.
+- Three MCP servers: `anet-relay` (flight, 20 tools), `anet-relay-device` (29
+  tools) and `anet-relay-app` (41 tools), with argument checks before a call
+  reaches Relay. The Python SDK covers every new endpoint; new example
+  `device_tour.py`.
+- Copilot runs in its own floating window: always on top, not modal, placed
+  anywhere and remembered, with opacity and a tool scope (`flight`,
+  `flight+device`, `all`) in Settings → Copilot. Device writes on a real aircraft
+  need the operator's approval like motion commands.
+- macOS builds are signed with a Developer ID (Hardened Runtime), notarized and
+  stapled, and ship as dmg and zip.
+
+### Fixed
+
+- The preflight item "Autopilot accepts Relay stick input" no longer stays on
+  "waiting for parameters" when the parameter table never delivers a parameter:
+  essential parameters are read by name, a parameter that cannot be read is
+  reported as a warning, and parameter frames from a MAVLink bridge are ignored.
+- A PX4 aircraft that has landed takes off again from a skill, plan or re-fly
+  instead of being refused in LAND.
+- The Copilot window picks up endpoint settings saved in the main window at once.
+
+### Downloads
+
+| Platform | File |
+|---|---|
+| macOS (Apple silicon) | `ANet-Relay-0.2.1-mac-arm64.dmg`, `ANet-Relay-0.2.1-mac-arm64.zip` |
+| macOS (Intel) | `ANet-Relay-0.2.1-mac-x64.dmg`, `ANet-Relay-0.2.1-mac-x64.zip` |
+| Linux x64 | `ANet-Relay-0.2.1-linux-x64.AppImage`, `ANet-Relay-0.2.1-linux-x64.tar.gz` |
+
+Verify downloads against `SHA256SUMS.txt`. The macOS build is signed and
+notarized: drag it to Applications and open it.
+
+### Known limitations
+
+- Motor tests use `MAV_CMD_ACTUATOR_TEST` on PX4 and `MAV_CMD_DO_MOTOR_TEST` on
+  ArduPilot, and the motor number follows each autopilot's own order. This has been
+  verified on simulators; on real hardware, check the order with the propellers
+  off before relying on it.
+- Actuator outputs 1 to the motor count are treated as motors (`MOTOR`, disarmed
+  aircraft). ArduPilot may ignore `DO_SET_SERVO` on an output its mixer drives as
+  a motor; use the motor test for those outputs.
+
 ## [0.2.0] - 2026-11-07
 
 Flight actions and sequences that work without a position source, flight health
@@ -130,5 +200,6 @@ xattr -dr com.apple.quarantine "/Applications/ANet Relay.app"
 - Stick timing has been verified on simulators and fake aircraft; check stick
   directions with the propellers removed before the first flight of each aircraft.
 
+[0.2.1]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.2.1
 [0.2.0]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.1.0

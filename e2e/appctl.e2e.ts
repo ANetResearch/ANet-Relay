@@ -58,9 +58,22 @@ test('app control: an agent session operates the window through /app/ui', async 
   await expect(page.locator('[data-copilot-toggle][aria-pressed="true"]')).toBeVisible()
   expect((await ui<{ open: boolean }>('toggle_copilot', { open: false })).data.open).toBe(false)
 
-  // an agent without permission is refused when the operator turned agent control off
-  await rest(r, 'PUT', '/settings', { agents_app_control: false })
-  const refused = await fetch(`${r.apiBase}/app/ui`, { method: 'POST', headers: { 'content-type': 'application/json', 'X-Relay-Session': session.token }, body: JSON.stringify({ action: 'get_state', args: {} }) })
+  // app operations beyond the window: an agent session adds a simulator while app control is on
+  const added = await rest<{ added: string[] }>(r, 'POST', '/sims', { count: 1 }, agent)
+  expect(added.added).toHaveLength(1)
+
+  // the operator turns agent control off in Settings > Safety; the agent is refused, and cannot turn it back on
+  await ui('open_settings', { section: 'safety' })
+  await page.locator('[data-agents-app-control]').click()
+  await until(async () => (await rest<{ agents_app_control: boolean }>(r, 'GET', '/settings', undefined, 'none')).agents_app_control === false, 'app control off', 5000)
+  const post = (path: string, body: unknown, method = 'POST') =>
+    fetch(`${r.apiBase}${path}`, { method, headers: { 'content-type': 'application/json', 'X-Relay-Session': session.token }, body: JSON.stringify(body) })
+  const refused = await post('/app/ui', { action: 'get_state', args: {} })
   expect(refused.status).toBe(403)
+  expect(JSON.stringify(await refused.json())).toContain('app_control_disabled')
+  expect((await post('/sims', { count: 1 })).status).toBe(403)
+  const regrant = await post('/settings', { agents_app_control: true }, 'PUT')
+  expect(regrant.status).toBe(403)
+  await page.keyboard.press('Escape')
   await rest(r, 'PUT', '/settings', { agents_app_control: true })
 })

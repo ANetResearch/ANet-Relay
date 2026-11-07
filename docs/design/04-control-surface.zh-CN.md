@@ -105,6 +105,8 @@
 
 后端已有接口（扫描、连接、移除、模拟机、设置、告警、全部急停、网络、记录、航线、配网）由应用级 MCP 直接封装，无需新路径；`PUT /settings` 增加 `agents_app_control`。
 
+这些写操作属于"应用操作"权限级别（依赖 `require_app_control`）：操作员，或 `agents_app_control` 开启时的任意会话；关闭时会话得到 403 `app_control_disabled`。`agents_app_control` 本身只能由操作员修改，会话提交与当前值不同的取值得到 403 `operator_required`（原样回写当前值不报错，便于整体读改写）。REST 附身与释放、杆量方向与桨叶确认仍为操作员专属；写参数（`POST /vehicles/{id}/params`）改为控制者级别：认领该飞机的会话或操作员。
+
 事件：`app_command`（`data: {action, args, by}`），`refly_started`、`refly_finished`、`refly_failed`。
 
 ## 4. 再飞（`relay/refly.py`）

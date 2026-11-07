@@ -28,6 +28,7 @@ const COPILOT_EVENTS = new Set([
   "approval",
   "approval_closed",
   "error",
+  "config",
 ]);
 const validCopilot = (p) => p !== null && typeof p === "object" && COPILOT_EVENTS.has(p.type);
 const validMenu = (p) => p !== null && typeof p === "object" && MENU_ACTIONS.has(p.action);

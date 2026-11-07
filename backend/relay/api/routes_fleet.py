@@ -24,7 +24,7 @@ from ..config import (
 from ..errors import RelayError
 from ..mav import modes
 from . import schemas
-from .deps import require_operator, service
+from .deps import caller, require_app_control, service
 
 router = APIRouter()
 ERRORS = {s: {"model": schemas.ErrorBody} for s in (400, 401, 403, 404, 409, 429, 503)}
@@ -210,7 +210,9 @@ def network(request: Request) -> dict[str, Any]:
     return service(request).network()
 
 
-@router.post("/network/retry", tags=["network"], dependencies=[Depends(require_operator)], responses=ERRORS)
+@router.post(
+    "/network/retry", tags=["network"], dependencies=[Depends(require_app_control)], responses=ERRORS
+)
 def network_retry(request: Request) -> dict[str, Any]:
     """Retry binding the UDP listen port (R-05)."""
     return service(request).retry_listen()
@@ -222,7 +224,7 @@ def courses(request: Request) -> dict[str, Any]:
 
 
 @router.put(
-    "/courses/{course_id}", tags=["courses"], dependencies=[Depends(require_operator)], responses=ERRORS
+    "/courses/{course_id}", tags=["courses"], dependencies=[Depends(require_app_control)], responses=ERRORS
 )
 def put_course(request: Request, course_id: str, body: schemas.CourseBody) -> dict[str, Any]:
     return service(request).put_course(course_id, body.model_dump())
@@ -234,7 +236,7 @@ def alerts(request: Request) -> dict[str, Any]:
 
 
 @router.post(
-    "/alerts/{alert_id}/ack", tags=["alerts"], dependencies=[Depends(require_operator)], responses=ERRORS
+    "/alerts/{alert_id}/ack", tags=["alerts"], dependencies=[Depends(require_app_control)], responses=ERRORS
 )
 def ack_alert(request: Request, alert_id: str) -> dict[str, Any]:
     return service(request).ack_alert(alert_id)
@@ -245,8 +247,12 @@ def get_settings(request: Request) -> dict[str, Any]:
     return service(request).get_settings()
 
 
-@router.put("/settings", tags=["settings"], dependencies=[Depends(require_operator)], responses=ERRORS)
+@router.put("/settings", tags=["settings"], dependencies=[Depends(require_app_control)], responses=ERRORS)
 def put_settings(request: Request, body: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(body, dict):
         raise RelayError("invalid_request", detail={"reason": "body must be an object"})
-    return service(request).update_settings(body)
+    svc = service(request)
+    grant = body.get("agents_app_control")
+    if grant is not None and grant != svc.settings.agents_app_control and not caller(request).operator:
+        raise RelayError("operator_required")  # only the person at the window grants or withdraws app control
+    return svc.update_settings(body)

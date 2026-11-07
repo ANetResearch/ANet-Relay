@@ -69,10 +69,10 @@ def test_operator_auth(client):
     assert (
         error(client.post("/api/v1/sims", headers={"X-Relay-Operator": "nope"})) == "invalid_operator_token"
     )
-    headers, _ = session(client)
-    resp = client.post("/api/v1/sims", headers=headers)
-    assert resp.status_code == 403 and error(resp) == "operator_required"
     assert client.post("/api/v1/sims", headers=OP, json={"count": 1}).json() == {"added": ["sim-1"]}
+    headers, _ = session(client)
+    resp = client.post("/api/v1/vehicles/sim-1/calibration", headers=headers, json={})
+    assert resp.status_code == 403 and error(resp) == "operator_required"
 
 
 def test_session_auth_and_claim(client):

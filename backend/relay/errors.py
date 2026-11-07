@@ -44,8 +44,8 @@ CATALOGUE: dict[str, tuple[int, str, str]] = {
     ),
     "app_control_disabled": (
         403,
-        "Agent control of the Relay window is turned off in Settings.",
-        "设置中已关闭智能体对 Relay 窗口的控制。",
+        "Agent control of the Relay application is turned off in Settings.",
+        "设置中已关闭智能体对 Relay 应用的控制。",
     ),
     "operator_required": (
         403,

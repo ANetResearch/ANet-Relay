@@ -8,33 +8,36 @@ from fastapi import APIRouter, Depends, Query, Request
 
 from ..errors import err
 from . import schemas
-from .deps import actor, require_operator, service
+from .deps import actor, require_app_control, require_operator, service
 
 router = APIRouter()
 ERRORS = {s: {"model": schemas.ErrorBody} for s in (400, 401, 403, 404, 409, 429, 503)}
 OPERATOR = [Depends(require_operator)]
+# Fleet and network operations an agent may run when the operator allows app control (04 §3). Possession and
+# the operator's own attestations (stick directions, propellers) stay with the person at the window.
+APP = [Depends(require_app_control)]
 
 
 # ---------------------------------------------------------------------------- fleet management
 
 
-@router.post("/discover", tags=["network"], dependencies=OPERATOR, responses=ERRORS)
+@router.post("/discover", tags=["network"], dependencies=APP, responses=ERRORS)
 def discover(request: Request, body: schemas.DiscoverBody | None = None) -> dict[str, Any]:
     body = body or schemas.DiscoverBody()
     return service(request).discover(body.networks, body.http_port)
 
 
-@router.post("/vehicles", tags=["fleet"], dependencies=OPERATOR, responses=ERRORS)
+@router.post("/vehicles", tags=["fleet"], dependencies=APP, responses=ERRORS)
 def connect(request: Request, body: schemas.ConnectBody) -> dict[str, Any]:
     return service(request).connect(body.host, body.port)
 
 
-@router.delete("/vehicles/{vid}", tags=["fleet"], dependencies=OPERATOR, responses=ERRORS)
+@router.delete("/vehicles/{vid}", tags=["fleet"], dependencies=APP, responses=ERRORS)
 def remove(request: Request, vid: str) -> dict[str, Any]:
     return service(request).remove_vehicle(vid)
 
 
-@router.post("/vehicles/{vid}/label", tags=["fleet"], dependencies=OPERATOR, responses=ERRORS)
+@router.post("/vehicles/{vid}/label", tags=["fleet"], dependencies=APP, responses=ERRORS)
 def label(request: Request, vid: str, body: schemas.LabelBody) -> dict[str, Any]:
     return service(request).set_label(vid, body.label)
 
@@ -49,18 +52,18 @@ def confirm(request: Request, vid: str, body: schemas.ConfirmBody) -> dict[str, 
     return service(request).confirm(vid, body.item)
 
 
-@router.post("/sims", tags=["sims"], dependencies=OPERATOR, responses=ERRORS)
+@router.post("/sims", tags=["sims"], dependencies=APP, responses=ERRORS)
 def add_sims(request: Request, body: schemas.SimsBody | None = None) -> dict[str, Any]:
     body = body or schemas.SimsBody()
     return {"added": service(request).add_sims(body.count, body.autopilot, body.position)}
 
 
-@router.delete("/sims", tags=["sims"], dependencies=OPERATOR, responses=ERRORS)
+@router.delete("/sims", tags=["sims"], dependencies=APP, responses=ERRORS)
 def remove_sims(request: Request, id: list[str] | None = Query(None)) -> dict[str, Any]:
     return {"removed": service(request).remove_sims(id)}
 
 
-@router.post("/sims/{vid}/reset", tags=["sims"], dependencies=OPERATOR, responses=ERRORS)
+@router.post("/sims/{vid}/reset", tags=["sims"], dependencies=APP, responses=ERRORS)
 def reset_sim(request: Request, vid: str) -> dict[str, Any]:
     return service(request).reset_sim(vid)
 
@@ -159,7 +162,7 @@ def stop(request: Request, vid: str) -> dict[str, Any]:
     return service(request).stop(vid, actor(request, "control"))
 
 
-@router.post("/stop-all", tags=["control"], dependencies=OPERATOR, responses=ERRORS)
+@router.post("/stop-all", tags=["control"], dependencies=APP, responses=ERRORS)
 def stop_all(request: Request) -> dict[str, Any]:
     return service(request).stop_all()
 
@@ -169,9 +172,12 @@ def params_refresh(request: Request, vid: str) -> dict[str, Any]:
     return service(request).params_refresh(vid, actor(request, "other"))
 
 
-@router.post("/vehicles/{vid}/params", tags=["params"], dependencies=OPERATOR, responses=ERRORS)
+@router.post("/vehicles/{vid}/params", tags=["params"], responses=ERRORS)
 def set_param(request: Request, vid: str, body: schemas.ParamBody) -> dict[str, Any]:
-    return service(request).set_param(vid, body.name, body.value, body.confirm)
+    """Write one parameter: the operator, or the session that controls the aircraft (04 §2)."""
+    return service(request).set_param(
+        vid, body.name, body.value, body.confirm, actor=actor(request, "control")
+    )
 
 
 @router.post("/vehicles/{vid}/motor-test", tags=["control"], dependencies=OPERATOR, responses=ERRORS)

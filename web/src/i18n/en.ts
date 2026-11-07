@@ -496,6 +496,8 @@ export const en = {
   'set.possessMode': 'Possession mode',
   'set.possessModeAuto': 'Altitude hold when available, otherwise stabilise',
   'set.airborneAlert': 'Alert when an aircraft is airborne with no controller',
+  'set.agentsAppControl': 'Allow agents to operate Relay',
+  'set.agentsAppControlHint': 'Agent sessions may change the interface, scan the network, manage aircraft and simulators, change settings and stop all. Possession and preflight confirmations stay with the operator.',
   'set.stickTimeout': 'Stick timeout',
   'set.chaseOnCourse': 'Switch to chase view when a course starts',
   'set.listenPort': 'Listen port',

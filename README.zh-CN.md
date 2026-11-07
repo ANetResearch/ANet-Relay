@@ -36,8 +36,10 @@ ANet Relay 是面向局域网 Wi-Fi 小型无人机机群的桌面地面站，�
 | 附身 | 用 DualSense 或标准手柄、键盘或屏幕摇杆接管任意一架；多个手柄可同时飞多架 | 可用 |
 | 接力给智能体 | 附身始终优先，智能体的认领被挂起；松手后认领恢复，智能体收到 `relay_handback` | 可用 |
 | 飞行动作与动作序列 | 在检查器中起飞、悬停、前后左右与升降平移、转向、降落，或编排成动作序列逐步执行；无定位源时在定高模式下也可使用（平移距离为开环估算） | 可用 |
-| 智能体接口 | 本机 REST 与 WebSocket 接口：会话、认领、杆量、技能（起飞、降落、悬停、平移、转向、返航、前往）、动作序列与事件；Python SDK；面向大语言模型的 MCP 服务器 | 可用 |
-| Copilot | 基于 [pi](https://github.com/earendil-works/pi) 的内置对话智能体：用自然语言查询状态、起飞、平移、执行与规划动作序列；可配置任意 OpenAI 或 Anthropic 兼容的端点与 Key；真机的每个运动指令都需操作员批准 | 可用 |
+| 智能体接口 | 本机 REST 与 WebSocket 接口：会话、认领、杆量、技能（起飞、降落、悬停、平移、转向、返航、前往、姿态、速度）、动作序列、按历史飞行再飞与事件；Python SDK；飞行、设备级、应用控制三套 MCP 服务 | 可用 |
+| 设备级接口 | 细到单个电机与输出通道：设备总览、任意 MAVLink 消息、参数读写、原始指令目录、单电机测试、执行器、遥控通道覆盖、消息频率、重启、校准、home、飞行终止；危险操作需确认词 | 可用 |
+| 应用控制 | 智能体可操作 Relay 本身：查看手柄与应用状态、切换中英文与工作区、选择飞机、扫描网络、管理机群与模拟机、修改设置、截图；可在设置中关闭 | 可用 |
+| Copilot | 基于 [pi](https://github.com/earendil-works/pi) 的内置对话智能体，独立浮动窗口始终置顶、可拖到任意位置且不阻挡其他窗口；用自然语言完成飞行、设备级与应用操作；可配置任意 OpenAI 或 Anthropic 兼容的端点与 Key；真机的每个运动指令与设备写入都需操作员批准 | 可用 |
 | 飞行健康 | 飞行中滚动诊断：姿态振荡、松杆倾斜、航向漂移、定高稳定性、悬停油门、电机均衡、振动、电池压降、链路与摇杆数据流，并给出可能原因与处理方法 | 可用 |
 | 模拟器 | 最多 8 架模拟机，行为与 ArduPilot 飞机一致，含动力学与电池模型；通过接口看与真机完全相同 | 可用 |
 | 穿环航线 | 虚拟环序列（围网环线、绕桩、爬升），含计时、分段与追尾视角；模拟机可飞，具备本地位置估计的真机也可飞 | 可用 |
@@ -53,15 +55,11 @@ ANet Relay 是面向局域网 Wi-Fi 小型无人机机群的桌面地面站，�
 
 | 平台 | 文件 |
 |---|---|
-| macOS，Apple 芯片 | `ANet-Relay-<版本>-mac-arm64.zip` |
-| macOS，Intel | `ANet-Relay-<版本>-mac-x64.zip` |
+| macOS，Apple 芯片 | `ANet-Relay-<版本>-mac-arm64.dmg` 或 `.zip` |
+| macOS，Intel | `ANet-Relay-<版本>-mac-x64.dmg` 或 `.zip` |
 | Linux x64 | `ANet-Relay-<版本>-linux-x64.AppImage` 或 `.tar.gz` |
 
-请用 `SHA256SUMS.txt` 校验下载文件。macOS 版本为 ad-hoc 签名，不是 Developer ID 签名：首次启动前把应用移到“应用程序”，并移除隔离属性。
-
-```sh
-xattr -dr com.apple.quarantine "/Applications/ANet Relay.app"
-```
+请用 `SHA256SUMS.txt` 校验下载文件。macOS 版本使用 Developer ID 签名并经 Apple 公证，下载后拖入“应用程序”即可直接打开。
 
 应用自带后端，运行时无需安装 Python 或 Node。
 
@@ -119,12 +117,14 @@ with RelayClient() as relay:                         # http://127.0.0.1:8765
     relay.land("sim-1")
 ```
 
-**Copilot。** 桌面应用内置一个智能体：点击 **Copilot** 按钮或按 `⌘J` / `Ctrl+J` 打开，在 **设置 → Copilot** 中填写端点、模型与 API Key，然后直接提出要求，例如“起飞到 1 米，悬停，前进 1 米再退回，右转 45° 后降落”。Copilot 与其他智能体一样通过会话、认领和技能接口操作，从不发送原始杆量；对真机的每个运动指令都会先显示审批卡片。Key 使用系统钥匙串加密保存。
+**Copilot。** 桌面应用内置一个智能体：点击 **Copilot** 按钮或按 `⌘J` / `Ctrl+J` 打开，在 **设置 → Copilot** 中填写端点、模型与 API Key，然后直接提出要求，例如“起飞到 1 米，悬停，前进 1 米再退回，右转 45° 后降落”。Copilot 是独立的浮动窗口：始终位于其他应用之上，可拖到屏幕任意位置，显示期间仍可正常操作主窗口与其他应用。它与其他智能体一样通过会话、认领和接口操作，可按设置使用飞行、设备级与应用控制三组工具；对真机的每个运动指令与设备写入都会先显示审批卡片。Key 使用系统钥匙串加密保存。
 
 大语言模型通过 MCP 接入：
 
 ```sh
-claude mcp add anet-relay -- python3 /path/to/ANet-Relay/mcp/anet_relay_mcp.py --name claude-code
+claude mcp add anet-relay -- python3 /path/to/ANet-Relay/mcp/anet_relay_mcp.py --name claude-code                     # 飞行
+claude mcp add anet-relay-device -- python3 /path/to/ANet-Relay/mcp/anet_relay_device_mcp.py --name claude-code-device  # 设备级
+claude mcp add anet-relay-app -- python3 /path/to/ANet-Relay/mcp/anet_relay_app_mcp.py --name claude-code-app           # 应用控制
 ```
 
 | 接口 | 地址 |
@@ -132,8 +132,8 @@ claude mcp add anet-relay -- python3 /path/to/ANet-Relay/mcp/anet_relay_mcp.py -
 | REST | `http://127.0.0.1:8765/api/v1`（取 8765 到 8775 中第一个空闲端口） |
 | WebSocket | `ws://127.0.0.1:8765/api/v1/stream` |
 | OpenAPI | `http://127.0.0.1:8765/openapi.json`，交互式文档在 `/docs` |
-| MCP | `mcp/anet_relay_mcp.py`，stdio，18 个工具 |
-| Python SDK | `sdk/python/anet_relay_client.py` 与五个示例 |
+| MCP | stdio：`mcp/anet_relay_mcp.py`（飞行，20 个工具）、`mcp/anet_relay_device_mcp.py`（设备级，29 个）、`mcp/anet_relay_app_mcp.py`（应用控制，41 个） |
+| Python SDK | `sdk/python/anet_relay_client.py` 与六个示例 |
 
 接口只监听本机回环地址。智能体用同一组调用控制模拟机和真机；真机另需操作员完成起飞前步骤，并传入 `confirm: "ARM"`。
 

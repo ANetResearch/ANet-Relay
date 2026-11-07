@@ -2,7 +2,7 @@
 
 [English](agent-api.md) · 简体中文
 
-ANet Relay 把它所管理的机群开放给外部程序：脚本、自主智能体与大语言模型。本文说明控制模型、REST 与 WebSocket 接口、Python SDK 与 MCP 服务。每个接口与数据模型的完整参考由运行中的后端生成，地址为 `http://127.0.0.1:8765/docs`（OpenAPI：`/openapi.json`）。
+ANet Relay 把它所管理的机群开放给外部程序：脚本、自主智能体与大语言模型。本文说明控制模型、REST 与 WebSocket 接口（飞行、设备级、应用控制三个层面）、Python SDK 与三套 MCP 服务。每个接口与数据模型的完整参考由运行中的后端生成，地址为 `http://127.0.0.1:8765/docs`（OpenAPI：`/openapi.json`）。
 
 > **安全提示**：针对模拟机编写的代码可以不加修改地用于真机，区别只在飞机 ID。真机只能在四周有阻拦网、地面铺有缓冲垫的场地内飞行，且 Relay 窗口前必须有操作员，随时可以附身接管或急停。
 
@@ -24,9 +24,9 @@ with RelayClient() as relay:                # 缺省 http://127.0.0.1:8765，或
     relay.land("sim-1")
 ```
 
-3. 或者通过 MCP 接入大语言模型（第 8 节）。
+3. 或者通过 MCP 接入大语言模型（第 8 节）：飞行、设备级、应用控制各一套服务。
 
-`sdk/python/examples/` 下的四个示例都在模拟机上运行：
+`sdk/python/examples/` 下的六个示例都在模拟机上运行：
 
 | 示例 | 内容 |
 |---|---|
@@ -34,6 +34,8 @@ with RelayClient() as relay:                # 缺省 http://127.0.0.1:8765，或
 | `watch_handback.py` | 让 sim-1 绕圈飞行；操作员附身后暂停；收到 `relay_handback` 后从当前位置继续 |
 | `course_sim.py` | 用 `goto` 逐环飞完 `cage-loop` 穿环航线并打印成绩 |
 | `swarm_square.py` | 四架模拟机同时起飞，同步做方阵旋转，然后一起降落 |
+| `bench_routine.py` | 以一个动作序列完成起飞、悬停、前进 1 m、后退 1 m、转向 45°、降落 |
+| `device_tour.py` | 设备总览、原始指令目录、单电机测试与 `attitude` 姿态保持 |
 
 每个示例都接受 `--base` 与 `--name`。提供 `--operator-token`（或环境变量 `$RELAY_OPERATOR_TOKEN`）时，示例会自行补齐缺少的模拟机；否则请在应用中通过 **Add sim** 添加。
 
@@ -78,7 +80,15 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | 智能体会话 | `X-Relay-Session: <token>` | `?session=<token>` |
 | 操作员（Relay 窗口） | `X-Relay-Operator: <token>` | `?operator=<token>` |
 
-只读接口无需令牌。API 只绑定 127.0.0.1，并且只响应发往 `127.0.0.1` 或 `localhost` 的请求。附身、释放、添加模拟机、写参数、数传配网、全部急停等操作员专属操作只属于 Relay 窗口；智能体通过会话工作。
+只读接口无需令牌。API 只绑定 127.0.0.1，并且只响应发往 `127.0.0.1` 或 `localhost` 的请求。写操作分三个权限级别：
+
+| 级别 | 调用方 | 包含 |
+|---|---|---|
+| 控制者 | 认领了该飞机的会话；操作员 | 杆量、解锁、模式、技能、动作序列、再飞、穿环航线、急停、设备级指令（电机、执行器、遥控覆盖、原始指令、重启、校准、终止）、写参数 |
+| 应用操作 | 操作员；设置项 `agents_app_control` 开启时（缺省开启）的任意会话 | 扫描网络、按地址连接、移除飞机、模拟机增删与复位、全部急停、数传重试与配网、告警确认、航线编辑、修改设置、界面动作（`POST /app/ui`） |
+| 操作员专属 | 仅 Relay 窗口 | REST 附身与释放、杆量方向与桨叶确认、授予或收回 `agents_app_control` |
+
+`agents_app_control` 关闭时，会话发起的应用操作返回 403 `app_control_disabled`；会话试图修改该设置项返回 403 `operator_required`。会话发起的每个界面动作都会在窗口中显示通知并记录事件 `app_command`。
 
 **限速**（每会话）：控制类调用（杆量、解锁、模式、技能）每秒 60 次，其他调用每秒 20 次。超出时返回 429 `rate_limited`，并带 `Retry-After: 1`。
 
@@ -108,6 +118,8 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | `POST /vehicles/{id}/skills/{name}` | 控制者 | `takeoff {alt}`、`land`、`hold {seconds?}`、`move {forward?, right?, up?}`、`yaw {deg}`、`rtl`、`goto {x, y, z, yaw?}` |
 | `POST /vehicles/{id}/plan` | 控制者 | `{steps, name?, confirm?}`：执行动作序列（见下文） |
 | `POST /vehicles/{id}/plan/cancel` | 控制者 | 取消正在执行的序列；空中的飞机原地悬停 |
+| `GET /history/sessions/{sid}/refly` | – | 某次飞行记录可用于再飞的来源：`plan`、`path`、`sticks` 与 `recommended` |
+| `POST /vehicles/{id}/refly` | 控制者 | `{session_id, mode?, speed?, confirm?}`：按记录再飞一次（见下文） |
 | `POST /vehicles/{id}/course/start` | 控制者 | `{course_id}`（缺省 `cage-loop`） |
 | `POST /vehicles/{id}/course/stop` | 控制者 | 中止航线 |
 | `POST /vehicles/{id}/stop` | 控制者 | 急停 |
@@ -125,6 +137,9 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | `yaw {deg}` | althold，须在空中 | 按姿态航向转动 `deg` 度，顺时针为正；误差 3° 以内完成。 |
 | `rtl` | position | 返回起飞点并降落。 |
 | `goto {x, y, z, yaw?}` | position | 飞往飞机位置坐标系中的目标点；距离 0.15 m 以内即完成。 |
+| `sticks {roll, pitch, yaw, throttle, seconds}` | manual，须已解锁 | 在手动类模式下保持一组杆量 `seconds` 秒（0.05–10 s），然后回中。适合大语言模型发出短促的手动输入。 |
+| `attitude {roll_deg, pitch_deg, yaw_rate_dps, thrust, seconds}` | manual，须已解锁 | 以 `SET_ATTITUDE_TARGET` 保持姿态与总推力 `seconds` 秒（ArduPilot 自动切到 GUIDED_NOGPS，PX4 为 OFFBOARD）。 |
+| `velocity {vx, vy, vz, yaw_rate_dps?, seconds}` | position | 以 ENU 速度（m/s）飞行 `seconds` 秒，然后悬停。 |
 
 技能运行或保持期间，Relay 持续发送中位杆量（油门 0.5）作为遥控保活，使飞控的遥控丢失保护保持静默；这依赖的失控保护设置见 `hardware.zh-CN.md`。
 
@@ -144,11 +159,76 @@ POST /api/v1/vehicles/sim-1/plan
 ]}
 ```
 
-可用动作：`takeoff {alt}`（缺省 1 m）、`hover {seconds}` / `hold {seconds}`（缺省 3 s）、`move {forward, right, up}`、`yaw {deg}`、`land`、`goto {x, y, z, yaw?}`、`rtl`。序列开始前会校验每一步（`invalid_request` 指出出错的步骤与字段；缺少能力的步骤返回 `capability_missing`）。不以 `takeoff` 开头的序列要求飞机已在空中（`not_airborne`）。真机从地面开始的序列需要 `confirm: "ARM"`。
+可用动作：`takeoff {alt}`（缺省 1 m）、`hover {seconds}` / `hold {seconds}`（缺省 3 s）、`move {forward, right, up}`、`yaw {deg}`、`land`、`goto {x, y, z, yaw?}`、`rtl`，以及 `sticks`、`attitude`、`velocity`（参数同上表）。序列开始前会校验每一步（`invalid_request` 指出出错的步骤与字段；缺少能力的步骤返回 `capability_missing`）。不以 `takeoff` 开头的序列要求飞机已在空中（`not_airborne`）。真机从地面开始的序列需要 `confirm: "ARM"`。
 
 飞机的 `plan` 字段报告 `{id, name, state, index, count, steps, results, detail}`，`state` 为 `running`、`done`、`failed` 或 `cancelled`；事件 `plan_started`、`plan_step`、`plan_finished`、`plan_failed`、`plan_cancelled` 标记进度。任一步失败、新的技能、控制者发送杆量、操作员拨杆或接管、急停，都会结束序列。`POST /plan/cancel` 主动结束序列（没有序列时返回 `no_plan`），空中的飞机原地悬停。
 
 `sdk/python/examples/bench_routine.py` 执行上面的序列：`python3 sdk/python/examples/bench_routine.py --vehicle sim-1`；真机加 `--arm-real`。
+
+### 再飞（按历史飞行再飞一次）
+
+每次飞行都会记录动作序列、轨迹与杆量（含来源：键盘、手柄、屏幕摇杆或智能体）。`GET /history/sessions/{sid}/refly` 列出该记录可用的来源，`POST /vehicles/{id}/refly` 在任意一架飞机上重新执行：
+
+| `mode` | 行为 |
+|---|---|
+| `plan` | 重放记录中的动作序列，步骤与参数不变 |
+| `path` | 把记录的轨迹每 0.3 m 取一个 `goto` 航点，平移到目标飞机当前位置后作为动作序列飞行；需要 `position` |
+| `sticks` | 在原始时间轴上重放从解锁到上锁的杆量与模式切换，`speed`（0.25–2.0）缩放时间；只适用于手动类模式下飞行的记录 |
+| `auto`（缺省） | 依次选择 `plan`、`path`、`sticks` 中第一个可用的来源 |
+
+`plan` 与 `path` 返回 `{plan}`，`sticks` 以技能 `replay` 运行并返回 `{skill}`，之后按动作序列或技能的方式跟踪；事件 `refly_started`、`refly_finished`、`refly_failed` 标记过程。记录不存在时返回 `record_not_found`，记录中没有所需来源时返回 `refly_unavailable`。真机从地面开始需要 `confirm: "ARM"`；操作员接管、杆量输入或急停都会结束再飞。
+
+### 设备级接口
+
+设备级接口把飞控暴露到单个电机、输出通道与 MAVLink 消息。写入类调用都需要控制者权限（先认领）；会改变硬件状态的调用需要确认词：
+
+| 确认词 | 用于 | 何时需要 |
+|---|---|---|
+| `MOTOR` | 电机测试、驱动电机输出的执行器指令 | 真机 |
+| `ARM` / `FORCE` | 解锁 / 强制解锁（跳过 prearm） | 真机 |
+| `REBOOT` | 重启飞控 | 真机 |
+| `CALIBRATE` | 传感器校准 | 真机 |
+| `TERMINATE` | 飞行终止 | 所有飞机，包括模拟机 |
+
+电机测试、重启与校准要求飞机已上锁，否则返回 409 `must_be_disarmed`。
+
+| 方法与路径 | 鉴权 | 用途 |
+|---|---|---|
+| `GET /vehicles/{id}/device` | – | 设备总览：电机数量、布局与各输出 PWM、舵机输出、遥控通道、机架类型、传感器健康、估计器状态、振动、home、参数表统计、各消息的接收频率 |
+| `GET /vehicles/{id}/messages/{name}` | – | 某条 MAVLink 消息的最新一帧（字段、时间、频率），例如 `SERVO_OUTPUT_RAW`、`EKF_STATUS_REPORT` |
+| `GET /vehicles/{id}/params/{name}` | – | 单个参数；参数表中没有时按名称向飞控读取（至多 2 s），读不到返回 `param_not_found` |
+| `POST /vehicles/{id}/params/read` | 会话 | `{names}`（至多 32 个）按名称批量读取 → `{values, missing}` |
+| `POST /vehicles/{id}/params` | 控制者 | `{name, value, confirm}`，`confirm` 须等于参数名 |
+| `GET /commands` | – | 原始指令目录：MAV_CMD 名称与编号、中英文标签、参数含义与范围、危险级别、适用飞控 |
+| `POST /vehicles/{id}/command` | 控制者 | `{command, params[≤7], frame?, use_int?, confirm?, timeout_s?}`；只接受目录中的指令（`command_not_allowed`），返回 `COMMAND_ACK` |
+| `POST /vehicles/{id}/motors/test` | 控制者 | `{motor: 序号或 "all", throttle_pct, seconds(0.2–5), confirm}`；真机油门不超过 30% |
+| `POST /vehicles/{id}/motors/stop` | 控制者 | 立即停止电机测试 |
+| `POST /vehicles/{id}/actuators/set` | 控制者 | `{index 1–16, value −1..1 或 pwm 800–2200, seconds, confirm?}`；`seconds` 为 0 时保持到下次修改 |
+| `POST /vehicles/{id}/rc` | 控制者 | `{channels: {"1".."18": 1000–2000}}` 或 `{axes}`：一帧遥控通道覆盖，0.8 s 后过期，与杆量互相替代 |
+| `POST /vehicles/{id}/message-interval` | 控制者 | `{message, hz 0–50}`，0 停止该消息流 |
+| `POST /vehicles/{id}/request-message` | 控制者 | `{message}`：请求飞控立即发送一次 |
+| `POST /vehicles/{id}/reboot` | 控制者 | `{confirm}`：重启飞控，链路随后自动恢复 |
+| `POST /vehicles/{id}/calibrate` | 控制者 | `{sensor: gyro | level | baro | accel_simple, confirm}` |
+| `POST /vehicles/{id}/home` | 控制者 | `{here: true}` 或 `{lat, lon, alt}` |
+| `POST /vehicles/{id}/terminate` | 控制者 | `{confirm: "TERMINATE"}`：电机立即停转并强制上锁，空中的飞机会坠落 |
+
+模式列表与解锁、上锁、切模式沿用第 5 节的接口；`GUIDED_NOGPS` 在 ArduPilot 上可用。
+
+### 应用控制
+
+应用控制让智能体操作 Relay 本身：查看与切换窗口状态、管理机群与网络、修改设置。界面动作由打开的 Relay 窗口执行，因此需要窗口在运行；其余应用操作直接由后端完成。
+
+| 方法与路径 | 鉴权 | 用途 |
+|---|---|---|
+| `GET /app` | – | 应用概况：版本、运行时长、端口、扫描状态，飞机、会话、手柄与告警数量，窗口是否连接，`agents_app_control` |
+| `GET /app/ui` | – | 窗口当前状态：语言、工作区、选中的飞机、视图、检查器、对话框、偏好、手柄与绑定、附身、窗口尺寸、打开的记录 |
+| `GET /app/gamepads` | – | 已接入的手柄及其绑定的飞机 |
+| `GET /app/actions` | – | 界面动作目录及参数 |
+| `POST /app/ui` | 应用操作 | `{action, args}`：执行一个界面动作，最多等待 5 s，返回 `{ok, data}` |
+
+界面动作：`get_state`、`set_language {lang: en | zh}`、`set_workspace`、`select_vehicle {vehicle | null}`、`set_view`、`open_inspector`、`close_inspector`、`open_settings`、`open_connect`、`close_dialogs`、`set_pref`、`notify {text, level}`、`bind_gamepad`、`unbind_gamepad`、`possess`、`release`、`open_record`、`replay {play | pause | seek}`、`toggle_copilot`、`window {focus | minimize | maximize | restore | fullscreen}`、`screenshot {max_width}`。界面动作 `possess` 由窗口执行，效果等同操作员在窗口中附身：之后由人驾驶，智能体的认领被挂起。
+
+窗口未连接返回 503 `ui_unavailable`，5 s 内无应答返回 504 `ui_timeout`，动作本身被拒绝返回 409 `ui_action_failed`。机群、网络、设置与告警等应用操作使用第 5 节与 OpenAPI 中已有的路径（`/discover`、`/vehicles`、`/sims`、`/stop-all`、`/network/retry`、`/bridges/{ip}`、`/alerts/{id}/ack`、`/courses/{id}`、`/settings`），权限按第 4 节的"应用操作"级别。
 
 ### 飞行健康
 
@@ -156,7 +236,7 @@ POST /api/v1/vehicles/sim-1/plan
 
 ### 杆量
 
-超过 0.8 s 未刷新的杆量帧停止发送，飞机不会按陈旧输入飞行。连续控制请以 10–50 Hz 通过 REST，或更好地通过 WebSocket 发送（`{"type": "sticks", "vehicle", "roll", "pitch", "yaw", "throttle"}`）。关闭 WebSocket 即停止它所驱动的全部杆量流。MCP 不提供杆量工具：大语言模型无法闭合 50 Hz 的控制环。
+超过 0.8 s 未刷新的杆量帧停止发送，飞机不会按陈旧输入飞行。连续控制请以 10–50 Hz 通过 REST，或更好地通过 WebSocket 发送（`{"type": "sticks", "vehicle", "roll", "pitch", "yaw", "throttle"}`）。关闭 WebSocket 即停止它所驱动的全部杆量流。MCP 不提供连续的杆量流：大语言模型无法闭合 50 Hz 的控制环；`relay_sticks_for` 与技能 `sticks` 只把一组杆量保持至多 10 s 后回中。
 
 ### 穿环航线
 
@@ -192,6 +272,9 @@ POST /api/v1/vehicles/sim-1/plan
 | `battery_warn` / `battery_critical` / `crashed` | 风险 |
 | `course_started` / `ring_passed` / `course_finished` / `course_aborted` | 穿环航线 |
 | `stop` / `stop_all` | 急停 |
+| `refly_started` / `refly_finished` / `refly_failed` | 再飞 |
+| `device_command` / `motor_test` / `motor_test_stopped` / `actuator_set` / `rc_override` / `message_interval` / `home_set` / `rebooting` / `calibration_started` / `terminated` | 设备级操作 |
+| `app_command` | 会话或操作员执行的界面动作（`data.action`、`data.by`） |
 
 完整列表见 `web/src/api/schema.json`（`EventKind`）。错误使用统一结构，`code` 在各版本间保持稳定：
 
@@ -201,34 +284,28 @@ POST /api/v1/vehicles/sim-1/plan
 
 | 状态码 | 智能体常见的错误码 |
 |---|---|
-| 400 | `invalid_request`、`confirm_required`、`outside_safety_volume`、`unknown_mode` |
+| 400 | `invalid_request`、`confirm_required`、`outside_safety_volume`、`unknown_mode`、`command_not_allowed` |
 | 401 | `auth_required`、`session_expired`（重新打开会话） |
-| 403 | `operator_required`、`session_required`、`untrusted_host` |
-| 404 | `vehicle_not_found`、`course_not_found`、`unknown_skill` |
-| 409 | `not_claimed`、`claimed_by_other`、`possessed_by_human`、`claim_suspended`、`preflight_blocked`、`arm_rejected`、`mode_rejected`、`not_armed`、`crashed`、`capability_missing`、`no_position_estimate`、`not_airborne`、`no_plan` |
+| 403 | `operator_required`、`session_required`、`untrusted_host`、`app_control_disabled` |
+| 404 | `vehicle_not_found`、`course_not_found`、`unknown_skill`、`param_not_found`、`record_not_found` |
+| 409 | `not_claimed`、`claimed_by_other`、`possessed_by_human`、`claim_suspended`、`preflight_blocked`、`arm_rejected`、`mode_rejected`、`not_armed`、`crashed`、`capability_missing`、`no_position_estimate`、`not_airborne`、`no_plan`、`must_be_disarmed`、`message_not_seen`、`refly_unavailable`、`ui_action_failed` |
 | 429 | `rate_limited` |
-| 503 | `link_not_ready`、`backend_busy` |
+| 503 | `link_not_ready`、`backend_busy`、`ui_unavailable` |
+| 504 | `ui_timeout` |
 
 ## 8. MCP 服务
 
-`mcp/anet_relay_mcp.py` 是基于 stdio 的 Model Context Protocol 服务（JSON-RPC 2.0，只用标准库；支持协议版本 2024-11-05 至 2025-11-25）。它在启动时打开一个智能体会话，名称取 `--name`（缺省 `mcp`），自动续租，并在客户端断开时关闭会话。Relay 重启后，服务在下一次调用时重新打开会话；此时需要重新认领。
+Relay 提供三套基于 stdio 的 Model Context Protocol 服务（JSON-RPC 2.0，只用标准库；支持协议版本 2024-11-05 至 2025-11-25），可以单独接入，也可以同时接入：
 
-| 工具 | 用途 |
-|---|---|
-| `relay_fleet` | 精简机群视图：链路、模式、位置、电池、控制者、认领、技能；安全区 |
-| `relay_vehicle` | 单机完整状态 |
-| `relay_topology` | 网络拓扑 |
-| `relay_events` | 最近事件；传入 `after` 可从某个序号向后翻页 |
-| `relay_claim` / `relay_release_claim` | 认领与释放 |
-| `relay_arm` / `relay_disarm` | 解锁（真机：`confirm: "ARM"`）与上锁 |
-| `relay_mode` | 按名称切换飞行模式 |
-| `relay_takeoff` / `relay_land` / `relay_hold` / `relay_goto` | 技能；除非 `wait: false`，否则等待完成。`relay_hold` 接受 `seconds` |
-| `relay_move` / `relay_yaw` | 机体坐标系下的相对平移与转向（无位置估计时为开环） |
-| `relay_plan` | 执行动作序列（见第 5 节）并等待完成 |
-| `relay_stop` | 急停 |
-| `relay_course_start` | 启动穿环航线，返回待穿越的环 |
+| 服务 | 文件 | 工具 | 面向 |
+|---|---|---|---|
+| `anet-relay` | `mcp/anet_relay_mcp.py` | 20 个 `relay_*` | 飞行：机群、认领、解锁、模式、技能、动作序列、短时杆量、再飞、穿环航线、急停 |
+| `anet-relay-device` | `mcp/anet_relay_device_mcp.py` | 29 个 `device_*` | 设备级：设备总览、MAVLink 消息、参数读写、原始指令、单电机测试、执行器、遥控覆盖、消息频率、重启、校准、home、姿态与速度控制、飞行终止 |
+| `anet-relay-app` | `mcp/anet_relay_app_mcp.py` | 41 个 `app_*` | 应用控制：应用与窗口状态、手柄、语言、工作区、选择飞机、检查器、对话框、截图、扫描网络、连接与移除飞机、模拟机、设置、告警、记录与导出、再飞来源、附身、Copilot 窗口、全部急停 |
 
-失败以 `isError: true` 的工具结果返回，并附错误码，模型可据此应对（例如遇到 `possessed_by_human` 时等待）。
+每套服务在启动时打开一个智能体会话，名称取 `--name`（缺省分别为 `mcp`、`mcp-device`、`mcp-app`），自动续租，并在客户端断开时关闭会话；Relay 重启后，服务在下一次调用时重新打开会话，此时需要重新认领。认领属于会话：用某一套服务控制飞机时，请用同一套服务的认领工具（`relay_claim` 或 `device_claim`）。工具参数在发往 Relay 之前校验，缺少或多余的参数以 `invalid arguments` 返回。失败以 `isError: true` 的工具结果返回，并附错误码，模型可据此应对（例如遇到 `possessed_by_human` 时等待）。
+
+应用控制服务的工具在 `agents_app_control` 开启时即可使用，不需要操作员令牌。`--operator-token`（或环境变量 `RELAY_OPERATOR_TOKEN`）只在需要以操作员身份调用时提供，一般不需要。
 
 **Claude Desktop**（`claude_desktop_config.json`）：
 
@@ -238,6 +315,14 @@ POST /api/v1/vehicles/sim-1/plan
     "anet-relay": {
       "command": "python3",
       "args": ["/path/to/ANet-Relay/mcp/anet_relay_mcp.py", "--name", "claude-desktop"]
+    },
+    "anet-relay-device": {
+      "command": "python3",
+      "args": ["/path/to/ANet-Relay/mcp/anet_relay_device_mcp.py", "--name", "claude-desktop-device"]
+    },
+    "anet-relay-app": {
+      "command": "python3",
+      "args": ["/path/to/ANet-Relay/mcp/anet_relay_app_mcp.py", "--name", "claude-desktop-app"]
     }
   }
 }
@@ -247,6 +332,8 @@ POST /api/v1/vehicles/sim-1/plan
 
 ```bash
 claude mcp add anet-relay -- python3 /path/to/ANet-Relay/mcp/anet_relay_mcp.py --name claude-code
+claude mcp add anet-relay-device -- python3 /path/to/ANet-Relay/mcp/anet_relay_device_mcp.py --name claude-code-device
+claude mcp add anet-relay-app -- python3 /path/to/ANet-Relay/mcp/anet_relay_app_mcp.py --name claude-code-app
 ```
 
 或项目级 `.mcp.json`：
@@ -254,7 +341,9 @@ claude mcp add anet-relay -- python3 /path/to/ANet-Relay/mcp/anet_relay_mcp.py -
 ```json
 {
   "mcpServers": {
-    "anet-relay": {"command": "python3", "args": ["mcp/anet_relay_mcp.py", "--name", "claude-code"]}
+    "anet-relay": {"command": "python3", "args": ["mcp/anet_relay_mcp.py", "--name", "claude-code"]},
+    "anet-relay-device": {"command": "python3", "args": ["mcp/anet_relay_device_mcp.py", "--name", "claude-code-device"]},
+    "anet-relay-app": {"command": "python3", "args": ["mcp/anet_relay_app_mcp.py", "--name", "claude-code-app"]}
   }
 }
 ```
@@ -278,6 +367,15 @@ Relay 不在 8765 端口运行时，追加 `"--base", "http://127.0.0.1:<port>"`
 | `plan(id, steps, name=None, confirm=None, wait=True)` · `cancel_plan(id)` | 动作序列；等待时若序列失败或被取消，抛出 `plan_failed` |
 | `skill(id, name, params, wait)` · `wait_skill(id, skill_id)` | 通用技能调用与等待 |
 | `course_start(id, course_id)` · `course_stop(id)` · `stop(id)` | 航线与急停 |
+| `sticks_for(id, roll, pitch, yaw, throttle, seconds)` · `attitude(id, roll_deg, pitch_deg, yaw_rate_dps, thrust, seconds)` · `velocity(id, vx, vy, vz, yaw_rate_dps, seconds)` | 短时手动、姿态与速度控制（技能） |
+| `refly_options(session_id)` · `refly(id, session_id, mode="auto", speed=None, confirm=None, wait=True)` | 再飞 |
+| `device(id)` · `message(id, name)` · `param(id, name)` · `params_read(id, names)` · `set_param(id, name, value)` · `commands()` | 设备读取与写参数 |
+| `command(id, command, params, frame, use_int, confirm, timeout_s)` · `motor_test(id, motor, throttle_pct, seconds, confirm)` · `motors_stop(id)` · `actuator(id, index, value, pwm, seconds, confirm)` · `rc(id, channels, axes)` | 原始指令、电机、执行器、遥控覆盖 |
+| `message_interval(id, message, hz)` · `request_message(id, message)` · `reboot(id, confirm)` · `calibrate(id, sensor, confirm)` · `set_home(id, here, lat, lon, alt)` · `terminate(id, confirm)` | 消息频率、重启、校准、home、飞行终止 |
+| `app()` · `ui_state()` · `gamepads()` · `app_actions()` · `ui(action, **args)` | 应用与窗口状态、界面动作 |
+| `scan_network(networks)` · `connect_vehicle(host, port)` · `remove_vehicle(id)` · `add_sims(count, autopilot)` · `remove_sims(ids)` · `settings()` · `update_settings(**patch)` · `ack_alert(id)` · `stop_all()` | 应用操作：打开会话时以会话身份调用，否则使用操作员令牌 |
+
+`sdk/python/examples/device_tour.py` 在模拟机上演示设备级接口：读取设备总览与原始指令目录，测试单个电机并读回输出 PWM，起飞后用 `attitude` 保持一个姿态，然后降落。
 
 错误抛出 `RelayError`，带 `code`、`status`、`message`、`message_zh` 与 `detail`。等待技能时，技能失败（例如操作员接管）抛出 `skill_failed`，被其他技能替换抛出 `skill_superseded`。HTTP 429 会按 `Retry-After` 间隔自动重试两次。
 
@@ -292,8 +390,7 @@ Relay 不在 8765 端口运行时，追加 `"--base", "http://127.0.0.1:<port>"`
 
 桌面应用内置 Copilot，一个基于 [pi](https://github.com/earendil-works/pi)（`@earendil-works/pi-agent-core`）的小型智能体。它运行在应用主进程中，像其他智能体一样使用本 API：打开名为 `copilot` 的会话，认领被要求操控的飞机，并出现在智能体工作区和接力时间线中。
 
-- **打开：** 顶栏的 Copilot 按钮，或 Ctrl/Cmd + J。每条消息会附带当前选中的飞机。
-- **配置：** 设置 → Copilot：接口类型（OpenAI 兼容端点选 `openai-completions`，另有 `anthropic-messages`、`openai-responses`）、Base URL、模型 ID 和 API Key。**测试连接** 会发送一次简短请求。Key 通过操作系统钥匙串（Electron `safeStorage`）加密保存在应用数据目录，不会回传到界面；端点只会收到对话内容和工具结果。
-- **工具：** 机群与单机状态、起飞、悬停、平移、转向、降落、动作序列、取消、释放和急停，与第 5 节的技能相同，不提供原始杆量。
-- **安全：** 对真机的每个运动指令（起飞、平移、转向、悬停、降落、动作序列），聊天中都会出现审批卡片，操作员批准前不会发送任何指令（120 秒未处理视为拒绝）。接管和急停对 Copilot 与其他智能体同样有效。
-
+- **浮动窗口：** Copilot 是一个独立的浮动窗口，始终位于其他应用之上，但不是模态窗口：显示期间仍可点击 Relay 主窗口和其他应用。拖动标题栏可放到屏幕任意位置（包括主窗口左侧），拖动边缘调整大小；位置与大小会被记住。顶栏的 Copilot 按钮、Ctrl/Cmd + J 或窗口自身的隐藏按钮可显示或隐藏它。每条消息会附带主窗口中当前选中的飞机。
+- **配置：** 设置 → Copilot：接口类型（OpenAI 兼容端点选 `openai-completions`，另有 `anthropic-messages`、`openai-responses`）、Base URL、模型 ID、API Key、工具范围与窗口不透明度（60%–100%）。**测试连接** 会发送一次简短请求。Key 通过操作系统钥匙串（Electron `safeStorage`）加密保存在应用数据目录，不会回传到界面；端点只会收到对话内容和工具结果。
+- **工具范围：** `flight`（飞行：状态、技能、动作序列、短时杆量、再飞、急停）、`flight+device`（另加设备级工具）、`all`（缺省，另加应用控制工具：语言、工作区、选择飞机、扫描网络、模拟机、设置、手柄、记录、窗口与截图）。工具与第 5 节的接口一一对应。
+- **安全：** 对真机的每个运动指令与设备级写入（起飞、平移、转向、悬停、降落、动作序列、再飞、电机测试、执行器、重启、校准、终止等），聊天中都会出现审批卡片，操作员批准前不会发送任何指令（120 秒未处理视为拒绝）；需要审批时浮动窗口会自动显示并提示。确认词由审批代替，Copilot 不会自行填写。接管和急停对 Copilot 与其他智能体同样有效。

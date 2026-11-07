@@ -175,3 +175,42 @@ def test_actions_catalogue(client):
     assert lang["description_en"] and lang["description_zh"]
     assert lang["args"][0]["name"] == "lang" and lang["args"][0]["required"] is True
     assert lang["args"][0]["description_zh"]
+
+
+def test_app_operations_follow_the_app_control_setting(client):
+    agent = session(client, "app-agent")
+    resp = client.post("/api/v1/sims", json={"count": 1}, headers=agent)
+    assert resp.status_code == 200, resp.text
+    vid = resp.json()["added"][0]
+    assert client.post(f"/api/v1/vehicles/{vid}/label", json={"label": "A"}, headers=agent).status_code == 200
+    assert client.put("/api/v1/settings", json={"retention_days": 30}, headers=agent).status_code == 200
+    # echoing the current grant is harmless; changing it belongs to the operator
+    assert client.put("/api/v1/settings", json={"agents_app_control": True}, headers=agent).status_code == 200
+    resp = client.put("/api/v1/settings", json={"agents_app_control": False}, headers=agent)
+    assert resp.status_code == 403 and resp.json()["error"]["code"] == "operator_required"
+    # possession and the operator's attestations never pass to an agent
+    resp = client.post(f"/api/v1/vehicles/{vid}/possess", headers=agent)
+    assert resp.status_code == 403 and resp.json()["error"]["code"] == "operator_required"
+
+    assert client.put("/api/v1/settings", json={"agents_app_control": False}, headers=OP).status_code == 200
+    for method, path, body in (
+        ("post", "/api/v1/sims", {"count": 1}),
+        ("post", "/api/v1/stop-all", None),
+        ("post", "/api/v1/network/retry", None),
+        ("put", "/api/v1/settings", {"retention_days": 60}),
+    ):
+        resp = client.request(method.upper(), path, json=body, headers=agent)
+        assert resp.status_code == 403 and resp.json()["error"]["code"] == "app_control_disabled", path
+    resp = client.post("/api/v1/sims", json={"count": 1})
+    assert resp.status_code == 401 and resp.json()["error"]["code"] == "auth_required"
+
+
+def test_set_param_needs_control_for_sessions(client):
+    vid = client.post("/api/v1/sims", json={"count": 1}, headers=OP).json()["added"][0]
+    agent = session(client, "param-agent")
+    resp = client.post(
+        f"/api/v1/vehicles/{vid}/params",
+        json={"name": "ANGLE_MAX", "value": 3000, "confirm": "ANGLE_MAX"},
+        headers=agent,
+    )
+    assert resp.status_code in (403, 409) and resp.json()["error"]["code"] != "operator_required", resp.text

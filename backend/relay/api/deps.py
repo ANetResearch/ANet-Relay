@@ -66,6 +66,17 @@ def require_operator(request: Request) -> None:
         raise err("operator_required")
 
 
+def require_app_control(request: Request) -> None:
+    """Application operations (04 §3): the operator, or an agent session while agents_app_control is on."""
+    who = caller(request)
+    if who.operator:
+        return
+    if who.session is None:
+        raise err("operator_required")
+    if not service(request).settings.agents_app_control:
+        raise err("app_control_disabled")
+
+
 def require_session(request: Request, klass: str = "other") -> Session:
     who = caller(request, klass)
     if who.session is None:

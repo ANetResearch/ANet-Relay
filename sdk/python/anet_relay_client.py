@@ -129,6 +129,10 @@ class RelayClient:
     def _op(self, method: str, path: str, body: Any = None, query: dict | None = None) -> Any:
         return self.request(method, path, body, auth="operator", query=query)
 
+    def _app(self, method: str, path: str, body: Any = None, query: dict | None = None) -> Any:
+        """An app operation (04 §3): as the open session (needs agents_app_control), else as the operator."""
+        return self.request(method, path, body, auth="session" if self._token else "operator", query=query)
+
     # ------------------------------------------------------------------ reads
 
     def health(self) -> dict:
@@ -614,9 +618,38 @@ class RelayClient:
     def ui(self, action: str, **args: Any) -> dict:
         """Run one window action, e.g. ``ui("set_language", lang="zh")`` -> ``{ok, data}``."""
         body = {"action": action, "args": {k: v for k, v in args.items() if v is not None}}
-        if self._token:
-            return self._post("/app/ui", body)
-        return self._op("POST", "/app/ui", body)
+        return self._app("POST", "/app/ui", body)
+
+    def scan_network(self, networks: list[str] | None = None) -> dict:
+        """Start a network scan for aircraft and bridges."""
+        return self._app("POST", "/discover", {"networks": networks} if networks else {})
+
+    def connect_vehicle(self, host: str, port: int | None = None) -> dict:
+        return self._app("POST", "/vehicles", {"host": host, "port": port} if port else {"host": host})
+
+    def remove_vehicle(self, vehicle_id: str) -> dict:
+        return self._app("DELETE", f"/vehicles/{vehicle_id}")
+
+    def settings(self) -> dict:
+        return self._get("/settings")
+
+    def update_settings(self, **patch: Any) -> dict:
+        """Change settings; agents_app_control itself belongs to the operator."""
+        return self._app("PUT", "/settings", patch)
+
+    def ack_alert(self, alert_id: str) -> dict:
+        return self._app("POST", f"/alerts/{alert_id}/ack")
+
+    def stop_all(self) -> dict:
+        """EMERGENCY: throttle to zero and disarm every aircraft."""
+        return self._app("POST", "/stop-all")
+
+    def set_param(self, vehicle_id: str, name: str, value: float) -> dict:
+        """Write one parameter: needs control of the aircraft (``claim``) or the operator token."""
+        body = {"name": name, "value": value, "confirm": name}
+        return self.request(
+            "POST", f"/vehicles/{vehicle_id}/params", body, auth="session" if self._token else "operator"
+        )
 
     # ------------------------------------------------------------------ refly (04 §4)
 
@@ -649,13 +682,15 @@ class RelayClient:
             return {"plan": self.wait_plan(vehicle_id, started["plan"]["id"], timeout)}
         return started
 
-    # ------------------------------------------------------------------ operator helpers (operator token)
+    # ------------------------------------------------------------------ simulators (app operations)
 
     def add_sims(self, count: int = 1, autopilot: str = "ardupilot") -> list[str]:
-        return self._op("POST", "/sims", {"count": count, "autopilot": autopilot})["added"]
+        return self._app("POST", "/sims", {"count": count, "autopilot": autopilot})["added"]
 
     def remove_sims(self, ids: list[str] | None = None) -> list[str]:
-        return self._op("DELETE", "/sims", query={"id": ids} if ids else None)["removed"]
+        return self._app("DELETE", "/sims", query={"id": ids} if ids else None)["removed"]
+
+    # ------------------------------------------------------------------ operator helpers (operator token)
 
     def possess(self, vehicle_id: str, input: str = "keyboard", pad: int | None = None) -> dict:
         return self._op("POST", f"/vehicles/{vehicle_id}/possess", {"input": input, "pad": pad})

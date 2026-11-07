@@ -474,6 +474,8 @@ export const zh: Record<MessageKey, string> = {
   'set.possessMode': '附身模式',
   'set.possessModeAuto': '有定高能力时用定高，否则用自稳',
   'set.airborneAlert': '飞机在空中且无人控制时告警',
+  'set.agentsAppControl': '允许智能体操作 Relay',
+  'set.agentsAppControlHint': '智能体会话可以操作界面、扫描网络、管理飞机与模拟机、修改设置和全部急停。附身与起飞前确认始终由操作员完成。',
   'set.stickTimeout': '杆量超时',
   'set.chaseOnCourse': '开始航线时切到追尾视角',
   'set.listenPort': '监听端口',

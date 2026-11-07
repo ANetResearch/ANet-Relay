@@ -144,7 +144,11 @@ test('copilot window: floating, placed anywhere, remembered, main window stays u
     await page.locator('[data-copilot-toggle]').click()
     const cp = await copilotPage(app)
     await expect(cp.locator('[data-copilot-drag]')).toBeVisible()
-    const info = await copilotWindowInfo(app)
+    // the page renders before its first frame is ready; the window is shown on ready-to-show
+    const info = await until(async () => {
+      const i = await copilotWindowInfo(app)
+      return i?.visible ? i : null
+    }, 'copilot window shown', 10000)
     expect(info).toMatchObject({ visible: true, onTop: true, modal: false, hasParent: false })
 
     // drag it to the left of the main window; the main window still takes clicks while it is shown

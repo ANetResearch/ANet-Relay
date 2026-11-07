@@ -124,7 +124,7 @@ export function appTools(relay) {
     defineTool(
       "app_settings_set",
       "Write settings",
-      "Merge a partial settings object into the Relay settings (for example {agents_app_control: true}). Only the keys you pass change.",
+      "Merge a partial settings object into the Relay settings (for example {retention_days: 30}). Only the keys you pass change. agents_app_control belongs to the operator and cannot be changed here.",
       Type.Object({ patch: Type.Record(Type.String(), Type.Any()) }),
       (p) => call("PUT", "/settings", p.patch),
     ),

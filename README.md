@@ -36,8 +36,10 @@ ANet Relay is the desktop ground control station for small drone fleets on a loc
 | Possession | Take over any aircraft with a DualSense or standard gamepad, the keyboard or on-screen sticks; several gamepads fly several aircraft at once | Available |
 | Relay to agents | Possession always wins and suspends the agent's claim; on release the claim resumes and the agent receives `relay_handback` | Available |
 | Flight actions and sequences | Take off, hover, move forward, back, sideways and vertically, turn and land from the inspector, or as an editable sequence flown step by step; works in altitude hold without a position source (moves are then open-loop estimates) | Available |
-| Agent API | Local REST and WebSocket API with sessions, claims, sticks, skills (take off, land, hold, move, yaw, return, go to), sequences and events; Python SDK; MCP server for language models | Available |
-| Copilot | Built-in chat agent on [pi](https://github.com/earendil-works/pi): status, take-off, moves, sequences and planning in plain language, with any OpenAI- or Anthropic-compatible endpoint and key; every motion on a real aircraft waits for the operator's approval | Available |
+| Agent API | Local REST and WebSocket API with sessions, claims, sticks, skills (take off, land, hold, move, yaw, return, go to, attitude, velocity), sequences, re-fly from past flights and events; Python SDK; three MCP servers for flight, device-level and application control | Available |
+| Device-level interface | Down to single motors and output channels: device overview, any MAVLink message, parameter reads and writes, raw command catalogue, single-motor tests, actuators, RC channel override, message rates, reboot, calibration, home, flight termination; hazardous operations need a confirm word | Available |
+| Application control | Agents operate Relay itself: controllers and app status, language and workspace, selection, network scan, fleet and simulators, settings, screenshots; can be switched off in Settings | Available |
+| Copilot | Built-in chat agent on [pi](https://github.com/earendil-works/pi) in a floating, always-on-top window that can be placed anywhere and never blocks other windows; flight, device-level and application operations in plain language, with any OpenAI- or Anthropic-compatible endpoint and key; every motion and device write on a real aircraft waits for the operator's approval | Available |
 | Flight health | Rolling diagnostics while flying: attitude oscillation, hands-off lean, yaw drift, altitude hold, hover throttle, motor balance, vibration, battery sag, link and stick stream, each with its likely cause and fix | Available |
 | Simulator | Up to 8 simulated aircraft that behave like ArduPilot vehicles, with dynamics and a battery model; identical to real aircraft through the API | Available |
 | Ring course | Virtual ring sequences (cage loop, slalom, climb) with timing, splits and a chase camera, for simulators and for real aircraft with a local position estimate | Available |
@@ -53,15 +55,11 @@ Packages for every release are on the [Releases](https://github.com/ANetResearch
 
 | Platform | File |
 |---|---|
-| macOS, Apple silicon | `ANet-Relay-<version>-mac-arm64.zip` |
-| macOS, Intel | `ANet-Relay-<version>-mac-x64.zip` |
+| macOS, Apple silicon | `ANet-Relay-<version>-mac-arm64.dmg` or `.zip` |
+| macOS, Intel | `ANet-Relay-<version>-mac-x64.dmg` or `.zip` |
 | Linux x64 | `ANet-Relay-<version>-linux-x64.AppImage` or `.tar.gz` |
 
-Verify downloads against `SHA256SUMS.txt`. The macOS build carries an ad-hoc signature, not a Developer ID: move the app to Applications and remove the quarantine attribute before the first launch.
-
-```sh
-xattr -dr com.apple.quarantine "/Applications/ANet Relay.app"
-```
+Verify downloads against `SHA256SUMS.txt`. The macOS build is signed with a Developer ID and notarized by Apple: drag it to Applications and open it.
 
 The application bundles its backend; no Python or Node installation is needed to run it.
 
@@ -119,12 +117,14 @@ with RelayClient() as relay:                         # http://127.0.0.1:8765
     relay.land("sim-1")
 ```
 
-**Copilot.** The desktop app has a built-in agent: open it with the **Copilot** button or `⌘J` / `Ctrl+J`, set the endpoint, model and API key in **Settings → Copilot**, and ask, for example, "take off to 1 m, hover, go forward 1 m and back, turn 45° and land". Copilot works through the same session, claim and skill API as any agent, never sends raw sticks, and on a real aircraft shows an approval card before every motion command. The key is stored encrypted with the system keychain.
+**Copilot.** The desktop app has a built-in agent: open it with the **Copilot** button or `⌘J` / `Ctrl+J`, set the endpoint, model and API key in **Settings → Copilot**, and ask, for example, "take off to 1 m, hover, go forward 1 m and back, turn 45° and land". Copilot is a separate floating window: it stays above other applications, can be dragged anywhere on screen, and the main window and other applications stay usable while it is shown. It works through the same session, claim and API as any agent, with flight, device-level and application tool sets chosen in Settings, and on a real aircraft shows an approval card before every motion command and device write. The key is stored encrypted with the system keychain.
 
 Language models connect through MCP:
 
 ```sh
-claude mcp add anet-relay -- python3 /path/to/ANet-Relay/mcp/anet_relay_mcp.py --name claude-code
+claude mcp add anet-relay -- python3 /path/to/ANet-Relay/mcp/anet_relay_mcp.py --name claude-code                     # flight
+claude mcp add anet-relay-device -- python3 /path/to/ANet-Relay/mcp/anet_relay_device_mcp.py --name claude-code-device  # device level
+claude mcp add anet-relay-app -- python3 /path/to/ANet-Relay/mcp/anet_relay_app_mcp.py --name claude-code-app           # application control
 ```
 
 | Interface | Address |
@@ -132,8 +132,8 @@ claude mcp add anet-relay -- python3 /path/to/ANet-Relay/mcp/anet_relay_mcp.py -
 | REST | `http://127.0.0.1:8765/api/v1` (first free port from 8765 to 8775) |
 | WebSocket | `ws://127.0.0.1:8765/api/v1/stream` |
 | OpenAPI | `http://127.0.0.1:8765/openapi.json`, interactive at `/docs` |
-| MCP | `mcp/anet_relay_mcp.py`, 18 tools over stdio |
-| Python SDK | `sdk/python/anet_relay_client.py` and five examples |
+| MCP | over stdio: `mcp/anet_relay_mcp.py` (flight, 20 tools), `mcp/anet_relay_device_mcp.py` (device level, 29), `mcp/anet_relay_app_mcp.py` (application control, 41) |
+| Python SDK | `sdk/python/anet_relay_client.py` and six examples |
 
 The API listens on the loopback interface only. Agents control simulators and real aircraft through the same calls; real aircraft additionally require the operator's preflight steps and `confirm: "ARM"`.
 

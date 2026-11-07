@@ -9,7 +9,7 @@ from fastapi.responses import Response
 
 from ..errors import err
 from . import schemas
-from .deps import require_operator, service
+from .deps import require_app_control, service
 
 router = APIRouter()
 ERRORS = {s: {"model": schemas.ErrorBody} for s in (400, 401, 403, 404, 409, 503)}
@@ -53,14 +53,14 @@ def history_refly(request: Request, sid: int) -> dict[str, Any]:
     return service(request).refly_options(sid)
 
 
-@router.get("/bridges/{ip}", tags=["network"], dependencies=[Depends(require_operator)], responses=ERRORS)
+@router.get("/bridges/{ip}", tags=["network"], dependencies=[Depends(require_app_control)], responses=ERRORS)
 def bridge_read(request: Request, ip: str, port: int = Query(80, ge=1, le=65535)) -> dict[str, Any]:
     """Read a bridge's current settings (passwords are never returned)."""
     return service(request).bridge_read(ip, port)
 
 
 @router.post(
-    "/bridges/{ip}/configure", tags=["network"], dependencies=[Depends(require_operator)], responses=ERRORS
+    "/bridges/{ip}/configure", tags=["network"], dependencies=[Depends(require_app_control)], responses=ERRORS
 )
 def bridge_configure(
     request: Request, ip: str, body: schemas.BridgeConfigureBody, port: int = Query(80, ge=1, le=65535)

@@ -2129,7 +2129,13 @@ class FleetService(DeviceOps):
         return self.call(run)
 
     def set_param(
-        self, vid: str, name: str, value: Any, confirm: str | None, wait: bool = True
+        self,
+        vid: str,
+        name: str,
+        value: Any,
+        confirm: str | None,
+        wait: bool = True,
+        actor: Actor | None = None,
     ) -> dict[str, Any]:
         name = str(name or "").strip()
         if confirm != name or not name:
@@ -2138,6 +2144,8 @@ class FleetService(DeviceOps):
 
         def start() -> tuple[int, float]:
             v = self._vehicle(vid)
+            if actor is not None and actor.kind == "session":
+                self._check_control(v, actor)
             self._require_link(v)
             entry = v.state["params"].get(name)
             if entry is None:
