@@ -156,3 +156,16 @@ def test_open_loop_move_limit(svc, stepper):
     with pytest.raises(RelayError) as exc:
         svc.run_skill(vid, agent, "move", {"forward": 3})
     assert exc.value.code == "outside_safety_volume"
+
+
+def test_px4_takes_off_again_after_landing(svc, stepper):
+    """A land leaves PX4 in LAND, where it refuses to arm; the next take-off switches mode first."""
+    vid, v = boot(svc, stepper, "px4", True)
+    session, agent = open_agent(svc)
+    svc.claim(vid, agent)
+    for _ in range(2):
+        svc.run_plan(vid, agent, [{"action": "takeoff", "alt": 1.0}, {"action": "land"}], name="hop")
+        assert stepper.until(lambda: v.plan.state != "running", 60, [session])
+        assert v.plan.state == "done", v.plan.detail
+        assert stepper.until(lambda: not v.armed, 5, [session])
+        assert v.mode == "LAND"

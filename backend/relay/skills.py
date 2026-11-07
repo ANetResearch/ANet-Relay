@@ -42,6 +42,7 @@ MOVE_ACCEL = 0.8
 MOVE_DRAG = 0.35  # 1/s, linear drag of a small quadrotor
 MOVE_SETTLE_S = 1.2
 MOVE_OPEN_LOOP_MAX_M = 2.0
+PX4_ARMABLE = frozenset({"MANUAL", "STABILIZED", "ACRO", "ALTCTL", "POSCTL", "LOITER", "OFFBOARD", "TAKEOFF"})
 YAW_TOLERANCE_DEG = 3.0
 YAW_SETTLE_S = 0.3
 GRAVITY = 9.81
@@ -256,10 +257,13 @@ class Skill:
                 self.expect_mode = host.mode
                 self.finish("already airborne")
                 return
-            self._phase("arm" if px4 else "mode", now)
+            # PX4 refuses to arm in LAND, RTL and other automatic modes, where a previous land leaves it.
+            armable = not px4 or host.mode in PX4_ARMABLE
+            self._phase("arm" if armable and px4 else "mode", now)
         if self.phase == "mode":
-            self.expect_mode = "GUIDED"
-            if self._ensure_mode(host, "GUIDED", now):
+            target = "POSCTL" if px4 else "GUIDED"
+            self.expect_mode = target
+            if self._ensure_mode(host, target, now):
                 self._phase("arm", now)
             return
         if self.phase == "arm":

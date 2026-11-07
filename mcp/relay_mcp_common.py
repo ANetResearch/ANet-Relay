@@ -268,6 +268,18 @@ class McpServer:
             if not isinstance(args, dict):
                 self.reply(rid, error=(-32602, "arguments must be an object"))
                 return None
+            tool = self.tools[name]
+            missing = [k for k in tool.required if k not in args]  # an explicit null is a value (deselect)
+            unknown = sorted(set(args) - set(tool.properties))
+            if missing or unknown:
+                # a tool error the model can read and correct, instead of a half-formed request to Relay
+                parts = [f"missing required argument(s): {', '.join(missing)}"] if missing else []
+                if unknown:
+                    parts.append(
+                        f"unknown argument(s): {', '.join(unknown)}; expected {', '.join(tool.properties)}"
+                    )
+                self.reply(rid, self._text_result("invalid arguments: " + "; ".join(parts), True))
+                return None
             worker = threading.Thread(target=self._run_tool, args=(rid, name, args), daemon=True)
             worker.start()  # long skills must not block ping or other calls
             return worker
