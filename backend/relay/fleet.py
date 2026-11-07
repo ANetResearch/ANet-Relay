@@ -69,7 +69,7 @@ from .mav import bridge as bridgemod
 from .mav import decode, discovery, modes
 from .mav.link import UdpLink
 from .mav.mavlink import M, Parser
-from .mav.params import ParamFetch, normalise, same_value, type_name
+from .mav.params import ESSENTIAL, NamedReads, ParamFetch, normalise, same_value, type_name
 from .model import INPUT_KINDS, Calibration, Capability, Confirmed, Signs, StickInput
 from .netinfo import local_networks, on_bridge_ap, scan_hosts
 from .sessions import Session, SessionManager
@@ -159,6 +159,7 @@ class Vehicle:
         self.param_due: float | None = None
         self.param_fetch: ParamFetch | None = None
         self.param_list_sent = 0
+        self.param_named: NamedReads | None = None
         self.mode_wait: tuple[str, float, bool] | None = None
         self.mode_alert: tuple[str, float] | None = None
         self.record_session: int | None = None
@@ -623,6 +624,8 @@ class FleetService:
         v.identity_at = now
         self._request_streams(v)
         v.stream_check_at = now + STREAM_RECHECK_S
+        # The parameters the preflight depends on are read by name at once, whatever the table setting.
+        v.param_named = NamedReads(ESSENTIAL.get(st["autopilot"] or "", ()))
         if self.settings.auto_params:
             v.param_due = now + PARAM_FETCH_DELAY_S
         if v.record_session is not None:
@@ -879,6 +882,9 @@ class FleetService:
             self._sample(v, wall, controller)
 
     def _param_housekeeping(self, v: Vehicle, now: float) -> None:
+        if v.param_named is not None and v.link_state == "ok":
+            for name in v.param_named.due(v.state["params"], now):
+                v.driver.request_param_named(name)
         if v.param_due is not None and now >= v.param_due and v.link_state == "ok":
             v.param_due = None
             self._fetch_params(v, now)
@@ -1912,6 +1918,8 @@ class FleetService:
             self._require_link(v)
             v.state["params"].clear()
             v.state["param_count"] = 0
+            if v.param_named is not None:
+                v.param_named = NamedReads(v.param_named.names)
             self._fetch_params(v, self.clock())
             return {"id": vid, "requested": True}
 
@@ -2307,6 +2315,7 @@ class FleetService:
             prearm=v.state["prearm"],
             params=params,
             params_complete=bool(total) and len(params) >= total,
+            params_unreadable=v.param_named.unreadable(params) if v.param_named else frozenset(),
             confirmed_signs=v.confirmed.signs,
             confirmed_props=v.confirmed.props,
             mode=v.mode,

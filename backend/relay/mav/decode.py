@@ -387,6 +387,10 @@ def _command_ack(state, msg, fields, notes, now, wall):
 
 
 def _param_value(state, msg, fields, notes, now, wall):
+    # Only the autopilot's own table: a Wi-Fi bridge (mavesp8266, component 240) shares the system id and
+    # answers parameter requests with its own short list, which would corrupt the count and the indices.
+    if state["compid"] is not None and msg.get_srcComponent() != state["compid"]:
+        return
     name = text_field(fields.get("param_id"))
     if not name:
         return

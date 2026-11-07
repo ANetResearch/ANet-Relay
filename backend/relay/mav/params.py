@@ -32,8 +32,9 @@ INT_RANGES = {
     M.MAV_PARAM_TYPE_UINT32: (0, 4294967295),
     M.MAV_PARAM_TYPE_INT32: (-2147483648, 2147483647),
 }
-STALL_S = 1.5
-MAX_ROUNDS = 6
+STALL_S = 1.0
+# A full table over a Wi-Fi bridge loses frames; keep re-reading the gaps until it is complete.
+MAX_ROUNDS = 80
 READS_PER_ROUND = 25
 
 
@@ -99,3 +100,50 @@ class ParamFetch:
         if not missing:
             self.done = True
         return missing
+
+
+# Parameters the preflight and the skills depend on, read by name as soon as the autopilot is identified
+# so that a lossy table fetch never leaves them unknown. Names absent on this firmware never answer.
+ESSENTIAL = {
+    "PX4": (
+        "COM_RC_IN_MODE",
+        "COM_RC_LOSS_T",
+        "NAV_RCL_ACT",
+        "NAV_DLL_ACT",
+        "MPC_MAN_TILT_MAX",
+        "MPC_THR_HOVER",
+    ),
+    "ArduPilot": (
+        "MAV_GCS_SYSID",
+        "SYSID_MYGCS",
+        "RC_OVERRIDE_TIME",
+        "FS_THR_ENABLE",
+        "FS_GCS_ENABLE",
+        "ANGLE_MAX",
+        "MOT_THST_HOVER",
+    ),
+}
+NAMED_TRIES = 6
+NAMED_INTERVAL_S = 1.5
+
+
+@dataclass
+class NamedReads:
+    """By-name reads of the essential parameters, retried until answered or out of tries."""
+
+    names: tuple[str, ...]
+    tries: dict[str, int] = field(default_factory=dict)
+    next_at: float = 0.0
+
+    def due(self, params: dict, now: float) -> list[str]:
+        if now < self.next_at:
+            return []
+        out = [n for n in self.names if n not in params and self.tries.get(n, 0) < NAMED_TRIES]
+        for n in out:
+            self.tries[n] = self.tries.get(n, 0) + 1
+        self.next_at = now + NAMED_INTERVAL_S
+        return out
+
+    def unreadable(self, params: dict) -> frozenset[str]:
+        """Names asked for NAMED_TRIES times without an answer."""
+        return frozenset(n for n in self.names if n not in params and self.tries.get(n, 0) >= NAMED_TRIES)

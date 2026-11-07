@@ -55,6 +55,7 @@ class Facts:
     prearm: bool | None = None
     params: dict[str, float] = field(default_factory=dict)
     params_complete: bool = False
+    params_unreadable: frozenset[str] = frozenset()
     confirmed_signs: bool = False
     confirmed_props: bool = False
     mode: str | None = None
@@ -82,10 +83,24 @@ def _param(f: Facts, *names: str) -> float | None:
     return None
 
 
-def _param_status(f: Facts, value_present: bool) -> str | None:
+def _param_status(f: Facts, value_present: bool, *names: str) -> str | None:
+    """None when the values are known; "waiting" while they may still arrive; "unreadable" when every name
+    was asked for by name repeatedly without an answer and the table is not complete either."""
     if value_present:
         return None
-    return "waiting" if not f.params_complete else "fail"
+    if f.params_complete:
+        return "fail"
+    if names and all(n in f.params or n in f.params_unreadable for n in names):
+        return "unreadable"
+    return "waiting"
+
+
+def _unreadable(names: tuple[str, ...]) -> tuple[str, str]:
+    joined = ", ".join(names)
+    return (
+        f"Could not read {joined} from the autopilot; check it in the Parameters tab or on the autopilot",
+        f"未能从飞控读取 {joined}，请在参数页或飞控上核对",
+    )
 
 
 def evaluate(f: Facts) -> list[dict[str, Any]]:
@@ -134,8 +149,15 @@ def evaluate(f: Facts) -> list[dict[str, Any]]:
     elif f.autopilot == ARDUPILOT:
         sysid = _param(f, "MAV_GCS_SYSID", "SYSID_MYGCS")
         override = _param(f, "RC_OVERRIDE_TIME")
-        pending = _param_status(f, sysid is not None and override is not None)
-        if pending:
+        pending = _param_status(
+            f, sysid is not None and override is not None, "MAV_GCS_SYSID", "SYSID_MYGCS", "RC_OVERRIDE_TIME"
+        )
+        if pending == "unreadable":
+            missing = tuple(
+                n for n, x in (("MAV_GCS_SYSID", sysid), ("RC_OVERRIDE_TIME", override)) if x is None
+            )
+            items.append(_item("gcs_input", "warn", _unreadable(missing)))
+        elif pending:
             items.append(
                 _item(
                     "gcs_input",
@@ -169,8 +191,10 @@ def evaluate(f: Facts) -> list[dict[str, Any]]:
             items.append(_item("gcs_input", "pass"))
     elif f.autopilot == PX4:
         mode = _param(f, "COM_RC_IN_MODE")
-        pending = _param_status(f, mode is not None)
-        if pending:
+        pending = _param_status(f, mode is not None, "COM_RC_IN_MODE")
+        if pending == "unreadable":
+            items.append(_item("gcs_input", "warn", _unreadable(("COM_RC_IN_MODE",))))
+        elif pending:
             items.append(
                 _item(
                     "gcs_input",

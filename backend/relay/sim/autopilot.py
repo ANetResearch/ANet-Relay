@@ -229,6 +229,7 @@ class SimAutopilot:
         table = ARDUPILOT_PARAMS if flavour == ARDUPILOT else PX4_PARAMS
         self.params: dict[str, list[float]] = {name: [float(v), t] for name, v, t in table}
         self.param_order = [name for name, _, _ in table]
+        self.param_list_skip: set[str] = set()  # tests: names lost from the table reply, as over a lossy link
         for key, value in (params or {}).items():
             if key in self.params:
                 self.params[key][0] = float(value)
@@ -401,7 +402,8 @@ class SimAutopilot:
 
     def _on_param_request_list(self, msg, now):
         for index, name in enumerate(self.param_order):
-            self._send_param(name, index)
+            if name not in self.param_list_skip:
+                self._send_param(name, index)
 
     def _on_param_request_read(self, msg, now):
         if msg.param_index >= 0 and msg.param_index < len(self.param_order):

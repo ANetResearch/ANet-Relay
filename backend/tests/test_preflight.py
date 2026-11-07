@@ -84,3 +84,20 @@ def test_prearm_and_link_and_mode_warn():
     assert status(items, "prearm") == "info" and status(items, "mode") == "warn"
     assert preflight.summary(items)["ok"]
     assert "link" in preflight.summary(preflight.evaluate(base(link_state="lost")))["blocking"]
+
+
+def test_unreadable_parameter_warns_instead_of_waiting_forever():
+    f = base(autopilot="PX4", params={"NAV_RCL_ACT": 2}, params_complete=False)
+    assert status(preflight.evaluate(f), "gcs_input") == "waiting"
+    f.params_unreadable = frozenset({"COM_RC_IN_MODE"})
+    items = preflight.evaluate(f)
+    item = next(i for i in items if i["id"] == "gcs_input")
+    assert item["status"] == "warn" and "COM_RC_IN_MODE" in item["detail_zh"]
+    assert "gcs_input" not in preflight.summary(items)["blocking"]
+    # ArduPilot: only one of the two sysid names exists on a given firmware
+    f = base(
+        params={"SYSID_MYGCS": 255}, params_complete=False, params_unreadable=frozenset({"MAV_GCS_SYSID"})
+    )
+    assert status(preflight.evaluate(f), "gcs_input") == "waiting"  # RC_OVERRIDE_TIME may still arrive
+    f.params_unreadable = frozenset({"MAV_GCS_SYSID", "RC_OVERRIDE_TIME"})
+    assert status(preflight.evaluate(f), "gcs_input") == "warn"

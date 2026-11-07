@@ -81,7 +81,9 @@ def test_handback_sends_nothing_on_agents_behalf(svc, stepper):
     stepper.run(0.6, [session])
     sent = [m for t, m in v.driver.sim.received if t >= t_release]
     kinds = {m.get_type() for m in sent}
-    assert kinds <= {"RC_CHANNELS_OVERRIDE", "HEARTBEAT", "TIMESYNC"}
+    # parameter reads are housekeeping, not control
+    control = kinds - {"PARAM_REQUEST_READ", "PARAM_REQUEST_LIST"}
+    assert control <= {"RC_CHANNELS_OVERRIDE", "HEARTBEAT", "TIMESYNC"}
     overrides = [m for m in sent if m.get_type() == "RC_CHANNELS_OVERRIDE"]
     assert len(overrides) == 4 and all(m.chan3_raw == 0 for m in overrides)  # release only
     assert v.mode == "ALT_HOLD"  # mode is not changed back for the agent
@@ -350,3 +352,27 @@ def test_possess_in_the_air_keeps_the_stick_mode(svc, stepper):
     svc.possess(vid, "keyboard")
     stepper.run(1.0, [session])
     assert v.mode == "STABILIZE"  # no mode change under the operator's hands in flight
+
+
+@pytest.mark.parametrize(("flavour", "name"), [("px4", "COM_RC_IN_MODE"), ("ardupilot", "RC_OVERRIDE_TIME")])
+def test_essential_parameters_are_read_by_name_when_the_table_loses_them(svc, stepper, flavour, name):
+    ids = svc.add_sims(1, flavour)
+    v = svc.vehicles[ids[0]]
+    v.driver.sim.param_list_skip = {name}
+    stepper.run(4.0)
+    assert name in v.state["params"]  # read by name although the table reply never carried it
+    assert v.param_named is not None and not v.param_named.unreadable(v.state["params"])
+
+
+def test_bridge_parameters_are_ignored():
+    from relay.mav import decode
+    from relay.mav.mavlink import M as MAV
+
+    state = decode.fresh_state()
+    state.update(sysid=1, compid=1, autopilot="PX4")
+    msg = MAV.MAVLink_param_value_message(b"WIFI_CHANNEL", 11.0, MAV.MAV_PARAM_TYPE_UINT32, 30, 3)
+    msg._header = type("H", (), {"srcSystem": 1, "srcComponent": 240})()
+    decode._param_value(
+        state, msg, {"param_id": "WIFI_CHANNEL", "param_type": 6, "param_count": 30}, [], 0.0, 0.0
+    )
+    assert state["params"] == {} and state["param_count"] == 0
