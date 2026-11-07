@@ -38,6 +38,16 @@ CREATE TABLE IF NOT EXISTS course_runs (
     started_at REAL, finished_at REAL, state TEXT NOT NULL, total_s REAL, splits_json TEXT, controller TEXT);
 CREATE TABLE IF NOT EXISTS calibration (host TEXT PRIMARY KEY, signs_json TEXT NOT NULL, hover REAL NOT NULL);
 """
+# Bench procedure reports (WP-B, 05 §4.4): one row per run, linked to the aircraft's host across restarts.
+TEST_RUNS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS test_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, vehicle_id TEXT NOT NULL, host TEXT, procedure TEXT NOT NULL,
+    state TEXT NOT NULL, verdict TEXT, started REAL NOT NULL, ended REAL, steps_json TEXT, params_json TEXT,
+    session_id INTEGER, meta_json TEXT);
+CREATE INDEX IF NOT EXISTS test_runs_vehicle ON test_runs (vehicle_id, started);
+CREATE INDEX IF NOT EXISTS test_runs_host ON test_runs (host, started);
+"""
+TEST_RUN_FIELDS = ("state", "verdict", "ended", "steps_json", "params_json", "session_id", "meta_json")
 
 SAMPLE_COLUMNS = (
     "t",
@@ -81,7 +91,9 @@ class History:
             path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = self._connect()
         self._conn.executescript(SCHEMA)
+        self._conn.executescript(TEST_RUNS_SCHEMA)
         self._migrate()
+        self._close_stale_test_runs()
         self._conn.commit()
         self._lock = threading.Lock()
         self._samples: list[tuple] = []
@@ -160,6 +172,7 @@ class History:
             for table in ("samples", "events", "control_segments", "course_runs"):
                 self._conn.executemany(f"DELETE FROM {table} WHERE session_id = ?", [(i,) for i in ids])
             self._conn.executemany("DELETE FROM record_sessions WHERE id = ?", [(i,) for i in ids])
+            self._conn.execute("DELETE FROM test_runs WHERE started < ?", (cutoff,))
             self._conn.commit()
         return len(ids)
 
@@ -399,3 +412,97 @@ class History:
         for i in range(len(cols["t"])):
             writer.writerow([cols[c][i] for c in SAMPLE_COLUMNS])
         return "text/csv", buffer.getvalue()
+
+    # ------------------------------------------------------------------ bench test runs (WP-B, 05 §4.4)
+
+    def _close_stale_test_runs(self) -> None:
+        """A run that was active when Relay stopped can never finish: mark it aborted."""
+        self._conn.execute(
+            "UPDATE test_runs SET state = 'aborted', ended = COALESCE(ended, started) "
+            "WHERE state IN ('running', 'waiting')"
+        )
+
+    def test_run_start(self, record: dict[str, Any]) -> int:
+        return self._write(
+            "INSERT INTO test_runs (vehicle_id, host, procedure, state, verdict, started, ended, steps_json, "
+            "params_json, session_id, meta_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                record["vehicle_id"],
+                record.get("host"),
+                record["procedure"],
+                record.get("state", "running"),
+                record.get("verdict"),
+                record["started"],
+                record.get("ended"),
+                json.dumps(record.get("steps") or [], ensure_ascii=False),
+                json.dumps(record.get("params") or {}, ensure_ascii=False),
+                record.get("session_id"),
+                json.dumps(record.get("meta") or {}, ensure_ascii=False),
+            ),
+        )
+
+    def test_run_update(self, run_id: int, record: dict[str, Any]) -> None:
+        values = {
+            "state": record.get("state"),
+            "verdict": record.get("verdict"),
+            "ended": record.get("ended"),
+            "steps_json": json.dumps(record.get("steps") or [], ensure_ascii=False),
+            "params_json": json.dumps(record.get("params") or {}, ensure_ascii=False),
+            "session_id": record.get("session_id"),
+            "meta_json": json.dumps(record.get("meta") or {}, ensure_ascii=False),
+        }
+        sets = ", ".join(f"{k} = ?" for k in TEST_RUN_FIELDS)
+        params = (*(values[k] for k in TEST_RUN_FIELDS), run_id)
+        self._write(f"UPDATE test_runs SET {sets} WHERE id = ?", params)
+
+    @staticmethod
+    def _test_run_row(r: sqlite3.Row, full: bool) -> dict[str, Any]:
+        meta = json.loads(r["meta_json"] or "{}")
+        steps = json.loads(r["steps_json"] or "[]")
+        out = {
+            **meta,
+            "run_id": r["id"],
+            "vehicle": r["vehicle_id"],
+            "host": r["host"],
+            "procedure": r["procedure"],
+            "state": r["state"],
+            "verdict": r["verdict"],
+            "started": r["started"],
+            "ended": r["ended"],
+            "session_id": r["session_id"],
+        }
+        if full:
+            out["steps"] = steps
+            out["params"] = json.loads(r["params_json"] or "{}")
+        else:
+            out["counts"] = {
+                v: sum(1 for s in steps if s.get("verdict") == v) for v in ("pass", "warn", "fail", "skipped")
+            }
+            out["total"] = len(steps)
+        return out
+
+    def test_runs(self, vehicle: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        """Newest first. ``vehicle`` matches the aircraft id or its host (reports survive a restart)."""
+        conn = self._read()
+        try:
+            if vehicle:
+                rows = conn.execute(
+                    "SELECT * FROM test_runs WHERE vehicle_id = ? OR host = ? ORDER BY started DESC, id DESC "
+                    "LIMIT ?",
+                    (vehicle, vehicle, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM test_runs ORDER BY started DESC, id DESC LIMIT ?", (limit,)
+                ).fetchall()
+            return [self._test_run_row(r, full=False) for r in rows]
+        finally:
+            conn.close()
+
+    def test_run(self, run_id: int) -> dict[str, Any] | None:
+        conn = self._read()
+        try:
+            row = conn.execute("SELECT * FROM test_runs WHERE id = ?", (run_id,)).fetchone()
+        finally:
+            conn.close()
+        return None if row is None else self._test_run_row(row, full=True)

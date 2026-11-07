@@ -245,6 +245,17 @@ class CourseRunView(_Model):
     rings: list[Ring] = Field(description="rings placed in the vehicle's position frame")
 
 
+class ProcedureBrief(_Model):
+    """The aircraft's bench procedure run, current or last (WP-B, 05 §4.4)."""
+
+    run_id: int
+    procedure: str
+    state: Literal["running", "waiting", "passed", "warned", "failed", "aborted"]
+    step: str | None = Field(description="step id while the run is active")
+    index: int
+    total: int
+
+
 class Vehicle(_Model):
     id: str
     kind: Literal["real", "sim"]
@@ -291,6 +302,7 @@ class Vehicle(_Model):
     preflight: PreflightSummary
     course: CourseRunView | None
     record_session: int | None
+    procedure: ProcedureBrief | None = None  # bench procedure (WP-B)
 
 
 class Alert(_Model):
@@ -372,6 +384,12 @@ EventKind = Literal[
     "refly_started",
     "refly_finished",
     "refly_failed",
+    # bench procedures (WP-B, 05 §4.4)
+    "procedure_started",
+    "procedure_step",
+    "procedure_waiting",
+    "procedure_finished",
+    "procedure_aborted",
 ]
 
 

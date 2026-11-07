@@ -122,6 +122,21 @@ TEMPLATES: dict[str, tuple[str, str]] = {
         "{vehicle} 的再飞记录 {session_id} 已中止：{detail}。",
     ),
     "listen_error": ("UDP listen failed: {error}", "UDP 监听失败：{error}"),
+    # bench procedures (WP-B, 05 §4.4)
+    "procedure_started": ("{vehicle} started {title_en}.", "{vehicle} 开始{title_zh}。"),
+    "procedure_step": (
+        "{vehicle} {title_en}: {step} {step_en} {verdict_en}.",
+        "{vehicle} {title_zh}：{step} {step_zh}{verdict_zh}。",
+    ),
+    "procedure_waiting": (
+        "{vehicle} {title_en} waits at {step} {step_en}: {prompt_en}",
+        "{vehicle} {title_zh}在 {step} {step_zh}等待：{prompt_zh}",
+    ),
+    "procedure_finished": ("{vehicle} {title_en} {verdict_en}.", "{vehicle} {title_zh}完成：{verdict_zh}。"),
+    "procedure_aborted": (
+        "{vehicle} {title_en} aborted: {detail}.",
+        "{vehicle} {title_zh}已中止：{detail}。",
+    ),
 }
 
 INPUT_LABELS = {"keyboard": ("keyboard", "键盘"), "screen": ("on-screen sticks", "屏幕摇杆")}

@@ -52,6 +52,15 @@
     },
     "UiResultMessage": {
       "$ref": "#/$defs/UiResultMessage"
+    },
+    "ProcedureCatalogue": {
+      "$ref": "#/$defs/ProcedureCatalogue"
+    },
+    "ProcedureRun": {
+      "$ref": "#/$defs/ProcedureRun"
+    },
+    "TestRuns": {
+      "$ref": "#/$defs/TestRuns"
     }
   },
   "required": [
@@ -70,7 +79,10 @@
     "UiState",
     "UiCommandMessage",
     "UiStateMessage",
-    "UiResultMessage"
+    "UiResultMessage",
+    "ProcedureCatalogue",
+    "ProcedureRun",
+    "TestRuns"
   ],
   "additionalProperties": false,
   "$defs": {
@@ -273,6 +285,37 @@
         "position"
       ],
       "title": "Capabilities",
+      "type": "object"
+    },
+    "CatalogueStep": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title_en": {
+          "type": "string"
+        },
+        "title_zh": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "auto",
+            "operator",
+            "operator_device",
+            "device",
+            "flight"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title_en",
+        "title_zh",
+        "kind"
+      ],
+      "title": "CatalogueStep",
       "type": "object"
     },
     "ClaimView": {
@@ -549,7 +592,12 @@
             "app_command",
             "refly_started",
             "refly_finished",
-            "refly_failed"
+            "refly_failed",
+            "procedure_started",
+            "procedure_step",
+            "procedure_waiting",
+            "procedure_finished",
+            "procedure_aborted"
           ],
           "type": "string"
         },
@@ -1249,6 +1297,778 @@
       "title": "PreflightSummary",
       "type": "object"
     },
+    "ProcedureBrief": {
+      "description": "The aircraft's bench procedure run, current or last (WP-B, 05 §4.4).",
+      "properties": {
+        "run_id": {
+          "type": "integer"
+        },
+        "procedure": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "running",
+            "waiting",
+            "passed",
+            "warned",
+            "failed",
+            "aborted"
+          ],
+          "type": "string"
+        },
+        "step": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "step id while the run is active"
+        },
+        "index": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "procedure",
+        "state",
+        "step",
+        "index",
+        "total"
+      ],
+      "title": "ProcedureBrief",
+      "type": "object"
+    },
+    "ProcedureCatalogue": {
+      "properties": {
+        "procedures": {
+          "items": {
+            "$ref": "#/$defs/ProcedureEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "procedures"
+      ],
+      "title": "ProcedureCatalogue",
+      "type": "object"
+    },
+    "ProcedureEntry": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title_en": {
+          "type": "string"
+        },
+        "title_zh": {
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/CatalogueStep"
+          },
+          "type": "array"
+        },
+        "est_s": {
+          "description": "rough duration in seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "title_en",
+        "title_zh",
+        "steps",
+        "est_s"
+      ],
+      "title": "ProcedureEntry",
+      "type": "object"
+    },
+    "ProcedureFinding": {
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "level": {
+          "enum": [
+            "info",
+            "warn",
+            "fail"
+          ],
+          "type": "string"
+        },
+        "text_en": {
+          "type": "string"
+        },
+        "text_zh": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "level",
+        "text_en",
+        "text_zh"
+      ],
+      "title": "ProcedureFinding",
+      "type": "object"
+    },
+    "ProcedureMetric": {
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "label_en": {
+          "type": "string"
+        },
+        "label_zh": {
+          "type": "string"
+        },
+        "value": {
+          "default": null
+        },
+        "unit": {
+          "type": "string"
+        },
+        "level": {
+          "enum": [
+            "ok",
+            "warn",
+            "bad",
+            "na",
+            "info"
+          ],
+          "type": "string"
+        },
+        "mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "peak": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "warn": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "bad": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "key",
+        "label_en",
+        "label_zh",
+        "value",
+        "unit",
+        "level",
+        "mean",
+        "peak",
+        "warn",
+        "bad"
+      ],
+      "title": "ProcedureMetric",
+      "type": "object"
+    },
+    "ProcedurePrompt": {
+      "properties": {
+        "id": {
+          "description": "props_removed, motor_check, calibrate_gyro, arm_start, apply_param, paused, ...",
+          "type": "string"
+        },
+        "text_en": {
+          "type": "string"
+        },
+        "text_zh": {
+          "type": "string"
+        },
+        "detail_en": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "detail_zh": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "answers": {
+          "items": {
+            "$ref": "#/$defs/PromptAnswer"
+          },
+          "type": "array"
+        },
+        "confirm_word": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "word the answer must carry on this aircraft, if any"
+        },
+        "operator_only": {
+          "description": "only the operator (the Relay window) may answer",
+          "type": "boolean"
+        },
+        "data": {
+          "description": "motor layout, motor, sensor, item to apply, blocking checks",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "text_en",
+        "text_zh",
+        "detail_en",
+        "detail_zh",
+        "answers",
+        "confirm_word",
+        "operator_only",
+        "data"
+      ],
+      "title": "ProcedurePrompt",
+      "type": "object"
+    },
+    "ProcedureRun": {
+      "properties": {
+        "run_id": {
+          "type": "integer"
+        },
+        "procedure": {
+          "type": "string"
+        },
+        "title_en": {
+          "type": "string"
+        },
+        "title_zh": {
+          "type": "string"
+        },
+        "vehicle": {
+          "type": "string"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "real",
+                "sim"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "host": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "autopilot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "firmware": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "simulated": {
+          "type": "boolean"
+        },
+        "state": {
+          "enum": [
+            "running",
+            "waiting",
+            "passed",
+            "warned",
+            "failed",
+            "aborted"
+          ],
+          "type": "string"
+        },
+        "step": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "index": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "verdict": {
+          "anyOf": [
+            {
+              "enum": [
+                "pass",
+                "warn",
+                "fail"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason_en": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason_zh": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "paused": {
+          "type": "boolean"
+        },
+        "by": {
+          "$ref": "#/$defs/RunActor"
+        },
+        "options": {
+          "type": "object"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/ProcedureStep"
+          },
+          "type": "array"
+        },
+        "started": {
+          "type": "number"
+        },
+        "ended": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "run_id",
+        "procedure",
+        "title_en",
+        "title_zh",
+        "vehicle",
+        "label",
+        "kind",
+        "host",
+        "autopilot",
+        "firmware",
+        "simulated",
+        "state",
+        "step",
+        "index",
+        "total",
+        "verdict",
+        "reason",
+        "reason_en",
+        "reason_zh",
+        "paused",
+        "by",
+        "options",
+        "steps",
+        "started",
+        "ended"
+      ],
+      "title": "ProcedureRun",
+      "type": "object"
+    },
+    "ProcedureStep": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title_en": {
+          "type": "string"
+        },
+        "title_zh": {
+          "type": "string"
+        },
+        "description_en": {
+          "type": "string"
+        },
+        "description_zh": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "auto",
+            "operator",
+            "operator_device",
+            "device",
+            "flight"
+          ],
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "pending",
+            "running",
+            "waiting",
+            "done",
+            "skipped",
+            "aborted"
+          ],
+          "type": "string"
+        },
+        "verdict": {
+          "anyOf": [
+            {
+              "enum": [
+                "pass",
+                "warn",
+                "fail",
+                "skipped"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metrics": {
+          "items": {
+            "$ref": "#/$defs/ProcedureMetric"
+          },
+          "type": "array"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/ProcedureFinding"
+          },
+          "type": "array"
+        },
+        "suggestions": {
+          "items": {
+            "$ref": "#/$defs/ProcedureSuggestion"
+          },
+          "type": "array"
+        },
+        "prompt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProcedurePrompt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "activity_en": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "activity_zh": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "live": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "recent points, 5 Hz"
+        },
+        "started": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ended": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "title_en",
+        "title_zh",
+        "description_en",
+        "description_zh",
+        "kind",
+        "state",
+        "verdict",
+        "metrics",
+        "findings",
+        "suggestions",
+        "prompt",
+        "activity_en",
+        "activity_zh",
+        "live",
+        "started",
+        "ended"
+      ],
+      "title": "ProcedureStep",
+      "type": "object"
+    },
+    "ProcedureSuggestion": {
+      "properties": {
+        "kind": {
+          "enum": [
+            "param",
+            "relay"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "current": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "suggested": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "direction": {
+          "enum": [
+            "increase",
+            "decrease",
+            "set"
+          ],
+          "type": "string"
+        },
+        "change_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason_en": {
+          "type": "string"
+        },
+        "reason_zh": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "proposed",
+            "applied",
+            "kept",
+            "failed",
+            "unavailable"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "current",
+        "suggested",
+        "direction",
+        "change_pct",
+        "reason_en",
+        "reason_zh",
+        "state"
+      ],
+      "title": "ProcedureSuggestion",
+      "type": "object"
+    },
+    "PromptAnswer": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label_en": {
+          "type": "string"
+        },
+        "label_zh": {
+          "type": "string"
+        },
+        "tone": {
+          "enum": [
+            "primary",
+            "default",
+            "danger"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label_en",
+        "label_zh",
+        "tone"
+      ],
+      "title": "PromptAnswer",
+      "type": "object"
+    },
     "Rates": {
       "properties": {
         "roll": {
@@ -1295,6 +2115,33 @@
         "r"
       ],
       "title": "Ring",
+      "type": "object"
+    },
+    "RunActor": {
+      "properties": {
+        "kind": {
+          "enum": [
+            "operator",
+            "session"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "title": "RunActor",
       "type": "object"
     },
     "SafetyVolume": {
@@ -1557,6 +2404,179 @@
         "source"
       ],
       "title": "SticksView",
+      "type": "object"
+    },
+    "TestRunCounts": {
+      "properties": {
+        "pass": {
+          "type": "integer"
+        },
+        "warn": {
+          "type": "integer"
+        },
+        "fail": {
+          "type": "integer"
+        },
+        "skipped": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pass",
+        "warn",
+        "fail",
+        "skipped"
+      ],
+      "title": "TestRunCounts",
+      "type": "object"
+    },
+    "TestRunSummary": {
+      "properties": {
+        "run_id": {
+          "type": "integer"
+        },
+        "vehicle": {
+          "type": "string"
+        },
+        "host": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "real",
+                "sim"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "procedure": {
+          "type": "string"
+        },
+        "title_en": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "title_zh": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "state": {
+          "enum": [
+            "running",
+            "waiting",
+            "passed",
+            "warned",
+            "failed",
+            "aborted"
+          ],
+          "type": "string"
+        },
+        "verdict": {
+          "anyOf": [
+            {
+              "enum": [
+                "pass",
+                "warn",
+                "fail"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "started": {
+          "type": "number"
+        },
+        "ended": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "counts": {
+          "$ref": "#/$defs/TestRunCounts"
+        },
+        "total": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "vehicle",
+        "host",
+        "label",
+        "kind",
+        "procedure",
+        "title_en",
+        "title_zh",
+        "state",
+        "verdict",
+        "started",
+        "ended",
+        "counts",
+        "total"
+      ],
+      "title": "TestRunSummary",
+      "type": "object"
+    },
+    "TestRuns": {
+      "properties": {
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/TestRunSummary"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "runs"
+      ],
+      "title": "TestRuns",
       "type": "object"
     },
     "UiCommandMessage": {
@@ -2243,6 +3263,17 @@
               "type": "null"
             }
           ]
+        },
+        "procedure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProcedureBrief"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -2290,7 +3321,8 @@
         "confirmed",
         "preflight",
         "course",
-        "record_session"
+        "record_session",
+        "procedure"
       ],
       "title": "Vehicle",
       "type": "object"
