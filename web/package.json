@@ -1,6 +1,6 @@
 {
   "name": "@anet-relay/web",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "description": "ANet Relay renderer: Vite + React 19 + TypeScript + Tailwind 4 + shadcn (base-mira).",

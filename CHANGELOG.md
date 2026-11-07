@@ -5,6 +5,15 @@ All notable changes to ANet Relay are documented in this file. The format follow
 [Semantic Versioning](https://semver.org/). Each release section is published as the
 GitHub Release notes for its tag.
 
+## [0.3.1] - 2026-11-07
+
+### Fixed
+
+- macOS installer window: the icon labels sit on graphite nameplates, so they
+  read clearly whether Finder draws them black (light appearance) or white
+  (dark appearance). In 0.3.0 the black labels of the light appearance were
+  hard to read on the dark background.
+
 ## [0.3.0] - 2026-11-07
 
 A director's-cut opening, bench procedures that calibrate and test an aircraft
@@ -310,6 +319,8 @@ xattr -dr com.apple.quarantine "/Applications/ANet Relay.app"
 - Stick timing has been verified on simulators and fake aircraft; check stick
   directions with the propellers removed before the first flight of each aircraft.
 
+[0.3.1]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.3.1
+[0.3.0]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.3.0
 [0.2.1]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.2.1
 [0.2.0]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.1.0
