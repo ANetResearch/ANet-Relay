@@ -19,6 +19,7 @@ import { live, startLive } from './live'
 import { framingExtras } from './scene/CameraRig'
 import { rig } from './scene/rigState'
 import { HudStrip, IdentityBlock, StickPanel, useStickPanelShown, ViewTools } from './Overlays'
+import { DRIVING_HUD_H, DrivingHud } from './DrivingHud'
 import { chaseTargetId } from './scene/CameraRig'
 import { StageCanvas } from './scene/StageCanvas'
 import { stagePulse, useStage, type ViewMode } from './store'
@@ -196,7 +197,9 @@ export function Stage({ children }: StageProps) {
   const sticksBottom = sticksLifted ? stripBottom + 64 + 8 : 16
   // toasts and hint cards (window bottom centre) clear the strip, and the stick panel when it is lifted over it
   const sticksShown = useStickPanelShown()
-  const toastLift = !replaying && sticksShown && sticksLifted ? sticksBottom + STICK_PANEL_H + 8 : stripBottom + 64 + 8
+  // WP-C: the driving HUD (05 §6.4) sits on top of the stick panel and lifts with it
+  const hudBottom = sticksBottom + (sticksShown ? STICK_PANEL_H + 8 : 0)
+  const toastLift = !replaying && sticksShown && sticksLifted ? hudBottom + DRIVING_HUD_H + 8 : stripBottom + 64 + 8
   React.useEffect(() => {
     if (replaying) return
     const root = document.documentElement
@@ -228,6 +231,7 @@ export function Stage({ children }: StageProps) {
             <ViewTools top={topShift} />
             <HudStrip width={w} bottom={stripBottom} />
             <StickPanel bottom={sticksBottom} />
+            <DrivingHud bottom={hudBottom} />
           </>
         )}
       </div>
