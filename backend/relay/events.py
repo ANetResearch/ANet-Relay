@@ -122,6 +122,11 @@ TEMPLATES: dict[str, tuple[str, str]] = {
         "{vehicle} 的再飞记录 {session_id} 已中止：{detail}。",
     ),
     "listen_error": ("UDP listen failed: {error}", "UDP 监听失败：{error}"),
+    # LAN arena (05 §7.4, WP-D); {detail} is filled from detail_en / detail_zh
+    "peer_joined": ("{callsign} joined the arena.", "{callsign} 已加入联机场地。"),
+    "peer_left": ("{callsign} left the arena.", "{callsign} 已离开联机场地。"),
+    "arena_hit": ("{vehicle} {detail}.", "{vehicle} {detail}。"),
+    "arena_down": ("{vehicle} {detail}.", "{vehicle} {detail}。"),
 }
 
 INPUT_LABELS = {"keyboard": ("keyboard", "键盘"), "screen": ("on-screen sticks", "屏幕摇杆")}

@@ -72,6 +72,7 @@ from .mav.mavlink import M, Parser
 from .mav.params import ESSENTIAL, NamedReads, ParamFetch, normalise, same_value, type_name
 from .model import INPUT_KINDS, Calibration, Capability, Confirmed, Signs, StickInput
 from .netinfo import local_networks, on_bridge_ap, scan_hosts
+from .peers.game import Arena
 from .sessions import Session, SessionManager
 from .sim.autopilot import ARDUPILOT, PX4, SimAutopilot
 
@@ -397,6 +398,9 @@ class FleetService(DeviceOps):
         if self.link is not None:
             self._open_listen()
         self._labels = self.history.labels()
+        # LAN arena (05 §7, WP-D): its own UDP socket and rules; peers never enter self.vehicles
+        self.arena = Arena(self, network=listen)
+        self.arena.apply_settings()
         self._build_snapshot(self.clock())
 
     # ====================================================================== lifecycle
@@ -424,6 +428,7 @@ class FleetService(DeviceOps):
             self._shutdown_vehicles()
         if self.link is not None:
             self.link.close()
+        self.arena.close()
         self.history.close()
 
     def _shutdown_vehicles(self) -> None:
@@ -511,6 +516,7 @@ class FleetService(DeviceOps):
                 continue
             for msg in msgs:
                 self._on_message(v, msg, now)
+        self.arena.tick(now)  # LAN arena (WP-D): fire, bullets and hits right after the simulators stepped
         if now >= self._next["stick"]:
             self._next["stick"] = max(self._next["stick"] + 1.0 / STICK_HZ, now)
             for v in list(self.vehicles.values()):
@@ -859,7 +865,8 @@ class FleetService(DeviceOps):
             conditions.append(
                 Condition("battery_critical", "critical", v.id, {**labels, "voltage": f"{voltage:.2f}"})
             )
-        if v.state["crashed"]:
+        # a shoot-down in the arena is not a safety event (05 §7.4, WP-D)
+        if v.state["crashed"] and not self.arena.is_down(v.id):
             conditions.append(Condition("crashed", "critical", v.id, labels))
 
         # Control: airborne with nobody flying.
@@ -2344,6 +2351,7 @@ class FleetService(DeviceOps):
             "bridge_port": self.settings.bridge_port,
             "api_port": self.http_port,
             "allow_loopback": self.allow_loopback,
+            "arena": self.arena.network_view(),
         }
 
     def discover(self, networks: list[str] | None = None, http_port: int = 80) -> dict[str, Any]:
@@ -2472,10 +2480,12 @@ class FleetService(DeviceOps):
             new = self.settings.merged(patch)
         except (ValueError, TypeError) as exc:
             raise err("invalid_request", reason=f"setting {exc} is not valid") from exc
+        self.arena.validate(new)
 
         def run() -> dict[str, Any]:
             self.settings = new
             save_settings(self.data_dir, new)
+            self.arena.apply_settings()
             return self.get_settings()
 
         return self.call(run)
@@ -2777,6 +2787,24 @@ class FleetService(DeviceOps):
 
     def health(self) -> dict[str, Any]:
         return {"ok": True, "version": VERSION, "uptime_s": round(self.clock() - self.started, 1)}
+
+    # ====================================================================== LAN arena (05 §7, WP-D)
+
+    def fire(self, vid: str, actor: Actor, on: bool = True, seconds: float | None = None) -> dict[str, Any]:
+        """Hold-type fire input: WebSocket ``on`` lapses after 300 ms; REST holds up to 3 s (05 §7.4)."""
+
+        def run() -> dict[str, Any]:
+            v = self._vehicle(vid)
+            if v.kind != "sim":
+                raise err("sim_only")
+            self._check_control(v, actor)
+            return self.arena.fire(v, on, seconds, self.clock())
+
+        return self.call(run)
+
+    def arena_snapshot(self) -> dict[str, Any]:
+        """The ``arena`` stream payload (05 §7.5), rebuilt at 20 Hz on the fleet thread."""
+        return self.arena.snapshot
 
 
 def _level_rank(level: str) -> int:

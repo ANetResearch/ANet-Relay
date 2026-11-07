@@ -127,6 +127,13 @@ CATALOGUE: dict[str, tuple[int, str, str]] = {
         "这架飞机没有报告本地位置估计。",
     ),
     "sim_only": (409, "This action is only available for simulated aircraft.", "此操作仅适用于模拟机。"),
+    # LAN arena (05 §7.4, WP-D)
+    "arena_off": (409, "Join the arena before firing.", "须先加入联机场地才能射击。"),
+    "arena_down": (
+        409,
+        "This aircraft was shot down. Reset it before firing.",
+        "这架飞机已被击落，复位后才能射击。",
+    ),
     "real_only": (409, "This action is only available for real aircraft.", "此操作仅适用于真机。"),
     "sim_limit": (409, "Relay runs at most {limit} simulated aircraft.", "Relay 最多运行 {limit} 架模拟机。"),
     "course_preset_readonly": (409, "Built-in courses cannot be changed.", "内置航线不可修改。"),

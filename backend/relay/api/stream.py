@@ -5,6 +5,8 @@ and ``{"type": "event", "data": event}`` as events happen. Client -> server: ``{
 "vehicle", "roll", "pitch", "yaw", "throttle"}`` (needs operator or session auth) and ``{"type": "ping"}``.
 Closing the socket stops every stick stream it was feeding. Operator sockets also carry the application
 channel (04 §3.1): the window sends ``ui_state`` and ``ui_result``, the server pushes ``ui_command``.
+LAN arena (05 §7.4-§7.5): the server sends ``{"type": "arena", "data": view}`` at 20 Hz, apart from ``fleet``;
+the controller sends ``{"type": "fire", "vehicle", "on"}`` every 100 ms while the trigger is held.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from .schemas_app import UiState
 router = APIRouter()
 QUEUE_LIMIT = 2000
 ERROR_INTERVAL_S = 1.0
+ARENA_HZ = 20.0
 
 
 @router.websocket("/stream")
@@ -91,6 +94,8 @@ async def stream(ws: WebSocket) -> None:
                 await ws.send_text(json.dumps({"type": "pong", "t": time.time()}))
             elif kind == "sticks":
                 await _sticks(ws, svc, msg, operator, session, conn, last_error)
+            elif kind == "fire":
+                await _fire(ws, svc, msg, operator, session, last_error)
             elif kind in ("ui_state", "ui_result"):
                 await _ui_message(ws, bridge, link, msg, kind, operator, last_error)
             else:
@@ -123,6 +128,28 @@ async def _sticks(ws, svc, msg, operator, session, conn, last_error) -> None:
         if not isinstance(vehicle, str):
             raise err("invalid_request", reason="vehicle is required")
         await run_in_threadpool(svc.sticks, vehicle, who, msg, conn)
+    except RelayError as exc:
+        await _send_error(ws, exc, last_error, ref=vehicle)
+
+
+async def _fire(ws, svc, msg, operator, session, last_error) -> None:
+    """LAN arena (WP-D): hold-type trigger; ``on`` lapses after 300 ms without a refresh (05 §7.4)."""
+    vehicle = msg.get("vehicle")
+    try:
+        if operator:
+            who = Actor.operator(msg.get("input"), msg.get("pad"))
+        elif session is not None:
+            if not svc.sessions.alive(session.session_id):
+                raise err("session_expired")
+            if not svc.sessions.allow(session, "control"):
+                raise err("rate_limited", klass="control")
+            svc.sessions.renew(session)
+            who = Actor.session(session.session_id, session.name)
+        else:
+            raise err("auth_required")
+        if not isinstance(vehicle, str):
+            raise err("invalid_request", reason="vehicle is required")
+        await run_in_threadpool(svc.fire, vehicle, who, msg.get("on") is True)
     except RelayError as exc:
         await _send_error(ws, exc, last_error, ref=vehicle)
 
@@ -165,17 +192,27 @@ async def _send_loop(ws: WebSocket, svc, events: asyncio.Queue) -> None:
     period = 1.0 / SNAPSHOT_HZ
     next_fleet = 0.0
     last_t = None
+    next_arena = 0.0  # LAN arena (WP-D): its own 20 Hz message, so the fleet snapshot keeps 10 Hz
+    last_arena = None
     while True:
         now = time.monotonic()
-        timeout = max(0.0, next_fleet - now)
+        timeout = max(0.0, min(next_fleet, next_arena) - now)
         try:
             event = await asyncio.wait_for(events.get(), timeout=timeout)
             await ws.send_text(json.dumps({"type": "event", "data": event}, ensure_ascii=False))
             continue
         except TimeoutError:
             pass
-        next_fleet = time.monotonic() + period
-        snapshot = svc.fleet()
-        if snapshot.get("t") != last_t:
-            last_t = snapshot.get("t")
-            await ws.send_text(json.dumps({"type": "fleet", "data": snapshot}, ensure_ascii=False))
+        now = time.monotonic()
+        if now >= next_fleet:
+            next_fleet = now + period
+            snapshot = svc.fleet()
+            if snapshot.get("t") != last_t:
+                last_t = snapshot.get("t")
+                await ws.send_text(json.dumps({"type": "fleet", "data": snapshot}, ensure_ascii=False))
+        if now >= next_arena:
+            next_arena = now + 1.0 / ARENA_HZ
+            view = svc.arena_snapshot()
+            if view.get("t") != last_arena:
+                last_arena = view.get("t")
+                await ws.send_text(json.dumps({"type": "arena", "data": view}, ensure_ascii=False))

@@ -372,6 +372,11 @@ EventKind = Literal[
     "refly_started",
     "refly_finished",
     "refly_failed",
+    # LAN arena (05 §7.4, WP-D)
+    "peer_joined",
+    "peer_left",
+    "arena_hit",
+    "arena_down",
 ]
 
 
@@ -435,6 +440,84 @@ class SessionOpened(_Model):
     name: str
     token: str
     lease_s: float
+
+
+# ---------------------------------------------------------------------------- LAN arena (05 §7.5, WP-D)
+
+
+class ArenaScore(_Model):
+    hits: int
+    downs: int
+    deaths: int
+
+
+class ArenaVehicle(_Model):
+    """A remote simulator, converted into this terminal's local frame (ENU m, radians)."""
+
+    key: str = Field(description="<peer id>/sim-N")
+    label: str
+    x: float
+    y: float
+    z: float
+    vx: float
+    vy: float
+    vz: float
+    roll: float
+    pitch: float
+    yaw: float = Field(description="rad, compass heading in the local frame")
+    throttle: float
+    armed: bool
+    down: bool
+    hp: int
+
+
+class ArenaPeer(_Model):
+    id: str = Field(description="the peer's install id, 16 hex digits")
+    callsign: str
+    seat: int | None
+    rtt_ms: float | None
+    stale: bool
+    age_s: float
+    score: ArenaScore
+    vehicles: list[ArenaVehicle]
+
+
+class ArenaShot(_Model):
+    """A bullet in flight: integrate from (p, v) at t0 with the shared 1/240 s integrator."""
+
+    id: str
+    owner: str
+    mine: bool
+    t0: float = Field(description="backend wall clock at which p and v hold (same clock as Fleet.t)")
+    p: list[float] = Field(min_length=3, max_length=3)
+    v: list[float] = Field(min_length=3, max_length=3)
+
+
+class ArenaLocal(_Model):
+    ammo: dict[str, int]
+    hp: dict[str, int]
+    reloading: dict[str, bool]
+    down: dict[str, bool]
+    max_ammo: int
+    max_hp: int
+    score: ArenaScore
+
+
+class ArenaView(_Model):
+    t: float
+    enabled: bool
+    instance: str
+    seat: int | None
+    callsign: str
+    error: str | None
+    peers: list[ArenaPeer]
+    shots: list[ArenaShot]
+    local: ArenaLocal
+
+
+class ArenaMessage(_Model):
+    type: Literal["arena"]
+    data: ArenaView
 
 
 # ---------------------------------------------------------------------------- request bodies
@@ -588,6 +671,12 @@ class SessionBody(_Body):
     name: str
 
 
+class FireBody(_Body):
+    """LAN arena (05 §7.4, WP-D)."""
+
+    seconds: float = Field(default=1.0, ge=0, le=3, description="hold the trigger this long; 0 releases it")
+
+
 class BridgeConfigureBody(_Body):
     model_config = ConfigDict(extra="ignore")
     mode: Literal["station", "ap"] = "station"
@@ -618,4 +707,6 @@ EXPORTED = {
     "EventMessage": EventMessage,
     "ErrorMessage": ErrorMessage,
     "SessionOpened": SessionOpened,
+    "ArenaView": ArenaView,
+    "ArenaMessage": ArenaMessage,
 }
