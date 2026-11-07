@@ -5,6 +5,109 @@ All notable changes to ANet Relay are documented in this file. The format follow
 [Semantic Versioning](https://semver.org/). Each release section is published as the
 GitHub Release notes for its tag.
 
+## [0.3.0] - 2026-11-07
+
+A director's-cut opening, bench procedures that calibrate and test an aircraft
+step by step, a physical flight model for simulators, control feel presets and
+RC transmitters, and a LAN arena in which simulated aircraft see and shoot at
+each other.
+
+### Added
+
+- Opening: on the first launch of each version a 5.6 s director's cut plays (a
+  voxel logo, a diagonal voxel cut into a film, a voxel reveal); later launches
+  play a 3.2 s short cut. Any key, click or controller button skips it, and
+  Settings → General → Opening sequence chooses Full, Short (the default) or
+  Minimal (the 1.2 s opening of 0.2). The 8 s and 20 s start-up warnings keep
+  their timing, the emergency stop works during the opening, and with reduced
+  motion it takes at most 400 ms and loads no video. Panel loading, workspace
+  switches, replays and the 3D stage use the same voxel language.
+- Bench procedures: `full_bench`, `preflight_quick`, `motor_check`,
+  `vibration_check` and `hover_tune` chain twelve steps (link and firmware,
+  battery at rest, parameter baseline, sensor calibration, stick directions,
+  motor order and direction, ground vibration, propellers fitted, hover test,
+  step response, hover learning, report). Each step measures, judges against a
+  stated limit and suggests parameter changes by name and direction; nothing is
+  written without the operator's consent, and the existing confirm words and
+  limits apply. Reports are saved, listed under Records → Bench reports and
+  exported as JSON or a bilingual Markdown table. New inspector tab **Bench**,
+  `GET /procedures`, `/vehicles/{id}/procedure` (start, answer, abort),
+  `/test-runs`, five `procedure_*` events, seven tools each in the device MCP
+  server (now 36 tools) and in Copilot, and SDK calls.
+- Simulator hover assist: every simulator has a hover-assist switch (setting
+  `sim_hover_assist`, on by default). Off, it flies like a racing quad without
+  barometer or position source: the throttle is thrust, the hover point rises as
+  the battery sags, hold modes are refused, and ground effect, motor lag,
+  turbulence (setting `sim_turbulence`) and propeller wake act. The switch works
+  in flight without a thrust jump. `POST /sims/{id}/assist`, event
+  `sim_assist_changed`, `vehicle.sim` in the snapshot, MCP `app_sim_assist`
+  (the app MCP server now has 42 tools).
+- Control feel: Gentle, Standard (the default) and Sport presets scale tilt, yaw
+  and keyboard reach; the throttle has its own linear curve with an optional
+  centre detent in hold modes; the right stick has a radial dead zone; Mode 1
+  and per-axis inversion. Keys `Z` (throttle to the hover point) and `H` (hover
+  assist); Triangle switches hover assist on a simulator and altitude hold on a
+  real aircraft; the D-pad changes the feel.
+- RC transmitters in USB joystick mode (EdgeTX, OpenTX, RadioMaster, Jumper,
+  FrSky, TBS and others) and non-standard controllers: an AETR default with an
+  absolute throttle, a mapping wizard that learns axes, directions, centres and
+  end points, and switch bindings for hover assist, fire, arm (simulators) and
+  stop. A transmitter starts sending sticks only once its throttle is lowest, or
+  centred in hold modes.
+- Driving HUD on the stage while an aircraft is flown: aircraft, controller,
+  mode, hover assist, feel, the throttle actually sent against the hover point,
+  and in the arena the aircraft's hit points and ammunition.
+- LAN arena: the top-bar **Arena** switch joins every Relay terminal on the same
+  network without rooms or a lobby. Remote simulators appear on the stage in
+  graphite; rounds follow a shared ballistic model; the owner of the aircraft
+  that is hit judges the hit; 20 damage per round, five bring a simulator down,
+  and it respawns after 5 s. Scoreboard, crosshair and hit direction on the
+  stage. `GET /arena`, `POST /vehicles/{id}/fire`, the stream messages `arena`
+  and `fire`, events `peer_joined`, `peer_left`, `arena_hit` and `arena_down`,
+  settings `peer_port`, `peer_callsign` and `arena_auto_respawn`, SDK `arena()`
+  and `fire()`. Real aircraft never join the arena and are never affected by
+  virtual rounds. The arena adds one UDP socket (port 47114 by default) that
+  carries no control: nothing received from the network reaches sticks, arming,
+  claims, parameters, skills, plans or device calls.
+- Installer art: a DMG window background and layout on macOS, and wizard sidebar
+  and header images in the Windows installer.
+
+### Changed
+
+- Keyboard pitch and roll reach follows the control feel (0.6, 0.8 or 1.0)
+  instead of a fixed half stick; in hold modes `R` and `F` climb and descend
+  only while held.
+- The flight tuning and hardware guides (Chinese) start from the bench
+  procedure.
+
+### Fixed
+
+- The `app://` protocol answers byte-range requests with 206 and 416, so video
+  served from the application bundle can seek.
+
+### Downloads
+
+| Platform | File |
+|---|---|
+| macOS (Apple silicon) | `ANet-Relay-0.3.0-mac-arm64.dmg`, `ANet-Relay-0.3.0-mac-arm64.zip` |
+| macOS (Intel) | `ANet-Relay-0.3.0-mac-x64.dmg`, `ANet-Relay-0.3.0-mac-x64.zip` |
+| Linux x64 | `ANet-Relay-0.3.0-linux-x64.AppImage`, `ANet-Relay-0.3.0-linux-x64.tar.gz` |
+| Windows x64 | `ANet-Relay-0.3.0-win-x64.exe` |
+
+Verify downloads against `SHA256SUMS.txt`. The macOS build is signed and
+notarized: drag it to Applications and open it. The Windows installer is not
+code-signed; when SmartScreen warns, choose More info → Run anyway.
+
+### Known limitations
+
+- The arena has been tested with several terminals on one machine over
+  loopback; networks that block both multicast and broadcast keep terminals
+  apart.
+- The flight steps of a bench procedure (S9, S10) need altitude hold: on a
+  simulator with hover assist off they fail at once with that reason.
+- Transmitter detection and the mapping wizard have been tested with synthetic
+  controller readings only, not yet with transmitter hardware.
+
 ## [0.2.1] - 2026-11-07
 
 A device-level interface down to single motors, application control for agents,

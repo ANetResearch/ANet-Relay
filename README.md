@@ -41,7 +41,11 @@ ANet Relay is the desktop ground control station for small drone fleets on a loc
 | Application control | Agents operate Relay itself: controllers and app status, language and workspace, selection, network scan, fleet and simulators, settings, screenshots; can be switched off in Settings | Available |
 | Copilot | Built-in chat agent on [pi](https://github.com/earendil-works/pi) in a floating, always-on-top window that can be placed anywhere and never blocks other windows; flight, device-level and application operations in plain language, with any OpenAI- or Anthropic-compatible endpoint and key; every motion and device write on a real aircraft waits for the operator's approval | Available |
 | Flight health | Rolling diagnostics while flying: attitude oscillation, hands-off lean, yaw drift, altitude hold, hover throttle, motor balance, vibration, battery sag, link and stick stream, each with its likely cause and fix | Available |
-| Simulator | Up to 8 simulated aircraft that behave like ArduPilot vehicles, with dynamics and a battery model; identical to real aircraft through the API | Available |
+| Simulator | Up to 8 simulated aircraft that behave like ArduPilot or PX4 vehicles, with dynamics and a battery model; identical to real aircraft through the API | Available |
+| Physical simulator | Per-simulator hover assist: off, a simulator flies like a racing quad without barometer or position source (throttle is thrust, ground effect, motor lag, turbulence); switchable in flight | Available |
+| Bench procedures | Five step-by-step procedures from link check to sensor calibration, motor order, vibration, hover and step-response tests; measured verdicts, parameter suggestions and a saved bilingual report | Available |
+| Controls and transmitters | Gentle, Standard and Sport feel, Mode 1 and Mode 2, per-axis inversion, RC transmitters in USB joystick mode with a mapping wizard, and a driving HUD | Available |
+| LAN arena | Relay terminals on one network see each other's simulators and fire virtual rounds with shared ballistics, hits and scores; real aircraft never take part | Available |
 | Ring course | Virtual ring sequences (cage loop, slalom, climb) with timing, splits and a chase camera, for simulators and for real aircraft with a local position estimate | Available |
 | Bridge setup | Four-step wizard that moves a new ESP8266 MAVLink bridge from its hotspot onto the team network | Available |
 | Preflight | Link, autopilot, battery, prearm, GCS input parameters, stick direction check, propellers, mode, failsafe and position; arming a real aircraft requires typing `ARM` | Available |
@@ -66,7 +70,7 @@ The application bundles its backend; no Python or Node installation is needed to
 
 ## Quick start
 
-1. Start ANet Relay. The ANet mark lights up while the backend starts.
+1. Start ANet Relay. The first launch of each version plays a short director's cut while the backend starts; any key, click or controller button skips it, and Settings → General → Opening sequence sets Full, Short or Minimal.
 2. Click **Add sim** at the bottom of the fleet bar to add a simulated aircraft, or connect a gamepad: it binds to the first free simulator and offers the ring course.
 3. Press **P** (or hold **Options** on the gamepad) to possess the selected aircraft. Arm, take off and fly; release with **P** again.
 4. To let an agent fly, run one of the examples against the running app:
@@ -93,7 +97,10 @@ The SDK and the MCP server use the Python standard library only. The [Agent API 
 | Arm or disarm (simulators) | — | L1 + R1, hold 1 s |
 | Stop this aircraft | `Esc` | L2 + R2, fully pressed |
 | Stop all aircraft | `⌘.` / `Ctrl+.` | — |
-| Flight mode | Inspector | Triangle |
+| Hover assist (simulators) or altitude hold (real aircraft) | `H` | Triangle |
+| Throttle to the hover point | `Z` | — |
+| Control feel sharper or gentler | — | D-pad up / down |
+| Fire (simulators, LAN arena) | `X`, held | R1, held |
 | Ring course | `G` | Square |
 | Command palette | `⌘K` / `Ctrl+K` | — |
 
@@ -133,7 +140,7 @@ claude mcp add anet-relay-app -- python3 /path/to/ANet-Relay/mcp/anet_relay_app_
 | REST | `http://127.0.0.1:8765/api/v1` (first free port from 8765 to 8775) |
 | WebSocket | `ws://127.0.0.1:8765/api/v1/stream` |
 | OpenAPI | `http://127.0.0.1:8765/openapi.json`, interactive at `/docs` |
-| MCP | over stdio: `mcp/anet_relay_mcp.py` (flight, 20 tools), `mcp/anet_relay_device_mcp.py` (device level, 29), `mcp/anet_relay_app_mcp.py` (application control, 41) |
+| MCP | over stdio: `mcp/anet_relay_mcp.py` (flight, 20 tools), `mcp/anet_relay_device_mcp.py` (device level, 36), `mcp/anet_relay_app_mcp.py` (application control, 42) |
 | Python SDK | `sdk/python/anet_relay_client.py` and six examples |
 
 The API listens on the loopback interface only. Agents control simulators and real aircraft through the same calls; real aircraft additionally require the operator's preflight steps and `confirm: "ARM"`.
@@ -163,6 +170,22 @@ Rings are drawn in three states (next, upcoming, passed) that differ in shape an
 <img src="docs/media/course-finish-zh.png" alt="Course finish card in Chinese with a new best time and four splits" width="100%" />
 
 <sub>**Screenshot.** The finish card with a new best time, in the Chinese interface.</sub>
+
+### Bench procedures
+
+Open the inspector's **Bench** tab, or **Run bench check** under the preflight list on the **Control** tab, and choose a procedure: `full_bench` for a new, modified or repaired aircraft, `preflight_quick` before each session, `motor_check` after a motor or ESC change, `vibration_check` after a propeller or motor change, and `hover_tune` while tuning. Steps run in order: link and firmware, battery at rest, parameter baseline, sensor calibration, stick directions, motor order and direction with the propellers removed (drawn from the reported frame), ground vibration, propellers fitted, a hover test at 0.6 m, roll, pitch and yaw step responses, and hover learning. Each step shows live measurements and its verdict against a stated limit; suggested parameter changes name the parameter and the direction and are applied only on the operator's answer. The existing confirm words (`CALIBRATE`, `MOTOR`, `ARM`) and limits apply on a real aircraft. The report is saved under **Records → Bench reports** and exports as JSON or a bilingual Markdown table. Agents run the same procedures through the API and the device MCP server; on a real aircraft only the operator answers the propeller and motor questions.
+
+### Physical simulator and hover assist
+
+Each simulator has a hover-assist switch (`H` or Triangle while flying it; the default for new simulators and the turbulence strength are in Settings → Safety). With hover assist on, a simulator holds height and position as before. With it off, it flies like a racing quad without barometer or position source: the attitude still self-levels, but the throttle is thrust, the hover point rises as the battery sags, ground effect, motor lag, turbulence and propeller wake act, and altitude and position hold modes are refused. The switch works in flight without a thrust jump. Bench flight steps need hover assist and say so when it is off.
+
+### Controls and transmitters
+
+Three feel presets, Gentle, Standard and Sport, scale tilt, yaw and keyboard reach without changing flight controller parameters; the throttle keeps a linear curve with an optional centre detent in hold modes. Mode 1 and Mode 2 and per-axis inversion are in Settings → Controllers. RC transmitters in USB joystick mode (EdgeTX, OpenTX, RadioMaster, Jumper, FrSky, TBS and others) are recognised with an AETR default and an absolute throttle; **Set up mapping** in the controller panel learns axes, directions, centres and end points for any non-standard device and binds switches to hover assist, fire, arm (simulators) and stop. A transmitter starts sending sticks only once its throttle is lowest, or centred in hold modes. While an aircraft is flown, the driving HUD above the stick panel shows the mode, hover assist, the feel and the throttle actually sent against the hover point.
+
+### LAN arena
+
+The **Arena** switch in the top bar joins every Relay terminal on the same network; there are no rooms or lobby, and switching it off leaves. Remote simulators appear on the stage in graphite with the terminal's callsign (Settings → Network), on twelve seats around a 10 m circle. Hold R1 or `X` to fire from a possessed, airborne simulator: 8 rounds per second, 24 per magazine. Rounds follow the same ballistic model on every terminal; the owner of the aircraft that is hit judges the hit, five hits bring a simulator down, and it respawns after 5 s. A scoreboard, a crosshair and the hit direction appear on the stage, and the driving HUD shows hit points and ammunition. Simulators on one terminal can also fire at each other for practice. **Real aircraft never join the arena and are never affected by virtual rounds**: only simulators are shared, and the arena's UDP socket carries no control, so nothing received from the network reaches sticks, arming, claims, parameters, skills or plans.
 
 ### Agents workspace
 
@@ -206,7 +229,7 @@ The backend runs on its own with `.venv/bin/python -m relay --dev`. Pushing a `v
 | Path | Contents |
 |---|---|
 | `electron/` | Desktop shell: window, `app://relay` protocol, native menus, backend supervisor, Copilot agent (`electron/copilot/`) |
-| `backend/relay/` | MAVLink links and drivers, control authority, sessions and skills, simulator, ring courses, preflight, history, REST and WebSocket API |
+| `backend/relay/` | MAVLink links and drivers, control authority, sessions and skills, simulator, ring courses, preflight, bench procedures (`procedures/`), LAN arena (`peers/`), history, REST and WebSocket API |
 | `web/` | Interface: React, three.js stage, ANet Graphite theme, English and Chinese |
 | `sdk/python/`, `mcp/` | Python SDK with examples; MCP server |
 | `tools/fakes/` | Fake bridge and flight controller for testing without hardware |

@@ -398,3 +398,15 @@ loading; buttons keep `Spinner`.
   tokens in `styles/motion/ext-tokens.css`; JS reads them with `ui/motion/tokens.ts` `msToken()`.
 - The pre-flight list's first poll (`control/PreflightList.tsx`) and a saved bench report loading
   (`bench/ReportView.tsx`) show `<VoxelLoader size={24} />` (wired at integration).
+
+## 10. v0.3.0 integration (WP-E: seams between the packages)
+
+- **Fire transport:** `InputLayer` installs `setFireHandler((vehicle, on) => sendFire(vehicle, on))` (`arena/store.ts`,
+  the stream `fire` message). The input engine's `FireTracker` (WP-C) is the only fire timing; R1 fires only without
+  L1 (L1 + R1 stays the arm chord), keyboard `X` is a flight key.
+- **Driving HUD row 3:** `Stage()` mounts `arena/ArenaDrivingHud`, which feeds `DrivingHud` its `hp` (scaled to
+  0..100) and `ammo` (with `progress`, the arena view's `local.reload[vid]`) from `useArenaLocal(useDrivenId())`.
+- **Bench and hover assist:** the flight steps S9 / S10 fail at once on a simulator with hover assist off (finding
+  `hover_assist_off`) and land and fail when it is switched off in flight; the Bench tab shows the finding text.
+- **Copy:** bench and arena keep their own dictionaries (`bench/copy.ts`, `arena/copy.ts`, each with an en / zh parity
+  test); the shared `i18n` files carry only the keys other modules read.
