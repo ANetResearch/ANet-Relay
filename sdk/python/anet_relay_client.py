@@ -29,7 +29,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 __all__ = ["DEFAULT_BASE", "RelayClient", "RelayError"]
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 DEFAULT_BASE = os.environ.get("RELAY_API", "http://127.0.0.1:8765")
 API = "/api/v1"
@@ -265,9 +265,15 @@ class RelayClient:
             f"/vehicles/{vehicle_id}/sticks", {"roll": roll, "pitch": pitch, "yaw": yaw, "throttle": throttle}
         )
 
-    def arm(self, vehicle_id: str, confirm: str | None = None) -> dict:
-        """Arm. Real aircraft need ``confirm="ARM"`` and passing preflight checks."""
-        return self._post(f"/vehicles/{vehicle_id}/arm", {"arm": True, "confirm": confirm})
+    def arm(self, vehicle_id: str, confirm: str | None = None, force: bool = False) -> dict:
+        """Arm. Real aircraft need ``confirm="ARM"`` and passing preflight checks.
+
+        ``force=True`` skips the autopilot's own pre-arm checks and needs ``confirm="FORCE"`` (04 §2).
+        """
+        body: dict[str, Any] = {"arm": True, "confirm": confirm}
+        if force:
+            body["force"] = True
+        return self._post(f"/vehicles/{vehicle_id}/arm", body)
 
     def disarm(self, vehicle_id: str) -> dict:
         return self._post(f"/vehicles/{vehicle_id}/arm", {"arm": False})
@@ -363,10 +369,14 @@ class RelayClient:
         plan = self._post(f"/vehicles/{vehicle_id}/plan", body)["plan"]
         if not wait:
             return plan
+        return self.wait_plan(vehicle_id, plan["id"], timeout)
+
+    def wait_plan(self, vehicle_id: str, plan_id: int, timeout: float = 180.0) -> dict:
+        """Wait until plan ``plan_id`` finishes; raises RelayError('plan_failed') unless it ends done."""
         end = time.monotonic() + timeout
         while time.monotonic() < end:
             current = self.vehicle(vehicle_id).get("plan") or {}
-            if current.get("id") == plan["id"] and current.get("state") != "running":
+            if current.get("id") == plan_id and current.get("state") != "running":
                 if current["state"] != "done":
                     raise RelayError(
                         "plan_failed",
@@ -376,7 +386,7 @@ class RelayClient:
                     )
                 return current
             time.sleep(0.25)
-        raise RelayError("timeout", 0, f"plan {plan['id']} did not finish in {timeout:g} s")
+        raise RelayError("timeout", 0, f"plan {plan_id} did not finish in {timeout:g} s")
 
     def cancel_plan(self, vehicle_id: str) -> dict:
         """Cancel the running plan; an airborne aircraft holds where it is."""
@@ -410,6 +420,234 @@ class RelayClient:
     def stop(self, vehicle_id: str) -> dict:
         """Emergency stop: throttle to zero and a disarm request."""
         return self._post(f"/vehicles/{vehicle_id}/stop")
+
+    # ------------------------------------------------------------------ device level (04 §2)
+
+    def device(self, vehicle_id: str) -> dict:
+        """Device overview: motors, servos, RC, frame, sensors, estimator, vibration, home, parameters."""
+        return self._get(f"/vehicles/{vehicle_id}/device")
+
+    def message(self, vehicle_id: str, name: str) -> dict:
+        """Latest frame of one MAVLink message ``{name, fields, t, hz}``; 404 ``message_not_seen``."""
+        return self._get(f"/vehicles/{vehicle_id}/messages/{urllib.parse.quote(name, safe='')}")
+
+    def param(self, vehicle_id: str, name: str) -> dict:
+        """One parameter ``{name, value, type}``; waits up to 2 s when the table is not loaded."""
+        return self._get(f"/vehicles/{vehicle_id}/params/{urllib.parse.quote(name, safe='')}")
+
+    def params_read(self, vehicle_id: str, names: list[str]) -> dict:
+        """Read up to 32 parameters by name: ``{values: {NAME: value}, missing: [...]}``."""
+        return self._post(f"/vehicles/{vehicle_id}/params/read", {"names": names})
+
+    def commands(self) -> list[dict]:
+        """Catalogue of raw MAVLink commands the command endpoint accepts."""
+        result = self._get("/commands")
+        return result["commands"] if isinstance(result, dict) and "commands" in result else result
+
+    def command(
+        self,
+        vehicle_id: str,
+        command: str | int,
+        params: list[float] | None = None,
+        frame: int | None = None,
+        use_int: bool | None = None,
+        confirm: str | None = None,
+        timeout_s: float | None = None,
+    ) -> dict:
+        """Send one catalogued MAVLink command; waits for ``COMMAND_ACK`` (``ack`` None on timeout)."""
+        body: dict[str, Any] = {"command": command, "params": params or []}
+        for key, value in (
+            ("frame", frame),
+            ("use_int", use_int),
+            ("confirm", confirm),
+            ("timeout_s", timeout_s),
+        ):
+            if value is not None:
+                body[key] = value
+        return self._post(f"/vehicles/{vehicle_id}/command", body)
+
+    def motor_test(
+        self,
+        vehicle_id: str,
+        motor: int | str,
+        throttle_pct: float,
+        seconds: float = 2.0,
+        confirm: str | None = None,
+    ) -> dict:
+        """Spin one motor (1..8) or ``"all"``. Disarmed only; real aircraft need ``confirm="MOTOR"``."""
+        body = {"motor": motor, "throttle_pct": throttle_pct, "seconds": seconds, "confirm": confirm}
+        return self._post(f"/vehicles/{vehicle_id}/motors/test", body)
+
+    def motors_stop(self, vehicle_id: str) -> dict:
+        """Stop every running motor test immediately."""
+        return self._post(f"/vehicles/{vehicle_id}/motors/stop")
+
+    def actuator(
+        self,
+        vehicle_id: str,
+        index: int,
+        value: float | None = None,
+        pwm: int | None = None,
+        seconds: float | None = None,
+        confirm: str | None = None,
+    ) -> dict:
+        """Drive output ``index`` (1..16) with ``value`` (-1..1) or ``pwm`` (800..2200); 0 s holds."""
+        body: dict[str, Any] = {"index": index}
+        for key, v in (("value", value), ("pwm", pwm), ("seconds", seconds), ("confirm", confirm)):
+            if v is not None:
+                body[key] = v
+        return self._post(f"/vehicles/{vehicle_id}/actuators/set", body)
+
+    def rc(
+        self,
+        vehicle_id: str,
+        channels: dict[int | str, int] | None = None,
+        axes: dict[str, float] | None = None,
+    ) -> dict:
+        """One RC override frame (``channels`` 1..18 in us, or named ``axes``); expires after 0.8 s."""
+        body: dict[str, Any] = {}
+        if channels is not None:
+            body["channels"] = {str(k): v for k, v in channels.items()}
+        if axes is not None:
+            body["axes"] = axes
+        return self._post(f"/vehicles/{vehicle_id}/rc", body)
+
+    def message_interval(self, vehicle_id: str, message: str, hz: float) -> dict:
+        """Ask the autopilot to stream ``message`` at ``hz`` (0 stops it)."""
+        return self._post(f"/vehicles/{vehicle_id}/message-interval", {"message": message, "hz": hz})
+
+    def request_message(self, vehicle_id: str, message: str) -> dict:
+        return self._post(f"/vehicles/{vehicle_id}/request-message", {"message": message})
+
+    def reboot(self, vehicle_id: str, confirm: str | None = None) -> dict:
+        """Reboot the flight controller. Disarmed only; needs ``confirm="REBOOT"``."""
+        return self._post(f"/vehicles/{vehicle_id}/reboot", {"confirm": confirm})
+
+    def calibrate(self, vehicle_id: str, sensor: str, confirm: str | None = None) -> dict:
+        """Calibrate gyro | level | baro | accel_simple. Disarmed only; ``confirm="CALIBRATE"``."""
+        return self._post(f"/vehicles/{vehicle_id}/calibrate", {"sensor": sensor, "confirm": confirm})
+
+    def set_home(
+        self,
+        vehicle_id: str,
+        here: bool = False,
+        lat: float | None = None,
+        lon: float | None = None,
+        alt: float | None = None,
+    ) -> dict:
+        """Set home to the current position (``here=True``) or to ``lat``, ``lon``, ``alt``."""
+        body: dict[str, Any] = {"here": True} if here else {"lat": lat, "lon": lon, "alt": alt}
+        return self._post(f"/vehicles/{vehicle_id}/home", body)
+
+    def terminate(self, vehicle_id: str, confirm: str | None = None) -> dict:
+        """Flight termination, motors stop at once. ``confirm="TERMINATE"`` on real and simulated aircraft."""
+        return self._post(f"/vehicles/{vehicle_id}/terminate", {"confirm": confirm})
+
+    def sticks_for(
+        self,
+        vehicle_id: str,
+        roll: float = 0.0,
+        pitch: float = 0.0,
+        yaw: float = 0.0,
+        throttle: float = 0.5,
+        seconds: float = 1.0,
+        wait: bool = True,
+    ) -> dict:
+        """Hold the sticks for ``seconds`` (<= 10), then centre them. Armed, manual mode."""
+        params = {"roll": roll, "pitch": pitch, "yaw": yaw, "throttle": throttle, "seconds": seconds}
+        return self.skill(vehicle_id, "sticks", params, wait, 15.0 + seconds)
+
+    def attitude(
+        self,
+        vehicle_id: str,
+        roll_deg: float = 0.0,
+        pitch_deg: float = 0.0,
+        yaw_rate_dps: float = 0.0,
+        thrust: float = 0.5,
+        seconds: float = 1.0,
+        wait: bool = True,
+    ) -> dict:
+        """Command an attitude and thrust for ``seconds`` (<= 10) while airborne, then hover again."""
+        params = {
+            "roll_deg": roll_deg,
+            "pitch_deg": pitch_deg,
+            "yaw_rate_dps": yaw_rate_dps,
+            "thrust": thrust,
+            "seconds": seconds,
+        }
+        return self.skill(vehicle_id, "attitude", params, wait, 15.0 + seconds)
+
+    def velocity(
+        self,
+        vehicle_id: str,
+        vx: float = 0.0,
+        vy: float = 0.0,
+        vz: float = 0.0,
+        yaw_rate_dps: float | None = None,
+        seconds: float = 1.0,
+        wait: bool = True,
+    ) -> dict:
+        """Command an ENU velocity (m/s, each <= 2) for ``seconds`` (<= 10) inside the safety volume."""
+        params: dict[str, Any] = {"vx": vx, "vy": vy, "vz": vz, "seconds": seconds}
+        if yaw_rate_dps is not None:
+            params["yaw_rate_dps"] = yaw_rate_dps
+        return self.skill(vehicle_id, "velocity", params, wait, 15.0 + seconds)
+
+    # ------------------------------------------------------------------ application level (04 §3)
+
+    def app(self) -> dict:
+        """Application status: version, uptime, counts, whether a window is connected."""
+        return self._get("/app")
+
+    def ui_state(self) -> dict:
+        """The window's current ``UiState`` with ``age_s``; ``state`` is None without a window."""
+        return self._get("/app/ui")
+
+    def gamepads(self) -> list[dict]:
+        result = self._get("/app/gamepads")
+        return result["gamepads"] if isinstance(result, dict) and "gamepads" in result else result
+
+    def app_actions(self) -> Any:
+        """Catalogue of the interface actions ``ui`` accepts."""
+        return self._get("/app/actions")
+
+    def ui(self, action: str, **args: Any) -> dict:
+        """Run one window action, e.g. ``ui("set_language", lang="zh")`` -> ``{ok, data}``."""
+        body = {"action": action, "args": {k: v for k, v in args.items() if v is not None}}
+        if self._token:
+            return self._post("/app/ui", body)
+        return self._op("POST", "/app/ui", body)
+
+    # ------------------------------------------------------------------ refly (04 §4)
+
+    def refly_options(self, session_id: int) -> dict:
+        """What a record can be flown again from: ``{plan, path, sticks, recommended}``."""
+        return self._get(f"/history/sessions/{session_id}/refly")
+
+    def refly(
+        self,
+        vehicle_id: str,
+        session_id: int,
+        mode: str = "auto",
+        speed: float | None = None,
+        confirm: str | None = None,
+        wait: bool = True,
+        timeout: float = 300.0,
+    ) -> dict:
+        """Fly a record again; returns ``{plan}`` or ``{skill}`` (finished when ``wait``)."""
+        body: dict[str, Any] = {"session_id": session_id, "mode": mode}
+        if speed is not None:
+            body["speed"] = speed
+        if confirm:
+            body["confirm"] = confirm
+        started = self._post(f"/vehicles/{vehicle_id}/refly", body)
+        if not wait:
+            return started
+        if started.get("skill"):
+            return {"skill": self.wait_skill(vehicle_id, started["skill"]["id"], timeout)}
+        if started.get("plan"):
+            return {"plan": self.wait_plan(vehicle_id, started["plan"]["id"], timeout)}
+        return started
 
     # ------------------------------------------------------------------ operator helpers (operator token)
 
