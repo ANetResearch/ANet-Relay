@@ -14,7 +14,10 @@ export type CopilotItem =
   | { kind: 'notice'; key: number; text: string; tone: 'info' | 'error' }
 
 interface CopilotState {
+  /** the floating window is visible (main window: mirrored from the shell) */
   open: boolean
+  /** bumped when an approval arrives, so the floating window flashes its frame once */
+  flash: number
   busy: boolean
   items: CopilotItem[]
   config: CopilotConfig | null
@@ -36,6 +39,7 @@ function lastIndex<T>(items: T[], pred: (x: T) => boolean): number {
 
 export const useCopilot = create<CopilotState>((set) => ({
   open: false,
+  flash: 0,
   busy: false,
   items: [],
   config: null,
@@ -88,7 +92,7 @@ export const useCopilot = create<CopilotState>((set) => ({
         }
         case 'approval':
           items.push({ kind: 'approval', key, id: e.id, tool: e.tool, vehicle: e.vehicle, label: e.label, request: e.request, state: 'pending' })
-          return { items, seq: key }
+          return { items, seq: key, flash: s.flash + 1 }
         case 'approval_closed':
           return {
             items: items.map((it) =>

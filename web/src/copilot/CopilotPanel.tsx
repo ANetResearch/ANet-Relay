@@ -1,47 +1,117 @@
-// Copilot panel (03 §16): a docked conversation with the built-in agent. The agent and its API key live in the
-// main process; this panel shows the transcript, tool progress and approval requests for real aircraft.
+// Copilot conversation (03 §16, 04 §6.1): the transcript, tool progress, approvals and composer. The agent and its
+// API key live in the main process. The panel is rendered by the floating Copilot window (CopilotWindow.tsx); the
+// main window only keeps the top bar button and ⌘J in step with that window.
 import * as React from 'react'
-import { env, type CopilotEvent } from '@/api'
+import { env, request, type CopilotEvent } from '@/api'
+import { useLang } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { registerHotkey } from '@/shell/keyboard'
-import { useVehicle } from '@/store/selectors'
-import { useUi } from '@/store/ui'
 import { Button } from '@/ui/components/ui/button'
 import { Textarea } from '@/ui/components/ui/textarea'
 import { Icon } from '@/ui/icons'
 import { useCT, type ControlKey } from '@/control/strings'
 import { useCopilot, type CopilotItem } from './store'
 import { cpt, useCPT, type CopilotKey } from './strings'
+import { toolLabel } from './toolLabels'
 import './copilot.css'
 
-const MOD = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl+'
+export const MOD = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl+'
 
 const bridge = () => (typeof window !== 'undefined' ? window.relay?.copilot : undefined)
 
-/** Subscribe once to the main-process event stream and load the endpoint settings. */
-export function useCopilotBridge(): void {
+/** Show, hide or toggle the floating Copilot window; without a desktop shell the store flag stands in. */
+export async function setCopilotWindow(action: 'show' | 'hide' | 'toggle'): Promise<void> {
+  const b = bridge()
+  if (b?.window) {
+    const s = await b.window(action).catch(() => null)
+    if (s) useCopilot.getState().setOpen(s.visible)
+    return
+  }
+  const st = useCopilot.getState()
+  st.setOpen(action === 'toggle' ? !st.open : action === 'show')
+}
+
+/** Main window: mirror the floating window's visibility and busy flag; ⌘J / Ctrl+J toggles the window. */
+export function useCopilotShell(): void {
   React.useEffect(() => {
     const b = bridge()
-    if (!b) return
-    const apply = useCopilot.getState().apply
-    const off = b.onEvent((e: CopilotEvent) => apply(e))
-    b.getConfig().then((cfg) => useCopilot.getState().setConfig(cfg), () => {})
+    const offKey = registerHotkey({ combo: 'mod+j', inText: true, handler: () => void setCopilotWindow('toggle') })
+    if (!b) return offKey
+    const off = [
+      b.onWindowState((s) => useCopilot.getState().setOpen(s.visible)),
+      b.onEvent((e: CopilotEvent) => {
+        if (e.type === 'busy') useCopilot.setState({ busy: e.busy })
+      }),
+    ]
+    b.getWindowState().then((s) => useCopilot.getState().setOpen(s.visible), () => {})
     b.getState().then((s) => useCopilot.setState({ busy: s.busy }), () => {})
-    const offKey = registerHotkey({ combo: 'mod+j', inText: true, handler: () => useCopilot.getState().toggle() })
     return () => {
-      off()
+      off.forEach((f) => f())
       offKey()
     }
   }, [])
 }
 
-export async function sendToCopilot(text: string): Promise<void> {
+/** Floating window: subscribe once to the main-process event stream and load the endpoint settings. */
+export function useCopilotEvents(): void {
+  React.useEffect(() => {
+    const b = bridge()
+    if (!b) return
+    const apply = useCopilot.getState().apply
+    const off = b.onEvent((e: CopilotEvent) => apply(e))
+    const offWin = b.onWindowState((s) => useCopilot.getState().setOpen(s.visible))
+    const refresh = () => b.getConfig().then((cfg) => useCopilot.getState().setConfig(cfg), () => {})
+    void refresh()
+    b.getState().then((s) => useCopilot.setState({ busy: s.busy }), () => {})
+    b.getWindowState().then((s) => useCopilot.getState().setOpen(s.visible), () => {})
+    // the endpoint may be changed in the main window's settings while this window stays open
+    window.addEventListener('focus', refresh)
+    return () => {
+      off()
+      offWin()
+      window.removeEventListener('focus', refresh)
+    }
+  }, [])
+}
+
+interface AppUiReply {
+  state?: { selected?: string | null } | null
+  selected?: string | null
+}
+
+/** The aircraft selected in the main window (GET /app/ui), polled; the floating window has no selection of its own. */
+export function useSelectedAircraft(): { id: string | null; label: string | null } {
+  const [sel, setSel] = React.useState<{ id: string | null; label: string | null }>({ id: null, label: null })
+  React.useEffect(() => {
+    let alive = true
+    const tick = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      try {
+        const ui = await request<AppUiReply>('GET', '/app/ui')
+        const id = ui?.state?.selected ?? ui?.selected ?? null
+        let label: string | null = null
+        if (id) label = await request<{ label?: string }>('GET', `/vehicles/${encodeURIComponent(id)}`).then((v) => v?.label ?? id, () => id)
+        if (alive) setSel((cur) => (cur.id === id && cur.label === label ? cur : { id, label }))
+      } catch {
+        if (alive) setSel((cur) => (cur.id === null ? cur : { id: null, label: null }))
+      }
+    }
+    void tick()
+    const timer = setInterval(() => void tick(), 2000)
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
+  }, [])
+  return sel
+}
+
+export async function sendToCopilot(text: string, vehicle: string | null = null): Promise<void> {
   const b = bridge()
   const trimmed = text.trim()
   if (!b || !trimmed) return
   const s = useCopilot.getState()
   s.pushUser(trimmed)
-  const vehicle = useUi.getState().selectedId
   const res = await b.prompt(trimmed, vehicle)
   if (!res.ok) {
     const code = res.error ?? 'generic'
@@ -105,16 +175,12 @@ function stepText(step: Record<string, unknown>, ct: (k: ControlKey) => string):
   }
 }
 
-const TOOL_KEYS = new Set(
-  ['relay_fleet', 'relay_vehicle', 'relay_takeoff', 'relay_hover', 'relay_move', 'relay_yaw', 'relay_land', 'relay_plan', 'relay_cancel', 'relay_release', 'relay_stop'].map((n) => `cp.tool.${n}`),
-)
-
 function ToolCard({ item }: { item: Extract<CopilotItem, { kind: 'tool' }> }) {
   const t = useCPT()
   const ct = useCT()
   const [open, setOpen] = React.useState(false)
-  const key = `cp.tool.${item.tool}` as CopilotKey
-  const label = TOOL_KEYS.has(key) ? t(key) : item.tool
+  const lang = useLang()
+  const label = toolLabel(item.tool, lang)
   const vehicle = typeof item.args.vehicle === 'string' ? item.args.vehicle : null
   const steps = Array.isArray(item.args.steps) ? (item.args.steps as Record<string, unknown>[]) : null
   return (
@@ -140,32 +206,53 @@ function ToolCard({ item }: { item: Extract<CopilotItem, { kind: 'tool' }> }) {
   )
 }
 
+/** One line per argument of a device or application tool request: "motor 2 · throttle_pct 10". */
+function argsText(args: Record<string, unknown>): string {
+  return Object.entries(args)
+    .filter(([, v]) => v !== undefined && v !== null)
+    .map(([k, v]) => `${k} ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
+    .join(' · ')
+}
+
 function ApprovalCard({ item }: { item: Extract<CopilotItem, { kind: 'approval' }> }) {
   const t = useCPT()
   const ct = useCT()
+  const lang = useLang()
   const req = item.request
+  const generic = typeof req.tool === 'string'
   const steps = Array.isArray(req.steps) ? (req.steps as Record<string, unknown>[]) : [req]
+  const danger = generic && typeof req.danger === 'string' ? (req.danger as string) : null
   const decide = (ok: boolean) => {
     useCopilot.getState().setApproval(item.id, ok ? 'approved' : 'declined')
     void bridge()?.approve(item.id, ok)
   }
   return (
-    <div className="cp-approval" data-state={item.state} data-approval={item.id}>
+    <div className="cp-approval" data-state={item.state} data-approval={item.id} data-danger={danger ?? undefined}>
       <div className="flex items-center gap-2">
         <Icon icon="alert" className="size-3.5 flex-none text-[var(--g50)]" />
         <span className="font-[560] text-[var(--g50)]">{t('cp.approval.title', { aircraft: item.label })}</span>
       </div>
-      <ol className="flex flex-col gap-0.5 pl-5 text-[var(--g200)]">
-        {steps.map((s, i) => (
-          <li key={i} className="num">
-            {steps.length > 1 ? `${i + 1}. ` : ''}
-            {stepText(s, ct)}
-          </li>
-        ))}
-      </ol>
+      {generic ? (
+        <div className="flex flex-col gap-0.5 pl-5 text-[var(--g200)]">
+          <span className="font-[560]">
+            {toolLabel(String(req.tool), lang)}
+            {danger ? <span className="ml-2 font-normal text-[var(--g400)]">{t(`cp.danger.${danger}` as CopilotKey)}</span> : null}
+          </span>
+          <span className="num break-words text-[var(--g300)]">{argsText((req.args as Record<string, unknown>) ?? {})}</span>
+        </div>
+      ) : (
+        <ol className="flex flex-col gap-0.5 pl-5 text-[var(--g200)]">
+          {steps.map((s, i) => (
+            <li key={i} className="num">
+              {steps.length > 1 ? `${i + 1}. ` : ''}
+              {stepText(s, ct)}
+            </li>
+          ))}
+        </ol>
+      )}
       {item.state === 'pending' ? (
         <>
-          <p className="text-[var(--g400)]">{t('cp.approval.body')}</p>
+          <p className="text-[var(--g400)]">{generic ? t('cp.approval.dangerBody') : t('cp.approval.body')}</p>
           <div className="flex gap-1.5">
             <button type="button" className="cp-approve" onClick={() => decide(true)} data-approve="">
               {t('cp.approval.approve')}
@@ -231,12 +318,11 @@ function Transcript() {
 function Composer() {
   const t = useCPT()
   const busy = useCopilot((s) => s.busy)
-  const selectedId = useUi((s) => s.selectedId)
-  const selected = useVehicle(selectedId ?? '')
+  const selected = useSelectedAircraft()
   const [text, setText] = React.useState('')
   const submit = () => {
     if (busy || !text.trim()) return
-    void sendToCopilot(text)
+    void sendToCopilot(text, selected.id)
     setText('')
   }
   return (
@@ -257,7 +343,7 @@ function Composer() {
       />
       <div className="flex items-center gap-2">
         <span className="min-w-0 flex-1 truncate text-hud-sub text-[var(--g500)]">
-          {selected ? t('cp.selected', { aircraft: selected.label }) : t('cp.noSelection')}
+          {selected.id ? t('cp.selected', { aircraft: selected.label ?? selected.id }) : t('cp.noSelection')}
         </span>
         {busy ? (
           <Button variant="outline" size="sm" onClick={() => void bridge()?.abort()} data-copilot-stop="">
@@ -278,12 +364,13 @@ function Composer() {
 function Empty() {
   const t = useCPT()
   const busy = useCopilot((s) => s.busy)
+  const selectedId = useSelectedAircraft().id
   return (
     <div className="flex flex-col gap-3 px-3 py-4">
       <p className="text-hud-sub text-[var(--g400)]">{t('cp.empty')}</p>
       <div className="flex flex-col items-start gap-1.5">
         {(['cp.suggest.status', 'cp.suggest.routine', 'cp.suggest.battery'] as const).map((k) => (
-          <button key={k} type="button" disabled={busy} className="cp-suggest" onClick={() => void sendToCopilot(t(k))}>
+          <button key={k} type="button" disabled={busy} className="cp-suggest" onClick={() => void sendToCopilot(t(k), selectedId)}>
             {t(k)}
           </button>
         ))}
@@ -298,7 +385,7 @@ function Setup() {
     <div className="flex flex-col items-start gap-2 px-3 py-4">
       <span className="text-hud-title font-[560] text-[var(--g100)]">{t('cp.setupTitle')}</span>
       <p className="text-hud-sub text-[var(--g400)]">{t('cp.setupBody')}</p>
-      <Button variant="outline" size="sm" onClick={() => useUi.getState().openSettings('copilot')} data-copilot-setup="">
+      <Button variant="outline" size="sm" onClick={() => void bridge()?.openSettings()} data-copilot-setup="">
         <Icon icon="key" />
         {t('cp.setupAction')}
       </Button>
@@ -306,34 +393,14 @@ function Setup() {
   )
 }
 
-export function CopilotPanel() {
+/** Header actions and content of the Copilot conversation; CopilotWindow supplies the frame and the drag header. */
+export function CopilotBody() {
   const t = useCPT()
-  const open = useCopilot((s) => s.open)
   const config = useCopilot((s) => s.config)
   const items = useCopilot((s) => s.items)
-  useCopilotBridge()
-  if (!open) return null
   const desktop = Boolean(bridge()) && env().electron
   return (
-    <aside className="cp-panel l3" aria-label={t('cp.title')} data-copilot-panel="">
-      <header className="flex h-10 shrink-0 items-center gap-2 border-b border-[var(--border)] pr-1.5 pl-3">
-        <Icon icon="copilot" className="size-4 text-[var(--g200)]" />
-        <span className="text-[13px] font-[560] text-[var(--g50)]">{t('cp.title')}</span>
-        {config?.model ? <span className="num truncate text-[11px] text-[var(--g500)]">{config.model}</span> : null}
-        <span className="flex-1" />
-        <Button variant="ghost" size="icon-sm" title={t('cp.newChat')} aria-label={t('cp.newChat')} onClick={() => {
-          useCopilot.getState().clear()
-          void bridge()?.reset()
-        }}>
-          <Icon icon="plus" />
-        </Button>
-        <Button variant="ghost" size="icon-sm" title={t('cp.settings')} aria-label={t('cp.settings')} onClick={() => useUi.getState().openSettings('copilot')}>
-          <Icon icon="settings" />
-        </Button>
-        <Button variant="ghost" size="icon-sm" title={t('cp.close')} aria-label={t('cp.close')} onClick={() => useCopilot.getState().setOpen(false)}>
-          <Icon icon="close" />
-        </Button>
-      </header>
+    <>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {!desktop ? (
           <p className="px-3 py-4 text-hud-sub text-[var(--g400)]">{t('cp.desktopOnly')}</p>
@@ -346,7 +413,7 @@ export function CopilotPanel() {
         )}
       </div>
       {desktop && config?.configured ? <Composer /> : null}
-    </aside>
+    </>
   )
 }
 
@@ -357,7 +424,7 @@ export function CopilotButton() {
   return (
     <button
       type="button"
-      onClick={() => useCopilot.getState().toggle()}
+      onClick={() => void setCopilotWindow('toggle')}
       title={t('cp.hint', { mod: MOD })}
       aria-pressed={open}
       className={cn(

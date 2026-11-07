@@ -18,7 +18,8 @@ import { ConnectDialog } from '@/connect/ConnectDialog'
 import { SettingsDialog } from '@/settings/SettingsDialog'
 import { GamepadHints } from '@/control/GamepadHint'
 import { InputLayer } from '@/control/InputLayer'
-import { CopilotPanel } from '@/copilot/CopilotPanel'
+import { AppNotices } from '@/appctl'
+import { useCopilotShell } from '@/copilot/CopilotPanel'
 
 const Gallery = React.lazy(() => import('@/dev/Gallery').then((m) => ({ default: m.Gallery })))
 const SHOW_GALLERY = typeof location !== 'undefined' && new URLSearchParams(location.search).has('gallery')
@@ -82,6 +83,7 @@ function Dialogs() {
 export function App() {
   const revealed = useBoot((s) => s.revealed)
   const workspace = useUi((s) => s.workspace)
+  useCopilotShell()
   return (
     <TooltipProvider delay={400}>
       <RelayToaster>
@@ -97,7 +99,7 @@ export function App() {
         </div>
         <CommandPalette />
         <Dialogs />
-        <CopilotPanel />
+        <AppNotices />
         <GamepadHints />
         <InputLayer />
         <BootLayer />

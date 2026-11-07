@@ -4,7 +4,7 @@
 // keyboard-possessed or selected aircraft; inside a text field it only leaves the field.
 import type { MenuAction, MenuEvent } from '@/api'
 import { setLang, t } from '@/i18n'
-import { useUi } from '@/store/ui'
+import { useUi, type SettingsSection } from '@/store/ui'
 import { moveSelection, stopAll, stopFocused } from './actions'
 import { notify } from './notify'
 
@@ -51,6 +51,8 @@ export function comboOf(e: Pick<KeyboardEvent, 'code' | 'key' | 'metaKey' | 'ctr
   parts.push(k)
   return parts.join('+')
 }
+
+const SETTINGS_SECTIONS: readonly SettingsSection[] = ['general', 'safety', 'controllers', 'copilot', 'network', 'data', 'about']
 
 export const OVERLAY_SELECTOR = [
   'dialog-content', 'alert-dialog-content', 'sheet-content', 'popover-content', 'dropdown-menu-content',
@@ -181,7 +183,10 @@ export function runMenuAction(e: MenuEvent): void {
   else if (action === 'toggle-fleet') ui.toggleFleet()
   else if (action === 'toggle-inspector') ui.toggleInspector()
   else if (action === 'toggle-timeline') ui.toggleTimeline()
-  else if (action === 'settings') ui.openSettings()
+  else if (action === 'settings') {
+    const section = SETTINGS_SECTIONS.find((s) => s === e.section)
+    ui.openSettings(section)
+  }
 }
 
 export function installKeyboard(): () => void {

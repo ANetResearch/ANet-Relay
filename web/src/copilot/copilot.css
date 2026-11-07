@@ -1,25 +1,19 @@
-/* Copilot panel (03 §16): docked under the top bar on the right, above the inspector. */
-.cp-panel {
-  position: fixed;
-  top: 52px;
-  right: 8px;
-  bottom: 8px;
-  z-index: 40;
-  display: flex;
-  width: min(400px, calc(100vw - 16px));
-  flex-direction: column;
+/* Floating Copilot window (04 §6.1): the page of a frameless Electron window; the shell supplies the frame. */
+html[data-window='copilot'],
+html[data-window='copilot'] body {
   overflow: hidden;
-  border-radius: 10px;
-  font-size: 12px;
-  line-height: 1.5;
-  animation: cp-in var(--dur-quick, 160ms) var(--ease-out, ease-out);
 }
 
-@keyframes cp-in {
-  from {
-    opacity: 0;
-    transform: translateX(8px);
-  }
+.cp-window {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--l3-border);
+  background: var(--popover);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .cp-user {
@@ -141,7 +135,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cp-panel,
   .cp-spin,
   .cp-pulse,
   .cp-thinking {

@@ -11,7 +11,9 @@ import { userDataDir } from "../paths.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APIS = ["openai-completions", "anthropic-messages", "openai-responses"];
-const DEFAULTS = { api: "openai-completions", baseUrl: "", model: "" };
+const TOOL_SCOPES = ["flight", "flight+device", "all"];
+const OPACITY_RANGE = [60, 100];
+const DEFAULTS = { api: "openai-completions", baseUrl: "", model: "", toolScope: "all", opacity: 100 };
 
 const configPath = () => path.join(userDataDir(), "copilot.json");
 
@@ -42,6 +44,17 @@ function decryptKey(cfg) {
   return cfg.keyPlain || "";
 }
 
+function clampOpacity(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return DEFAULTS.opacity;
+  return Math.min(OPACITY_RANGE[1], Math.max(OPACITY_RANGE[0], Math.round(n)));
+}
+
+/** Window opacity setting, 60..100 (read when the floating window is created). */
+export function configuredOpacity() {
+  return clampOpacity(readConfig().opacity);
+}
+
 function publicView(cfg) {
   const key = decryptKey(cfg);
   return {
@@ -52,6 +65,8 @@ function publicView(cfg) {
     keyHint: key.length >= 8 ? key.slice(-4) : null,
     secureStorage: safeStorage.isEncryptionAvailable(),
     configured: Boolean(cfg.baseUrl && cfg.model),
+    toolScope: TOOL_SCOPES.includes(cfg.toolScope) ? cfg.toolScope : DEFAULTS.toolScope,
+    opacity: clampOpacity(cfg.opacity),
   };
 }
 
@@ -70,17 +85,21 @@ function clean(input, current) {
   const model = typeof input?.model === "string" ? input.model.trim() : current.model;
   if (baseUrl && !validBaseUrl(baseUrl)) throw new Error("The endpoint must be an http(s) URL.");
   if (baseUrl.length > 512 || model.length > 200) throw new Error("The endpoint or model name is too long.");
-  return { api, baseUrl, model };
+  const toolScope = TOOL_SCOPES.includes(input?.toolScope) ? input.toolScope : TOOL_SCOPES.includes(current.toolScope) ? current.toolScope : DEFAULTS.toolScope;
+  const opacity = input?.opacity === undefined ? clampOpacity(current.opacity) : clampOpacity(input.opacity);
+  return { api, baseUrl, model, toolScope, opacity };
 }
 
 /**
  * @param {object} o
- * @param {() => import("electron").BrowserWindow | null} o.window
+ * @param {ReturnType<import("./window.mjs").createCopilotWindow>} o.copilotWindow the floating window (04 §6.1)
+ * @param {() => import("electron").BrowserWindow | null} o.mainWindow
  * @param {() => string | null} o.relayBase backend origin, e.g. http://127.0.0.1:8765
  * @param {() => string} o.language
- * @param {(event: any) => boolean} o.trusted
+ * @param {(event: any) => boolean} o.trusted a page of the app (main or Copilot window)
+ * @param {() => void} o.openSettings show Settings > Copilot in the main window
  */
-export function createCopilotHost({ window, relayBase, language, trusted }) {
+export function createCopilotHost({ copilotWindow, mainWindow, relayBase, language, trusted, openSettings }) {
   let modPromise = null;
   let copilot = null;
   let relay = null;
@@ -98,8 +117,12 @@ export function createCopilotHost({ window, relayBase, language, trusted }) {
 
   const emit = (event) => {
     if (event.type === "busy") busy = event.busy;
-    const wc = window()?.webContents;
-    if (wc && !wc.isDestroyed()) wc.send("relay:copilot", event);
+    // The conversation lives in the floating window; the main window only learns whether Copilot is busy.
+    const wc = copilotWindow.webContents();
+    if (wc) wc.send("relay:copilot", event);
+    const main = mainWindow()?.webContents;
+    if (event.type === "busy" && main && !main.isDestroyed()) main.send("relay:copilot", event);
+    if (event.type === "approval") copilotWindow.attention();
   };
 
   const dispose = async () => {
@@ -117,13 +140,14 @@ export function createCopilotHost({ window, relayBase, language, trusted }) {
     if (!cfg.baseUrl || !cfg.model) throw new Error("not_configured");
     if (!base) throw new Error("backend_unavailable");
     const key = decryptKey(cfg);
-    const stamp = JSON.stringify([cfg.api, cfg.baseUrl, cfg.model, key.length, key.slice(-6), base, language()]);
+    const scope = publicView(cfg).toolScope;
+    const stamp = JSON.stringify([cfg.api, cfg.baseUrl, cfg.model, key.length, key.slice(-6), base, language(), scope]);
     if (copilot && builtFor === stamp) return copilot;
     await dispose();
     const mod = await loadModule();
     const { models, model } = mod.buildModels(cfg, key);
     relay = new mod.RelayHttp(base);
-    copilot = mod.createCopilot({ relay, models, model, emit, lang: language });
+    copilot = mod.createCopilot({ relay, models, model, emit, lang: language, scope: () => publicView(readConfig()).toolScope });
     builtFor = stamp;
     return copilot;
   };
@@ -150,7 +174,10 @@ export function createCopilotHost({ window, relayBase, language, trusted }) {
       }
     }
     writeConfig(next);
-    await dispose();
+    // A conversation survives window-only changes such as opacity; the agent is rebuilt on the next prompt otherwise.
+    const agentKey = (c) => JSON.stringify([c.api, c.baseUrl, c.model, decryptKey(c), c.toolScope]);
+    if (agentKey(current) !== agentKey(next)) await dispose();
+    copilotWindow.setOpacity(clampOpacity(next.opacity) / 100);
     return publicView(next);
   });
 
@@ -194,6 +221,21 @@ export function createCopilotHost({ window, relayBase, language, trusted }) {
   });
   handle("relay:copilot-approve", (payload) => Boolean(copilot?.approve(String(payload?.id ?? ""), Boolean(payload?.ok))));
   handle("relay:copilot-state", () => ({ busy }));
+
+  // Floating window (04 §6.1)
+  const windowState = () => ({ visible: copilotWindow.isVisible() });
+  handle("relay:copilot-window", (action) => {
+    if (action === "show") copilotWindow.show();
+    else if (action === "hide") copilotWindow.hide();
+    else if (action === "toggle") copilotWindow.toggle();
+    else return windowState();
+    return { visible: action === "show" ? true : action === "hide" ? false : copilotWindow.isVisible() };
+  });
+  handle("relay:copilot-window-state", () => windowState());
+  handle("relay:copilot-open-settings", () => {
+    openSettings();
+    return true;
+  });
 
   return { dispose };
 }

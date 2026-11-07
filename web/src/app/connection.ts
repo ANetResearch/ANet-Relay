@@ -2,6 +2,7 @@
 // relay store; after a reconnect the event gap is filled from GET /events?after=. In fixture mode the dev fixture
 // replaces both transports (src/dev/fixtures.ts).
 import { api, env, installStream, RelayStream, type BackendState, type RelayEvent } from '@/api'
+import { handleUiCommand, reportNow } from '@/appctl'
 import { useRelay } from '@/store/relay'
 import { useBoot } from './boot'
 
@@ -87,9 +88,11 @@ export function startConnection(): () => void {
         }
       },
       onEvent: (ev) => useRelay.getState().applyEvents([ev]),
+      onUiCommand: (cmd) => void handleUiCommand(cmd),
       onState: (state, info) => {
         useRelay.getState().setConn(state, info)
         if (state === 'open') {
+          reportNow()
           if (opened) void fillGap()
           opened = true
         }

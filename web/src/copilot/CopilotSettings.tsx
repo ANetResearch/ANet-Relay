@@ -1,17 +1,20 @@
 // Settings → Copilot (03 §16): endpoint, model and API key of the built-in agent. The key is written once and
 // never read back into the renderer: the shell only reports whether one is stored and its last four characters.
 import * as React from 'react'
-import type { CopilotApi, CopilotConfig } from '@/api'
+import type { CopilotApi, CopilotConfig, CopilotToolScope } from '@/api'
 import { notify } from '@/shell/notify'
 import { Button } from '@/ui/components/ui/button'
 import { Input } from '@/ui/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/ui/components/ui/native-select'
+import { Slider } from '@/ui/components/ui/slider'
 import { useCopilot } from './store'
 import { useCPT, type CopilotKey } from './strings'
 
 type RowComponent = React.ComponentType<{ label: string; hint?: React.ReactNode; children: React.ReactNode; wide?: boolean }>
 
 const APIS: CopilotApi[] = ['openai-completions', 'anthropic-messages', 'openai-responses']
+const SCOPES: CopilotToolScope[] = ['flight', 'flight+device', 'all']
+const OPACITY_RANGE = [60, 100] as const
 
 export function CopilotSettings({ Row }: { Row: RowComponent }) {
   const t = useCPT()
@@ -21,6 +24,7 @@ export function CopilotSettings({ Row }: { Row: RowComponent }) {
   const [baseUrl, setBaseUrl] = React.useState('')
   const [model, setModel] = React.useState('')
   const [key, setKey] = React.useState('')
+  const [opacity, setOpacity] = React.useState(100)
   const [busy, setBusy] = React.useState<'save' | 'test' | null>(null)
   const [result, setResult] = React.useState<string | null>(null)
 
@@ -33,6 +37,7 @@ export function CopilotSettings({ Row }: { Row: RowComponent }) {
       setApi(c.api)
       setBaseUrl(c.baseUrl)
       setModel(c.model)
+      setOpacity(c.opacity)
     }, () => {})
     return () => {
       alive = false
@@ -48,7 +53,7 @@ export function CopilotSettings({ Row }: { Row: RowComponent }) {
       const next = await bridge.saveConfig(patch)
       setCfg(next)
       useCopilot.getState().setConfig(next)
-      setKey('')
+      if (Object.hasOwn(patch, 'apiKey')) setKey('')
       notify(t('cps.saved'))
       return true
     } catch (e) {
@@ -82,6 +87,35 @@ export function CopilotSettings({ Row }: { Row: RowComponent }) {
       </Row>
       <Row label={t('cps.model')} hint={t('cps.modelHint')}>
         <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="gpt-5.5" spellCheck={false} className="h-7 w-[260px] font-mono text-[12px]" aria-label={t('cps.model')} data-copilot-model="" />
+      </Row>
+      <Row label={t('cps.scope')} hint={t('cps.scopeHint')} wide>
+        <NativeSelect
+          value={cfg?.toolScope ?? 'all'}
+          onChange={(e) => void save({ toolScope: e.target.value as CopilotToolScope })}
+          className="w-[260px]"
+          aria-label={t('cps.scope')}
+          data-copilot-scope=""
+        >
+          {SCOPES.map((sc) => (
+            <NativeSelectOption key={sc} value={sc}>
+              {t(`cps.scope.${sc}` as CopilotKey)}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </Row>
+      <Row label={t('cps.opacity')} hint={t('cps.opacityHint')}>
+        <Slider
+          min={OPACITY_RANGE[0]}
+          max={OPACITY_RANGE[1]}
+          step={5}
+          value={opacity}
+          onValueChange={(v) => setOpacity(Array.isArray(v) ? (v[0] as number) : (v as number))}
+          onValueCommitted={(v) => void save({ opacity: Array.isArray(v) ? (v[0] as number) : (v as number) })}
+          className="w-[200px]"
+          aria-label={t('cps.opacity')}
+          data-copilot-opacity=""
+        />
+        <span className="num w-10 flex-none text-right text-[11px] text-[var(--g200)]">{opacity} %</span>
       </Row>
       <Row
         label={t('cps.key')}
