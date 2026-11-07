@@ -20,10 +20,27 @@ export function fail(message) {
   process.exit(1);
 }
 
+/**
+ * Spawn arguments for a command. Windows runs batch files (npm.cmd, node_modules/.bin/*.cmd) only through cmd.exe,
+ * so those go through the shell with their arguments quoted; everything else, python.exe included, is started
+ * directly, which keeps arguments such as `python -c "<code>"` in one piece.
+ */
+export function spawnArgs(command, args, options = {}) {
+  const shell = WIN && /\.(cmd|bat)$/i.test(command);
+  if (!shell) return [command, args, { shell: false, ...options }];
+  return [quoteCmd(command), args.map(quoteCmd), { shell: true, ...options }];
+}
+
+/** One cmd.exe argument: plain words stay as they are, anything else is double-quoted. */
+export function quoteCmd(arg) {
+  const text = String(arg);
+  return /^[\w\-.:\\/=@+,]+$/.test(text) ? text : `"${text.replace(/"/g, '""')}"`;
+}
+
 /** Run a command, inherit stdio, throw on a non-zero exit. */
 export function run(command, args, options = {}) {
   log(`$ ${[command, ...args].join(" ")}`);
-  const res = spawnSync(command, args, { stdio: "inherit", cwd: ROOT, shell: WIN, ...options });
+  const res = spawnSync(...spawnArgs(command, args, { stdio: "inherit", cwd: ROOT, ...options }));
   if (res.error) throw res.error;
   if (res.status !== 0) {
     const err = new Error(`${path.basename(command)} exited with code ${res.status}`);
@@ -34,14 +51,14 @@ export function run(command, args, options = {}) {
 
 /** Run a command and return its trimmed stdout, or null when it fails. */
 export function capture(command, args, options = {}) {
-  const res = spawnSync(command, args, { encoding: "utf8", cwd: ROOT, shell: WIN, ...options });
+  const res = spawnSync(...spawnArgs(command, args, { encoding: "utf8", cwd: ROOT, ...options }));
   return res.status === 0 ? res.stdout.trim() : null;
 }
 
 /** Start a long-running child; resolves its exit code. */
 export function start(command, args, options = {}) {
   log(`$ ${[command, ...args].join(" ")}`);
-  const child = spawn(command, args, { stdio: "inherit", cwd: ROOT, shell: WIN, ...options });
+  const child = spawn(...spawnArgs(command, args, { stdio: "inherit", cwd: ROOT, ...options }));
   child.done = new Promise((resolve) => child.once("exit", (code, signal) => resolve(code ?? (signal ? 1 : 0))));
   return child;
 }
