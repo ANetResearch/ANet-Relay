@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils'
 import { Icon } from '@/ui/icons'
-import { useAppNotices } from './notices'
+import { useAppNotices } from './noticeStore'
 
 /** Bottom-right stack of agent-action notices; never takes pointer events away from the stage beneath. */
 export function AppNotices() {
