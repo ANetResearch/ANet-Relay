@@ -25,16 +25,19 @@ extraResources:
     to: backend
 # No auto-update feed: releases are downloaded from GitHub by hand.
 publish: null
-# Ad-hoc signature for macOS. With identity null electron-builder skips signing and
-# never calls afterSign, so this runs as afterPack (before the zip is made).
+# macOS signing is done by this hook, not by electron-builder (identity stays null): Developer ID with the
+# Hardened Runtime and notarization when MAC_SIGN_IDENTITY and the App Store Connect API key are set,
+# otherwise an ad-hoc signature. It runs before the zip and dmg are made.
 afterPack: scripts/after-pack.cjs
 
 mac:
   target:
     - target: zip
+    - target: dmg
   icon: brand/icon.icns
   category: public.app-category.developer-tools
   identity: null
+  # Hardened Runtime and brand/entitlements.mac.plist are applied by scripts/after-pack.cjs.
   hardenedRuntime: false
   gatekeeperAssess: false
   extendInfo:

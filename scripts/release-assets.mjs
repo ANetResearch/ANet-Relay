@@ -13,7 +13,7 @@ import path from "node:path";
 import { fail, log, ROOT } from "./lib.mjs";
 
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
-const EXTENSIONS = ["tar.gz", "AppImage", "zip", "exe"];
+const EXTENSIONS = ["tar.gz", "AppImage", "zip", "dmg", "exe"];
 const ARCH = { x64: "x64", x86_64: "x64", amd64: "x64", arm64: "arm64", aarch64: "arm64" };
 const OS = { mac: "mac", darwin: "mac", linux: "linux", win: "win", windows: "win" };
 
