@@ -227,3 +227,20 @@ def test_refly_over_the_api():
             ).status_code
             == 400
         )
+
+
+def test_sticks_replay_does_not_fight_a_mode_change(svc, stepper):
+    a, b = boot(svc, stepper, position=False, count=2)
+    session, agent = open_agent(svc)
+    sid, _ = fly(svc, stepper, a, PLAN, session, agent)
+    svc.claim(b, agent)
+    vb = svc.vehicles[b]
+    svc.refly(b, agent, sid, "sticks")
+    assert stepper.until(lambda: vb.skill is not None and vb.skill.phase == "play", 30, [session])
+    stepper.run(4.0, [session])  # past the grace the replay gives the recorded mode
+    assert vb.skill.state == "running" and vb.mode == "ALT_HOLD"
+    vb.driver.set_mode("STABILIZE")  # a mode the record never asked for: a failsafe, say
+    assert stepper.until(lambda: vb.skill.state == "failed", 5, [session])
+    assert "mode" in (vb.skill.detail or "")
+    assert stepper.until(lambda: vb.refly is None, 5, [session])
+    assert any(e["kind"] == "refly_failed" for e in svc.events.after(0, 5000))

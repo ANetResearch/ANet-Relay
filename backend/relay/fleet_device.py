@@ -33,6 +33,8 @@ MOTION_COMMANDS = frozenset(
     }
 )
 MOTOR_GAP_S = 0.3  # pause between motors in an "all" sequence
+REAL_MOTOR_PCT = 30.0  # motor-test throttle cap on a real aircraft
+MOTOR_TEST_S = (0.2, 5.0)  # motor-test duration range
 DONE_RESULTS = (M.MAV_RESULT_IN_PROGRESS,)
 RC_AXES = ("roll", "pitch", "yaw", "throttle", "aux1", "aux2", "aux3", "aux4", "aux5", "aux6")
 ACK_WAIT_S = 3.0
@@ -118,6 +120,7 @@ class DeviceOps:
 
     def _stop_motors(self, v: Any) -> None:
         v.motor_seq = None
+        v.motor_until = 0.0
         for motor in range(1, self._motor_count(v) + 1):
             if v.autopilot == modes.PX4:
                 v.driver.command_long(
@@ -320,6 +323,8 @@ class DeviceOps:
                 device.require_disarmed("motor" if level == "motor" else entry["danger"] or "motor", v.armed)
             if level == "arm" and values[0] > 0.5:
                 self._arm_checks(v, confirm)
+            if cmd in (M.MAV_CMD_DO_MOTOR_TEST, M.MAV_CMD_ACTUATOR_TEST):
+                self._raw_motor_limits(v, cmd, values)
             if cmd in MOTION_COMMANDS:
                 self._stop_skill(v, "superseded by a raw command", "被原始命令取代")
             if use_int:
@@ -339,6 +344,31 @@ class DeviceOps:
         out["command"] = entry["name"]
         return out
 
+    def _raw_motor_limits(self, v: Any, cmd: int, values: list[float]) -> None:
+        """Raw motor and actuator tests keep the /motors/test limits: 0.2 to 5 s, 30 % on a real aircraft."""
+
+        def bad(reason: str) -> None:
+            raise err("invalid_request", reason=f"{reason}; use /motors/test or /actuators/set")
+
+        if cmd == M.MAV_CMD_DO_MOTOR_TEST:
+            pct, secs = values[2], values[3]
+            if pct == 0 and secs == 0:
+                return  # stops the motor
+            if v.kind == "real" and values[1] != 0:
+                bad("a real aircraft takes the motor-test throttle as a percentage (param 2 = 0)")
+            if v.kind == "real" and not 0 <= pct <= REAL_MOTOR_PCT:
+                bad("motor-test throttle must be 0 to 30 % on a real aircraft")
+            secs_limit = secs
+        else:
+            level, secs_limit, function = values[0], values[1], values[4]
+            if math.isnan(level):
+                return  # stops the output
+            if v.kind == "real" and 101 <= function <= 108 and not 0 <= level <= REAL_MOTOR_PCT / 100:
+                bad("motor output must be 0 to 0.30 on a real aircraft")
+        if not MOTOR_TEST_S[0] <= secs_limit <= MOTOR_TEST_S[1]:
+            bad("a motor test lasts 0.2 to 5 s")
+        v.motor_until = self.clock() + secs_limit
+
     # ------------------------------------------------------------------ motors and actuators
 
     def motors_test(
@@ -356,14 +386,14 @@ class DeviceOps:
         if not every and (isinstance(motor, bool) or not isinstance(motor, int) or not 1 <= motor <= 8):
             raise err("invalid_request", reason='motor must be 1 to 8 or "all"')
         pct = _number(throttle_pct, "throttle_pct", 0.0, 100.0)
-        secs = _number(seconds, "seconds", 0.2, 5.0)
+        secs = _number(seconds, "seconds", *MOTOR_TEST_S)
 
         def run() -> dict[str, Any]:
             v = self._vehicle(vid)
             if strict:
                 self._gate(v, actor)
             self._require_link(v)
-            if v.kind == "real" and pct > 30.0:
+            if v.kind == "real" and pct > REAL_MOTOR_PCT:
                 raise err("invalid_request", reason="throttle_pct must be 0 to 30 on a real aircraft")
             count = self._motor_count(v)
             if not every and motor > count:  # type: ignore[operator]
@@ -385,6 +415,7 @@ class DeviceOps:
                 v.motor_seq = None
                 self._motor_command(v, motor, pct, secs)  # type: ignore[arg-type]
                 total = secs
+            v.motor_until = self.clock() + total
             self._emit_device(
                 "motor_test",
                 v,
@@ -439,6 +470,17 @@ class DeviceOps:
             level = "motor" if motor else None
             device.require_confirm(level, v.kind, confirm)
             device.require_disarmed(level, v.armed)
+            if motor:
+                # a motor output is a motor test: bounded in time, and in throttle on a real aircraft
+                if not MOTOR_TEST_S[0] <= secs <= MOTOR_TEST_S[1]:
+                    raise err("invalid_request", reason="a motor output needs seconds 0.2 to 5")
+                share = val if val is not None else (us - 1000.0) / 1000.0  # type: ignore[operator]
+                if v.kind == "real" and share > REAL_MOTOR_PCT / 100:
+                    raise err(
+                        "invalid_request",
+                        reason="a motor output must stay at or below 30 % on a real aircraft",
+                    )
+                v.motor_until = self.clock() + secs
             if v.autopilot == modes.PX4:
                 span = 1000.0 if motor else 500.0
                 base = 1000.0 if motor else 1500.0

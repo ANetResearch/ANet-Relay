@@ -700,3 +700,53 @@ def test_real_aircraft_reboot_recovers_its_streams(rig, which):
     out = svc.reboot(vid, OP, "REBOOT")
     assert out["rebooting"] is True and out["ack"]["result_name"] == "ACCEPTED"
     assert wait_for(lambda: v.link_state == "ok" and "ATTITUDE" in v.state["messages"], 25)
+
+
+def test_raw_command_names_with_unicode_digits_are_refused():
+    with pytest.raises(RelayError) as exc:
+        device.find_command("²")
+    assert code(exc) == "command_not_allowed"
+
+
+@pytest.mark.parametrize("flavour", FLAVOURS)
+def test_a_motor_test_ends_when_control_changes(svc, stepper, flavour):
+    vid, v, session, agent = boot(svc, stepper, flavour)
+    svc.motors_test(vid, agent, "all", 20, 1.0, None)
+    stepper.run(0.5, [session])
+    assert max(servo(v)[:4]) > 1100
+    svc.possess(vid, "keyboard")  # the person at the window takes over
+    assert v.motor_seq is None
+    stepper.run(0.6, [session])
+    assert servo(v)[:4] == [1000] * 4
+    stepper.run(2.0, [session])  # the rest of the sequence never starts
+    assert servo(v)[:4] == [1000] * 4
+
+
+@pytest.mark.parametrize("flavour", FLAVOURS)
+def test_raw_motor_commands_keep_the_motor_test_limits(svc, stepper, flavour):
+    vid, _v, _session, agent = boot(svc, stepper, flavour)
+    for command, params in (
+        ("DO_MOTOR_TEST", [1, 0, 20, 30]),  # 30 s
+        ("ACTUATOR_TEST", [0.2, 0, 0, 0, 101]),  # no timeout
+    ):
+        with pytest.raises(RelayError) as exc:
+            svc.raw_command(vid, agent, command, params, confirm="MOTOR")
+        assert code(exc) == "invalid_request", command
+    with pytest.raises(RelayError) as exc:  # a motor output is a timed motor test
+        svc.actuator_set(vid, agent, 1, 0.2, None, 0, None)
+    assert code(exc) == "invalid_request"
+
+
+@pytest.mark.parametrize("which", [0, 1])
+def test_real_aircraft_raw_motor_commands_are_capped(rig, which):
+    svc, _ap, _px4, ids = rig
+    vid = ids[which]
+    assert wait_for(lambda: not svc.vehicles[vid].armed and svc.vehicles[vid].link_state == "ok", 6)
+    command, params = (("DO_MOTOR_TEST", [1, 0, 60, 1]), ("ACTUATOR_TEST", [0.6, 1, 0, 0, 101]))[which]
+    with pytest.raises(RelayError) as exc:
+        svc.raw_command(vid, OP, command, params, confirm="MOTOR")
+    assert code(exc) == "invalid_request"
+    with pytest.raises(RelayError) as exc:
+        svc.actuator_set(vid, OP, 1, 0.6, None, 1.0, "MOTOR")
+    assert code(exc) == "invalid_request"
+    assert svc.actuator_set(vid, OP, 1, 0.1, None, 0.5, "MOTOR")["motor"] is True

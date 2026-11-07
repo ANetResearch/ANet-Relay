@@ -221,19 +221,23 @@ describe('interface actions (04 §3.2)', () => {
 describe('ui_command handling', () => {
   it('replies with ui_result and notifies for agents only', async () => {
     const reply = vi.fn()
-    await handleUiCommand({ id: 'c1', action: 'set_language', args: { lang: 'zh' }, by: 'mcp-app' }, reply)
+    await handleUiCommand({ id: 'c1', action: 'set_language', args: { lang: 'zh' }, by: 'mcp-app', operator: false }, reply)
     expect(reply).toHaveBeenCalledWith({ type: 'ui_result', id: 'c1', ok: true, data: { lang: 'zh' } })
     expect(useAppNotices.getState().items.map((n) => n.text)).toEqual(['mcp-app 将语言切换为中文'])
     useAppNotices.setState({ items: [] })
-    await handleUiCommand({ id: 'c2', action: 'set_language', args: { lang: 'en' }, by: 'operator' }, reply)
+    await handleUiCommand({ id: 'c2', action: 'set_language', args: { lang: 'en' }, by: 'operator', operator: true }, reply)
     expect(useAppNotices.getState().items).toEqual([])
+    // a session that calls itself "operator" is still announced
+    await handleUiCommand({ id: 'c2b', action: 'set_language', args: { lang: 'zh' }, by: 'operator', operator: false }, reply)
+    expect(useAppNotices.getState().items).toHaveLength(1)
+    useAppNotices.setState({ items: [] })
   })
 
   it('reports failures with the error code and a message', async () => {
     const reply = vi.fn()
-    await handleUiCommand({ id: 'c3', action: 'nope', args: {}, by: 'copilot' }, reply)
+    await handleUiCommand({ id: 'c3', action: 'nope', args: {}, by: 'copilot', operator: false }, reply)
     expect(reply).toHaveBeenCalledWith(expect.objectContaining({ type: 'ui_result', id: 'c3', ok: false, error: 'unknown_action' }))
-    await handleUiCommand({ id: 'c4', action: 'select_vehicle', args: { vehicle: 'ghost' }, by: 'copilot' }, reply)
+    await handleUiCommand({ id: 'c4', action: 'select_vehicle', args: { vehicle: 'ghost' }, by: 'copilot', operator: false }, reply)
     expect(reply).toHaveBeenLastCalledWith(expect.objectContaining({ ok: false, error: 'vehicle_not_found', data: { message: expect.any(String) } }))
     expect(useAppNotices.getState().items.at(-1)?.level).toBe('warn')
   })
@@ -248,7 +252,7 @@ describe('ui_command handling', () => {
   it('parses ui_command messages from the stream', () => {
     expect(parseMessage(JSON.stringify({ type: 'ui_command', id: 'u', action: 'get_state', args: { a: 1 }, by: 'x' }))).toEqual({
       type: 'ui_command',
-      command: { id: 'u', action: 'get_state', args: { a: 1 }, by: 'x' },
+      command: { id: 'u', action: 'get_state', args: { a: 1 }, by: 'x', operator: false },
     })
     expect(parseMessage(JSON.stringify({ type: 'ui_command', action: 'get_state' }))).toEqual({ type: 'other' })
   })

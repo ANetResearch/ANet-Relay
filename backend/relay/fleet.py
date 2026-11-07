@@ -184,6 +184,7 @@ class Vehicle:
         self.plan: plans.Plan | None = None
         self.rc_frame: dict[str, Any] | None = None  # channel override resent at the stick rate (04 §2)
         self.motor_seq: dict[str, Any] | None = None  # "all motors" test in progress
+        self.motor_until = 0.0  # clock time until which a motor test may still be spinning
         self.deferred: list[tuple[float, Callable[[Any], None]]] = []
         self.refly: dict[str, Any] | None = None  # the re-fly in progress (04 §4)
         self.health = FlightHealth()
@@ -1141,6 +1142,8 @@ class FleetService(DeviceOps):
         for effect in outcome.effects:
             if effect == auth.STOP_SKILL:
                 self._stop_skill(v, "control changed", "控制权变化")
+                if v.motor_seq is not None or now < v.motor_until:
+                    self._stop_motors(v)  # a motor test belongs to the controller that started it
             elif effect == auth.STOP_STICKS:
                 v.sticks = None
                 v.rc_frame = None
@@ -1152,7 +1155,8 @@ class FleetService(DeviceOps):
             elif effect == auth.EMERGENCY_STOP:
                 v.sticks = None
                 v.rc_frame = None
-                v.motor_seq = None
+                if v.motor_seq is not None or now < v.motor_until:
+                    self._stop_motors(v)
                 v.stop_seq = {"until": now + STOP_THROTTLE_S}
         self._update_segment(v, v.controller(self.sessions), wall)
 

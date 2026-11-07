@@ -186,9 +186,14 @@ class McpServer:
 
     # ------------------------------------------------------------------ session
 
-    def ensure_session(self, reopen: bool = False) -> None:
+    def ensure_session(self, stale: str | None = None) -> None:
+        """Open the session if there is none, or replace ``stale`` (the id a call found expired).
+
+        Calls run on their own threads: when several find the same session expired, only the first
+        reopens it; the others see a newer id and reuse it."""
         with self.session_lock:
-            if self.relay.session_id and not reopen:
+            current = self.relay.session_id
+            if current and (stale is None or current != stale):
                 return
             self.relay.close()
             self.relay.open_session(self.name)
@@ -197,11 +202,12 @@ class McpServer:
     def call_tool(self, name: str, args: dict) -> Any:
         tool = self.tools[name]
         self.ensure_session()
+        used = self.relay.session_id
         try:
             return tool.handler(self.relay, args)
         except RelayError as exc:
             if exc.code in SESSION_ERRORS:
-                self.ensure_session(reopen=True)
+                self.ensure_session(stale=used)
                 return tool.handler(self.relay, args)
             raise
 

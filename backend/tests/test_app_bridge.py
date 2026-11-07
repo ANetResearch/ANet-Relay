@@ -86,10 +86,19 @@ def test_round_trip_and_state(client):
         thread, out = post_async(client, {"action": "set_language", "args": {"lang": "zh"}})
         cmd = next_command(ws)
         assert (cmd["action"], cmd["args"], cmd["by"]) == ("set_language", {"lang": "zh"}, "operator")
+        assert cmd["operator"] is True
         ws.send_json({"type": "ui_result", "id": cmd["id"], "ok": True, "data": {"lang": "zh"}})
         thread.join(5)
         assert out["resp"].status_code == 200
         assert out["resp"].json() == {"ok": True, "data": {"lang": "zh"}}
+        # a session may call itself "operator"; only the flag tells the window who asked
+        impostor = session(client, "operator")
+        thread, out = post_async(client, {"action": "get_state", "args": {}}, headers=impostor)
+        cmd = next_command(ws)
+        assert cmd["by"] == "operator" and cmd["operator"] is False
+        ws.send_json({"type": "ui_result", "id": cmd["id"], "ok": True, "data": {}})
+        thread.join(5)
+        assert out["resp"].status_code == 200
     events = client.get("/api/v1/events?after=0").json()["events"]
     ran = [e for e in events if e["kind"] == "app_command"]
     assert ran and ran[0]["data"] == {"action": "set_language", "args": {"lang": "zh"}, "by": "operator"}

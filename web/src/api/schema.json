@@ -1577,6 +1577,10 @@
         },
         "by": {
           "type": "string"
+        },
+        "operator": {
+          "default": false,
+          "type": "boolean"
         }
       },
       "required": [
@@ -1584,7 +1588,8 @@
         "id",
         "action",
         "args",
-        "by"
+        "by",
+        "operator"
       ],
       "title": "UiCommandMessage",
       "type": "object"

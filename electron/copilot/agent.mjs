@@ -410,9 +410,11 @@ function summarise(name, args, danger) {
  * @param {(event: object) => void} o.emit renderer events
  * @param {() => string} [o.lang]
  */
+// Approval ids stay unique across agent rebuilds, so a card from an earlier conversation never matches a new one.
+let approvalSeq = 0;
+
 export function createCopilot({ relay, models, model, emit, lang = () => "en", scope = () => "all" }) {
   const approvals = new Map();
-  let approvalSeq = 0;
   let vehicleKinds = new Map();
   const danger = dangerResolver(relay);
 
@@ -461,7 +463,9 @@ export function createCopilot({ relay, models, model, emit, lang = () => "en", s
       const level = await levelOf(toolCall.name, args);
       if (!level) return undefined;
       const info = await kindOf(args.vehicle);
-      if (!info || info.kind !== "real") return undefined;
+      // fail closed: an aircraft Copilot cannot identify is treated as real
+      if (info && info.kind !== "real") return undefined;
+      if (!info) return { block: true, reason: "Could not read this aircraft from Relay to check whether it is real. Check the id with relay_fleet and try again." };
       const ok = await requestApproval(toolCall.id, toolCall.name, args, info, level);
       return ok ? undefined : { block: true, reason: "The operator declined this command. Do not retry it unless asked." };
     },

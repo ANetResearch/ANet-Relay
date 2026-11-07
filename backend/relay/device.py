@@ -259,7 +259,7 @@ def find_command(spec: Any) -> dict[str, Any]:
         entry = BY_ID.get(spec)
     elif isinstance(spec, str):
         text = spec.strip().upper()
-        if text.isdigit():
+        if text.isascii() and text.isdigit():
             entry = BY_ID.get(int(text))
         else:
             entry = BY_NAME.get(text if text.startswith("MAV_CMD_") else f"MAV_CMD_{text}")

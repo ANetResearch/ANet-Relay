@@ -25,6 +25,7 @@ from .model import StickInput
 
 NEUTRAL = StickInput(roll=0.0, pitch=0.0, yaw=0.0, throttle=0.5, source="agent")
 RETRY_S = 1.2
+REPLAY_MODE_GRACE_S = 3.0  # time a replay gives the autopilot to take a recorded mode change
 MAX_TRIES = 3
 SETPOINT_PERIOD_S = 0.1
 GOTO_TOLERANCE_M = 0.15
@@ -111,6 +112,7 @@ class Skill:
     last_try: float = -1e9
     last_setpoint: float = -1e9
     expect_mode: str | None = None
+    mode_at: float = 0.0  # when the replay last asked for a mode
     target_local: tuple[float, float, float] | None = None
     yaw: float | None = None
     timeout: float = 30.0
@@ -765,13 +767,18 @@ class Skill:
         hold = self.expect_mode in modes.HOLD_STICK_MODES
         return StickInput(0.0, 0.0, 0.0, 0.5 if hold else 0.0, source="agent")
 
+    def _rest(self, last: tuple[float, ...]) -> StickInput:
+        """After a replay: centred sticks; mid throttle where the mode holds altitude, else the last one."""
+        hold = self.expect_mode in modes.HOLD_STICK_MODES
+        return StickInput(0.0, 0.0, 0.0, 0.5 if hold else last[4], source="agent")
+
     def _tick_replay(self, host: Host, now: float) -> None:
         """Recorded sticks on the original time line: mode, arm, then play (04 §4)."""
         samples = self.params["_samples"]
         speed = float(self.params.get("speed") or 1.0)
         duration = float(self.params["duration_s"])
         if self.state == "done":
-            self.out = stick_row(samples[-1])
+            self.out = self._rest(samples[-1])
             return
         if self.phase == "start":
             self.expect_mode = self.params["mode"]
@@ -785,6 +792,7 @@ class Skill:
             self.out = self._idle()
             if host.armed or self._ensure_armed(host, now):
                 self._phase("play", now)
+                self.mode_at = now
             return
         if not host.armed:
             self.fail("disarmed", "已上锁")
@@ -797,12 +805,20 @@ class Skill:
         if wanted != self.expect_mode:  # the record changed mode here (an autopilot landing, say)
             self.expect_mode = wanted
             self.last_try = -1e9
-        if host.mode != self.expect_mode and now - self.last_try >= RETRY_S:
-            self.last_try = now
-            host.driver.set_mode(self.expect_mode)
-        self.out = stick_row(sticks_at(samples, elapsed))
+            self.mode_at = now
+        if host.mode and host.mode != self.expect_mode:
+            if now - self.mode_at > REPLAY_MODE_GRACE_S:
+                # a mode the record never asked for (a failsafe, the operator): the replay must not fight it
+                self.fail(f"mode changed to {host.mode}", f"模式被切换为 {host.mode}")
+                return
+            if now - self.last_try >= RETRY_S:
+                self.last_try = now
+                host.driver.set_mode(self.expect_mode)
         if elapsed >= duration:
+            self.out = self._rest(samples[-1])
             self.finish(f"replayed {duration:.1f} s of sticks")
+            return
+        self.out = stick_row(sticks_at(samples, elapsed))
 
 
 def stick_row(row: tuple[float, ...]) -> StickInput:

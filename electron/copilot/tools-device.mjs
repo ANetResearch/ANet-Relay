@@ -26,7 +26,23 @@ const STATIC_DANGER = {
   device_attitude: "motion",
   device_velocity: "motion",
   device_param_set: "param",
+  device_mode: "motion",
 };
+
+/** Raw commands that move an aircraft (backend fleet_device.MOTION_COMMANDS): approved like any motion. */
+const MOTION_COMMANDS = new Set(["DO_SET_MODE", "NAV_TAKEOFF", "NAV_LAND", "NAV_RETURN_TO_LAUNCH", "NAV_LOITER_UNLIM", "DO_REPOSITION", "MISSION_START", "DO_PAUSE_CONTINUE"]);
+const FORCE_ARM_MAGIC = 21196;
+const MAX_MOTORS = 8; // outputs 1..8 may drive a motor (backend device.is_motor_output with the largest frame)
+
+/** The level the backend will apply to a raw command (device.danger_level): parameters can raise it. */
+function rawLevel(e, params) {
+  const name = String(e.name).replace(/^MAV_CMD_/, "");
+  const p = params ?? [];
+  if (name === "COMPONENT_ARM_DISARM" && Number(p[1]) === FORCE_ARM_MAGIC) return "force_arm";
+  if ((name === "DO_SET_SERVO" || name === "DO_REPEAT_SERVO") && Number(p[0]) >= 1 && Number(p[0]) <= MAX_MOTORS) return "motor";
+  if (e.danger) return e.danger;
+  return MOTION_COMMANDS.has(name) ? "motion" : null;
+}
 
 /**
  * The danger level of a tool call, or null when it needs no approval. Raw commands are looked up in the command
@@ -34,25 +50,27 @@ const STATIC_DANGER = {
  */
 export function dangerResolver(relay) {
   let catalogue = null;
+  /** The catalogue, or null when it cannot be read (not cached: the next call tries again). */
   const load = async () => {
     if (catalogue) return catalogue;
     try {
       const res = await relay.call("GET", "/commands");
       catalogue = Array.isArray(res) ? res : (res.commands ?? []);
+      return catalogue;
     } catch {
-      catalogue = [];
+      return null;
     }
-    return catalogue;
   };
   const entry = async (command) => {
     const wanted = String(command).replace(/^MAV_CMD_/, "").toUpperCase();
-    return (await load()).find((c) => String(c.name).replace(/^MAV_CMD_/, "").toUpperCase() === wanted || String(c.id) === wanted) ?? null;
+    const list = await load();
+    return list?.find((c) => String(c.name).replace(/^MAV_CMD_/, "").toUpperCase() === wanted || String(c.id) === wanted) ?? null;
   };
   const danger = async (name, args) => {
     if (name === "device_arm") return args.force ? "force_arm" : "arm";
     if (name === "device_command") {
       const e = await entry(args.command);
-      return e ? (e.danger ?? null) : "raw";
+      return e ? rawLevel(e, args.params) : "raw"; // unknown or unreadable: dangerous
     }
     return STATIC_DANGER[name] ?? null;
   };
@@ -61,7 +79,8 @@ export function dangerResolver(relay) {
 
 /** The confirm word to send with a dangerous call, from its danger level or catalogue entry. */
 export function confirmFor(danger, entry) {
-  return entry?.confirm ?? CONFIRM_WORDS[danger] ?? undefined;
+  // the level wins over the entry: parameters can raise a command to MOTOR or FORCE
+  return CONFIRM_WORDS[danger] ?? entry?.confirm ?? undefined;
 }
 
 export function deviceTools(relay, danger = dangerResolver(relay)) {

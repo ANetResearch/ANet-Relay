@@ -98,8 +98,12 @@ def _modes(r: RelayClient, a: dict) -> dict:
 
 
 def _skill_tool(name, skill, description, props, required) -> Tool:
+    defaults = {k: p["default"] for k, p in props.items() if "default" in p}
+
     def handler(r: RelayClient, a: dict) -> Any:
-        params = {k: v for k, v in a.items() if k not in ("vehicle", "wait") and v is not None}
+        # the defaults the schema advertises are the ones sent: the backend requires some of these keys
+        given = {k: v for k, v in a.items() if k not in ("vehicle", "wait") and v is not None}
+        params = {**defaults, **given}
         seconds = float(params.get("seconds") or 0.0)
         return {"skill": r.skill(a["vehicle"], skill, params, bool(a.get("wait", True)), 15.0 + seconds)}
 
@@ -220,6 +224,7 @@ def build_tools() -> list[Tool]:
                 "confirm": {"type": "string", "description": "must equal `name`"},
             },
             ["name", "value", "confirm"],
+            destructive=True,
         ),
         _t(
             "device_params_refresh",
@@ -262,6 +267,7 @@ def build_tools() -> list[Tool]:
                 "timeout_s": {"type": "number", "minimum": 0.1, "maximum": 10, "default": 3},
             },
             ["command"],
+            destructive=True,
         ),
         _t(
             "device_motor_test",
@@ -279,7 +285,7 @@ def build_tools() -> list[Tool]:
                     "description": "motor number 1..8 in the autopilot's motor order, or 'all'",
                 },
                 "throttle_pct": {"type": "number", "minimum": 0, "maximum": 100},
-                "seconds": {"type": "number", "minimum": 0.2, "maximum": 5, "default": 2},
+                "seconds": {"type": "number", "minimum": 0.2, "maximum": 5, "default": 1},
                 "confirm": _confirm(["MOTOR"], CONFIRM_MOTOR),
             },
             ["motor", "throttle_pct"],
@@ -464,7 +470,12 @@ def build_tools() -> list[Tool]:
                 "roll_deg": {"type": "number", "minimum": -30, "maximum": 30, "default": 0},
                 "pitch_deg": {"type": "number", "minimum": -30, "maximum": 30, "default": 0},
                 "yaw_rate_dps": {"type": "number", "minimum": -90, "maximum": 90, "default": 0},
-                "thrust": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.5},
+                "thrust": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "collective thrust; omit for the calibrated hover thrust",
+                },
                 "seconds": SECONDS10,
             },
             ["seconds"],

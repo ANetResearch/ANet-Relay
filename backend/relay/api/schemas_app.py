@@ -77,6 +77,7 @@ class UiCommandMessage(_Model):
     action: str
     args: dict[str, Any]
     by: str
+    operator: bool = False  # the person at the window issued it; otherwise ``by`` is a session name
 
 
 class UiStateMessage(_Model):

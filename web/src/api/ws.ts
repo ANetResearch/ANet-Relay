@@ -12,7 +12,10 @@ export interface UiCommandMessage {
   id: string
   action: string
   args: Record<string, unknown>
+  /** Session name, or "operator" for the window itself. */
   by: string
+  /** True only when the operator issued it; the window announces every other command. */
+  operator: boolean
 }
 
 export interface StreamHandlers {
@@ -74,7 +77,8 @@ export function parseMessage(raw: unknown): StreamMessage {
   if (type === 'ui_command') {
     if (typeof m.id === 'string' && typeof m.action === 'string') {
       const args = m.args && typeof m.args === 'object' && !Array.isArray(m.args) ? (m.args as Record<string, unknown>) : {}
-      return { type: 'ui_command', command: { id: m.id, action: m.action, args, by: typeof m.by === 'string' ? m.by : 'operator' } }
+      // only an explicit operator flag hides the agent notice: a session may be named anything
+      return { type: 'ui_command', command: { id: m.id, action: m.action, args, by: typeof m.by === 'string' ? m.by : 'agent', operator: m.operator === true } }
     }
     return { type: 'other' }
   }

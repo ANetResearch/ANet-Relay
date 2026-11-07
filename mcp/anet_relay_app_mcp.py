@@ -187,9 +187,9 @@ def build_tools() -> list[Tool]:
         ui_tool(
             "app_set_pref",
             "set_pref",
-            "Change an interface preference. units: metric or imperial; startView: overview, chase or "
-            "top; chaseOnCourse: boolean (auto chase while flying a course); padDeadzone: 0..0.5; "
-            "padExpo: 0..1.",
+            "Change an interface preference. units: m or ft; startView: overview, chase or top; "
+            "chaseOnCourse: boolean (auto chase while flying a course); padDeadzone: 0.04..0.15; "
+            "padExpo: 0..0.6.",
             {
                 "key": {
                     "type": "string",

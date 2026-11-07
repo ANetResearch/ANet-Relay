@@ -71,6 +71,25 @@ export function flightHelpers(relay) {
     return v;
   };
 
+  /** Stop button: end what Copilot started. A plan is cancelled; a skill is replaced by hold (disarm on the ground). */
+  const halt = async (id, what) => {
+    try {
+      if (what === "plan") await relay.call("POST", `/vehicles/${enc(id)}/plan/cancel`);
+      else await relay.call("POST", `/vehicles/${enc(id)}/skills/hold`, {});
+    } catch {
+      try {
+        const v = await vehicle(id);
+        if (v.armed && v.landed === "ground" && !v.possession) await relay.call("POST", `/vehicles/${enc(id)}/arm`, { arm: false });
+      } catch {
+        // the operator still has possession and stop
+      }
+    }
+  };
+  const halting = (id, what, signal) => (err) => {
+    if (signal?.aborted) return halt(id, what).then(() => Promise.reject(err));
+    return Promise.reject(err);
+  };
+
   const waitSkill = async (id, skillId, signal, timeoutMs = SKILL_TIMEOUT_MS) => {
     const end = Date.now() + timeoutMs;
     while (Date.now() < end) {
@@ -78,7 +97,7 @@ export function flightHelpers(relay) {
       const s = v.skill;
       if (!s || s.id !== skillId) return { state: "superseded", vehicle: compactVehicle(v) };
       if (s.state !== "running") return { state: s.state, detail: s.detail, vehicle: compactVehicle(v) };
-      await sleep(250, signal);
+      await sleep(250, signal).catch(halting(id, "skill", signal));
     }
     return { state: "timeout" };
   };
@@ -104,7 +123,7 @@ export function flightHelpers(relay) {
       }
       if (plan.state === "done") return { state: "done", results: plan.results, vehicle: compactVehicle(v) };
       if (plan.state !== "running") throw new Error(`sequence ${plan.state} at step ${plan.index + 1}: ${plan.detail}`);
-      await sleep(300, signal);
+      await sleep(300, signal).catch(halting(id, "plan", signal));
     }
     throw new Error("the sequence did not finish in time");
   };

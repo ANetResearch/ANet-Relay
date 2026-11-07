@@ -200,10 +200,10 @@ POST /api/v1/vehicles/sim-1/plan
 | `POST /vehicles/{id}/params/read` | 会话 | `{names}`（至多 32 个）按名称批量读取 → `{values, missing}` |
 | `POST /vehicles/{id}/params` | 控制者 | `{name, value, confirm}`，`confirm` 须等于参数名 |
 | `GET /commands` | – | 原始指令目录：MAV_CMD 名称与编号、中英文标签、参数含义与范围、危险级别、适用飞控 |
-| `POST /vehicles/{id}/command` | 控制者 | `{command, params[≤7], frame?, use_int?, confirm?, timeout_s?}`；只接受目录中的指令（`command_not_allowed`），返回 `COMMAND_ACK` |
+| `POST /vehicles/{id}/command` | 控制者 | `{command, params[≤7], frame?, use_int?, confirm?, timeout_s?}`；只接受目录中的指令（`command_not_allowed`），返回 `COMMAND_ACK`。`DO_MOTOR_TEST` 与 `ACTUATOR_TEST` 同样受电机测试的限制（0.2–5 s，真机不超过 30%） |
 | `POST /vehicles/{id}/motors/test` | 控制者 | `{motor: 序号或 "all", throttle_pct, seconds(0.2–5), confirm}`；真机油门不超过 30% |
 | `POST /vehicles/{id}/motors/stop` | 控制者 | 立即停止电机测试 |
-| `POST /vehicles/{id}/actuators/set` | 控制者 | `{index 1–16, value −1..1 或 pwm 800–2200, seconds, confirm?}`；`seconds` 为 0 时保持到下次修改 |
+| `POST /vehicles/{id}/actuators/set` | 控制者 | `{index 1–16, value −1..1 或 pwm 800–2200, seconds, confirm?}`；`seconds` 为 0 时保持到下次修改。输出 1 至电机数按电机处理：需要 `MOTOR`、已上锁，`seconds` 须为 0.2–5，真机不超过 30% |
 | `POST /vehicles/{id}/rc` | 控制者 | `{channels: {"1".."18": 1000–2000}}` 或 `{axes}`：一帧遥控通道覆盖，0.8 s 后过期，与杆量互相替代 |
 | `POST /vehicles/{id}/message-interval` | 控制者 | `{message, hz 0–50}`，0 停止该消息流 |
 | `POST /vehicles/{id}/request-message` | 控制者 | `{message}`：请求飞控立即发送一次 |

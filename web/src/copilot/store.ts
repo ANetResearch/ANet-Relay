@@ -50,7 +50,7 @@ export const useCopilot = create<CopilotState>((set) => ({
   pushUser: (text) => set((s) => ({ seq: s.seq + 1, items: [...s.items, { kind: 'user', key: s.seq + 1, text }] })),
   pushNotice: (text, tone = 'info') => set((s) => ({ seq: s.seq + 1, items: [...s.items, { kind: 'notice', key: s.seq + 1, text, tone }] })),
   setApproval: (id, state) =>
-    set((s) => ({ items: s.items.map((it) => (it.kind === 'approval' && it.id === id ? { ...it, state } : it)) })),
+    set((s) => ({ items: s.items.map((it) => (it.kind === 'approval' && it.id === id && it.state === 'pending' ? { ...it, state } : it)) })),
   clear: () => set({ items: [], busy: false }),
   apply: (e) =>
     set((s) => {

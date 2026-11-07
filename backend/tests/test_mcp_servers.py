@@ -317,9 +317,12 @@ def test_device_skills_and_derived(stub):
     result = call(server, "device_attitude", {"vehicle": "sim-1", "roll_deg": 5, "seconds": 2, "wait": False})
     assert text(result)["skill"]["id"] == 4
     assert last(stub)["path"] == "/vehicles/sim-1/skills/attitude"
-    assert last(stub)["body"] == {"roll_deg": 5, "seconds": 2}
+    # advertised defaults are sent; thrust stays out so the backend uses the calibrated hover thrust
+    assert last(stub)["body"] == {"roll_deg": 5, "pitch_deg": 0, "yaw_rate_dps": 0, "seconds": 2}
     call(server, "device_sticks", {"vehicle": "sim-1", "throttle": 0.6, "seconds": 1, "wait": False})
     assert last(stub)["path"].endswith("/skills/sticks")
+    call(server, "device_sticks", {"vehicle": "sim-1", "roll": 0.2, "seconds": 1, "wait": False})
+    assert last(stub)["body"] == {"roll": 0.2, "pitch": 0, "yaw": 0, "throttle": 0.5, "seconds": 1}
     call(server, "device_velocity", {"vehicle": "sim-1", "vx": 1, "seconds": 1, "wait": False})
     assert last(stub)["path"].endswith("/skills/velocity")
     stub.responses["/vehicles/sim-1"] = {
@@ -374,6 +377,17 @@ def test_errors_map_and_session_reopens(stub):
     stub.expire_once = True
     assert call(server, "device_overview", {"vehicle": "sim-1"})["isError"] is False
     assert stub.opened == 2 and last(stub)["session"] == "tok2"
+
+
+def test_concurrent_expiry_reopens_the_session_once(stub):
+    server = make(device_mcp, stub)
+    server.ensure_session()
+    expired = server.relay.session_id
+    opened = stub.opened
+    server.ensure_session(stale=expired)  # the first call that found it expired reopens
+    assert stub.opened == opened + 1
+    server.ensure_session(stale=expired)  # a second one, late, reuses the new session
+    assert stub.opened == opened + 1 and server.relay.session_id != expired
 
 
 APP_CASES = [

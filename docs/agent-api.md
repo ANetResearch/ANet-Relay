@@ -200,10 +200,10 @@ Motor tests, reboots and calibrations need the aircraft disarmed, otherwise 409 
 | `POST /vehicles/{id}/params/read` | session | `{names}` (up to 32) read by name → `{values, missing}` |
 | `POST /vehicles/{id}/params` | controller | `{name, value, confirm}`; `confirm` must equal the name |
 | `GET /commands` | – | Raw command catalogue: MAV_CMD name and number, English and Chinese labels, parameter meaning and range, danger level, autopilots |
-| `POST /vehicles/{id}/command` | controller | `{command, params[≤7], frame?, use_int?, confirm?, timeout_s?}`; catalogue commands only (`command_not_allowed`); returns the `COMMAND_ACK` |
+| `POST /vehicles/{id}/command` | controller | `{command, params[≤7], frame?, use_int?, confirm?, timeout_s?}`; catalogue commands only (`command_not_allowed`); returns the `COMMAND_ACK`. `DO_MOTOR_TEST` and `ACTUATOR_TEST` keep the motor-test limits (0.2–5 s, at most 30 % on a real aircraft) |
 | `POST /vehicles/{id}/motors/test` | controller | `{motor: number or "all", throttle_pct, seconds (0.2–5), confirm}`; at most 30 % throttle on a real aircraft |
 | `POST /vehicles/{id}/motors/stop` | controller | Stop a motor test now |
-| `POST /vehicles/{id}/actuators/set` | controller | `{index 1–16, value −1..1 or pwm 800–2200, seconds, confirm?}`; `seconds` 0 holds until changed |
+| `POST /vehicles/{id}/actuators/set` | controller | `{index 1–16, value −1..1 or pwm 800–2200, seconds, confirm?}`; `seconds` 0 holds until changed. Outputs 1 to the motor count are motors: `MOTOR`, a disarmed aircraft, `seconds` 0.2–5 and at most 30 % on a real aircraft |
 | `POST /vehicles/{id}/rc` | controller | `{channels: {"1".."18": 1000–2000}}` or `{axes}`: one RC-override frame, expires after 0.8 s, replaces sticks |
 | `POST /vehicles/{id}/message-interval` | controller | `{message, hz 0–50}`; 0 stops the stream |
 | `POST /vehicles/{id}/request-message` | controller | `{message}`: ask the autopilot to send it once |

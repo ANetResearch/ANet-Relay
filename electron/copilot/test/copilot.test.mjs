@@ -9,7 +9,7 @@ import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@ear
 import fs from "node:fs";
 
 import { createCopilot, RelayHttp, relayTools, systemPrompt, toolsFor } from "../agent.mjs";
-import { dangerResolver } from "../tools-device.mjs";
+import { confirmFor, dangerResolver } from "../tools-device.mjs";
 import { DEFAULT_HEIGHT, DEFAULT_WIDTH, defaultBounds, fitBounds, MIN_HEIGHT, MIN_WIDTH } from "../window-bounds.mjs";
 
 const BASE = process.env.RELAY_API || "http://127.0.0.1:8765";
@@ -123,6 +123,55 @@ test("danger levels: static tools, force arm and raw commands from the catalogue
   assert.equal(await danger("device_command", { command: "MAV_CMD_DO_SET_SERVO" }), null);
   assert.equal(await danger("device_command", { command: 246 }), "reboot");
   assert.equal(await danger("device_command", { command: "MAV_CMD_NOT_LISTED" }), "raw");
+});
+
+test("danger levels follow the parameters, mode changes are motion, and an unreadable catalogue is not cached", async () => {
+  const catalogue = {
+    commands: [
+      { id: 183, name: "MAV_CMD_DO_SET_SERVO", danger: null },
+      { id: 400, name: "MAV_CMD_COMPONENT_ARM_DISARM", danger: "arm", confirm: "ARM" },
+      { id: 176, name: "MAV_CMD_DO_SET_MODE", danger: null },
+      { id: 511, name: "MAV_CMD_SET_MESSAGE_INTERVAL", danger: null },
+    ],
+  };
+  let fail = true;
+  const relay = stubRelay({
+    "GET /commands": () => {
+      if (fail) throw new Error("backend busy");
+      return catalogue;
+    },
+  });
+  const danger = dangerResolver(relay);
+  assert.equal(await danger("device_command", { command: "DO_SET_MODE" }), "raw", "unreadable: dangerous");
+  fail = false;
+  assert.equal(await danger("device_command", { command: "DO_SET_MODE" }), "motion", "read again once it answers");
+  assert.equal(await danger("device_command", { command: "MAV_CMD_DO_SET_SERVO", params: [1, 1500] }), "motor");
+  assert.equal(await danger("device_command", { command: "MAV_CMD_DO_SET_SERVO", params: [9, 1500] }), null);
+  assert.equal(await danger("device_command", { command: 400, params: [1, 21196] }), "force_arm");
+  assert.equal(await danger("device_command", { command: 400, params: [1] }), "arm");
+  assert.equal(await danger("device_command", { command: "SET_MESSAGE_INTERVAL", params: [30, 1e5] }), null);
+  assert.equal(await danger("device_mode", { name: "LAND" }), "motion");
+  assert.equal(confirmFor("force_arm", catalogue.commands[1]), "FORCE");
+  assert.equal(confirmFor("arm", catalogue.commands[1]), "ARM");
+});
+
+test("an aircraft Copilot cannot look up is treated as real: the command is blocked", async () => {
+  const routes = {
+    "GET /app/ui": { state: { selected: null, lang: "en" } },
+    "GET /vehicles/real-9": () => {
+      throw new Error("backend busy");
+    },
+    "GET /commands": CATALOGUE,
+  };
+  const { copilot, relay, events } = offlineCopilot(routes, [
+    fauxAssistantMessage(fauxToolCall("device_motor_test", { vehicle: "real-9", motor: 1, throttle_pct: 5, seconds: 1 }), { stopReason: "toolUse" }),
+    fauxAssistantMessage("Could not check the aircraft."),
+  ]);
+  await copilot.prompt("spin motor 1 on real-9");
+  assert.ok(!relay.calls.some((c) => c.path.endsWith("/motors/test")), "nothing sent");
+  const end = events.find((e) => e.type === "tool_end" && e.tool === "device_motor_test");
+  assert.equal(end.error, true);
+  assert.match(end.text, /Could not read this aircraft/);
 });
 
 test("device tools claim, send the confirm word and report the result", async () => {

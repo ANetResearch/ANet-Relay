@@ -89,7 +89,9 @@ class AppBridge:
         age = max(0.0, self._clock() - at)
         return {"connected": age <= STALE_S, "age_s": round(age, 2), "state": state}
 
-    def command(self, action: str, args: dict[str, Any], by: str, timeout: float | None = None) -> Any:
+    def command(
+        self, action: str, args: dict[str, Any], by: str, timeout: float | None = None, operator: bool = False
+    ) -> Any:
         """Send a ``ui_command`` and wait for its result. Raises ``ui_unavailable`` / ``ui_timeout`` /
         ``ui_action_failed``; returns the ``data`` of a successful result."""
         with self._lock:
@@ -101,7 +103,8 @@ class AppBridge:
             future: Future = Future()
             self._pending[command_id] = (future, conn.conn)
         try:
-            conn.push({"type": "ui_command", "id": command_id, "action": action, "args": args, "by": by})
+            message = {"type": "ui_command", "id": command_id, "action": action, "args": args, "by": by}
+            conn.push({**message, "operator": operator})
             result = future.result(timeout=UI_WAIT_S if timeout is None else timeout)
         except FutureTimeout as exc:
             raise err("ui_timeout", action=action) from exc

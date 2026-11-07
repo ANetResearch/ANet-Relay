@@ -116,11 +116,14 @@ def path_waypoints(detail: dict[str, Any], spacing: float = PATH_SPACING_M) -> d
     if len(kept) < 2:
         return None
     on_ground = (alt0 if alt0 is not None else 0.0) < GROUND_ALT_M
+    alt_last = points[-1][4]
+    if alt_last is None:  # no height above ground: the first point's height plus the climb since
+        alt_last = (alt0 if alt0 is not None else 0.0) + rel[-1][2]
     return {
         "waypoints": [{"x": round(x, 3), "y": round(y, 3), "z": round(z, 3)} for x, y, z in kept],
         "duration_s": round(points[-1][0] - t0, 1),
         "from_ground": on_ground,
-        "to_ground": rel[-1][2] < GROUND_ALT_M,
+        "to_ground": alt_last < GROUND_ALT_M,
     }
 
 

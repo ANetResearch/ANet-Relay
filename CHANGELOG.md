@@ -39,8 +39,9 @@ first signed and notarized macOS build.
   `device_tour.py`.
 - Copilot runs in its own floating window: always on top, not modal, placed
   anywhere and remembered, with opacity and a tool scope (`flight`,
-  `flight+device`, `all`) in Settings → Copilot. Device writes on a real aircraft
-  need the operator's approval like motion commands.
+  `flight+device`, `all`) in Settings → Copilot. Device writes and mode changes
+  on a real aircraft need the operator's approval like motion commands, and Stop
+  in the Copilot window also ends the plan or skill Copilot started.
 - macOS builds are signed with a Developer ID (Hardened Runtime), notarized and
   stapled, and ship as dmg and zip.
 
@@ -71,9 +72,10 @@ notarized: drag it to Applications and open it.
   ArduPilot, and the motor number follows each autopilot's own order. This has been
   verified on simulators; on real hardware, check the order with the propellers
   off before relying on it.
-- Actuator outputs 1 to the motor count are treated as motors (`MOTOR`, disarmed
-  aircraft). ArduPilot may ignore `DO_SET_SERVO` on an output its mixer drives as
-  a motor; use the motor test for those outputs.
+- Actuator outputs 1 to the motor count are treated as motors: `MOTOR`, a
+  disarmed aircraft, 0.2 to 5 s and at most 30 % on a real aircraft. ArduPilot may
+  ignore `DO_SET_SERVO` on an output its mixer drives as a motor; use the motor
+  test for those outputs.
 
 ## [0.2.0] - 2026-11-07
 

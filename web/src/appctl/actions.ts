@@ -367,14 +367,15 @@ export function noticeText(action: string, args: Args, by: string, data: Data): 
 export async function handleUiCommand(cmd: UiCommandMessage, reply: (m: UiResultMessage) => unknown = sendJson): Promise<void> {
   const res = await runUiAction(cmd.action, cmd.args)
   const by = cmd.by || 'agent'
+  const announce = !cmd.operator
   if (res.ok) {
-    if (by !== 'operator') {
+    if (announce) {
       const text = noticeText(cmd.action, cmd.args, by, res.data)
       if (text) useAppNotices.getState().push(text)
     }
     reply({ type: 'ui_result', id: cmd.id, ok: true, data: res.data })
   } else {
-    if (by !== 'operator' && res.error !== 'unknown_action') useAppNotices.getState().push(apt('app.n.failed', { by, action: cmd.action }), 'warn')
+    if (announce && res.error !== 'unknown_action') useAppNotices.getState().push(apt('app.n.failed', { by, action: cmd.action }), 'warn')
     reply({ type: 'ui_result', id: cmd.id, ok: false, error: res.error, data: { message: res.message } })
   }
 }

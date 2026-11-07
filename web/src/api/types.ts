@@ -676,6 +676,7 @@ export interface UiCommandMessage {
   action: string
   args: {}
   by: string
+  operator: boolean
 }
 /**
  * Window -> server.

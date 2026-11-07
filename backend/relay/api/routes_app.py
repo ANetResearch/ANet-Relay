@@ -236,7 +236,7 @@ def app_command(request: Request, body: UiCommandBody) -> dict[str, Any]:
         if not svc.settings.agents_app_control:
             raise err("app_control_disabled")
         by = who.session.name
-    data = bridge(request).command(body.action, body.args, by)
+    data = bridge(request).command(body.action, body.args, by, operator=who.operator)
     svc.events.emit(
         "app_command",
         None,
