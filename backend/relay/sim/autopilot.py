@@ -271,6 +271,8 @@ class SimAutopilot:
         self.airborne_t: float | None = None
         self.takeoff_alt: float | None = None
         self.motor_tests: dict[int, tuple[float, float]] = {}  # output -> (throttle 0..1, until)
+        # WP-B (bench, 05 §4.2 S7) observability hook: when a test in a DO_MOTOR_TEST sequence starts
+        self.motor_test_from: dict[int, float] = {}
         self.servo_set: dict[
             int, tuple[int, float | None]
         ] = {}  # output -> (PWM, until) from DO_SET_SERVO / ACTUATOR_TEST
@@ -538,7 +540,7 @@ class SimAutopilot:
         if cmd == M.MAV_CMD_REQUEST_AUTOPILOT_CAPABILITIES:
             return self._request_message(M.MAVLINK_MSG_ID_AUTOPILOT_VERSION, now)
         if cmd == M.MAV_CMD_DO_MOTOR_TEST:
-            return self._motor_test(int(p[0]), p[2] / 100.0, p[3], now)
+            return self._motor_test(int(p[0]), p[2] / 100.0, p[3], now, int(p[4]))
         if cmd == M.MAV_CMD_ACTUATOR_TEST:
             return self._actuator_test(p[0], p[1], int(p[4]), now)
         if cmd in (M.MAV_CMD_DO_SET_SERVO, M.MAV_CMD_DO_REPEAT_SERVO):
@@ -694,13 +696,21 @@ class SimAutopilot:
         self.airborne_t = now
         return M.MAV_RESULT_ACCEPTED
 
-    def _motor_test(self, motor: int, throttle: float, seconds: float, now: float) -> int:
+    def _motor_test(self, motor: int, throttle: float, seconds: float, now: float, count: int = 0) -> int:
         if self.armed or not 1 <= motor <= MOTOR_OUTPUTS:
             return M.MAV_RESULT_DENIED
         if throttle <= 0.0 or seconds <= 0.0:
             self.motor_tests.pop(motor, None)
-        else:
-            self.motor_tests[motor] = (min(1.0, throttle), now + min(10.0, seconds))
+            self.motor_test_from.pop(motor, None)
+            return M.MAV_RESULT_ACCEPTED
+        # WP-B: param5 (motor count) runs the motors one after another, as ArduPilot does
+        seconds = min(10.0, seconds)
+        for k in range(max(1, count)):
+            output = motor + k
+            if output > MOTOR_OUTPUTS:
+                break
+            self.motor_test_from[output] = now + k * seconds
+            self.motor_tests[output] = (min(1.0, throttle), now + (k + 1) * seconds)
         return M.MAV_RESULT_ACCEPTED
 
     def _actuator_test(self, value: float, timeout: float, function: int, now: float) -> int:
@@ -711,6 +721,7 @@ class SimAutopilot:
             output = function - 100
             if output > MOTOR_OUTPUTS:
                 return M.MAV_RESULT_DENIED
+            self.motor_test_from.pop(output, None)
             if math.isnan(value) or value <= 0.0:
                 self.motor_tests.pop(output, None)
             else:
@@ -763,6 +774,9 @@ class SimAutopilot:
         if what is None:
             return M.MAV_RESULT_UNSUPPORTED
         self._text(M.MAV_SEVERITY_INFO, f"Calibrating {what}")
+        if self.flavour != ARDUPILOT:
+            # WP-B (bench, 05 §4.2 S4) observability hook: PX4 reports the end of a calibration in text
+            self._text(M.MAV_SEVERITY_INFO, f"[cal] calibration done: {what}")
         return M.MAV_RESULT_ACCEPTED
 
     def _reboot(self, autopilot: int, now: float) -> int:
@@ -1031,7 +1045,11 @@ class SimAutopilot:
                 **{f"servo{i}_raw": self._servo_pwm(i, now) for i in range(1, 17)},
             )
         if name == "VIBRATION":
-            level = 4.0 + 3.0 * s.motor if self.armed else 0.3
+            # WP-B (bench, 05 §4.2 S7) observability hook: a running motor test shakes the frame on the ground
+            spin = max(
+                (t for o, (t, _) in self.motor_tests.items() if self._motor_testing(o, now)), default=0.0
+            )
+            level = 4.0 + 3.0 * s.motor if self.armed else 0.3 + 6.0 * spin
             return M.MAVLink_vibration_message(
                 time_usec=int(boot_ms * 1000),
                 vibration_x=level,
@@ -1083,6 +1101,10 @@ class SimAutopilot:
             )
         return None
 
+    def _motor_testing(self, output: int, now: float) -> bool:
+        test = self.motor_tests.get(output)
+        return test is not None and self.motor_test_from.get(output, 0.0) <= now < test[1]
+
     def _servo_pwm(self, output: int, now: float) -> int:
         """PWM on one output: DO_SET_SERVO wins, then a running motor test, then the flight controller."""
         held = self.servo_set.get(output)
@@ -1093,7 +1115,7 @@ class SimAutopilot:
         ):
             return held[0]
         test = self.motor_tests.get(output)
-        if test is not None and now < test[1]:
+        if test is not None and self._motor_testing(output, now):
             return int(1000 + 1000 * test[0])
         if output <= MOTOR_OUTPUTS:
             return int(1000 + 1000 * self.quad.s.motor) if self.armed else 1000
