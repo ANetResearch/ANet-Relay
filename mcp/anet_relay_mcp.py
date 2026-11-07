@@ -10,24 +10,14 @@ a 50 Hz control loop. Protocol messages go to stdout, one JSON object per line; 
 
 from __future__ import annotations
 
-import argparse
-import json
-import os
 import sys
-import threading
-import traceback
 from pathlib import Path
 from typing import Any
 
-try:
-    from anet_relay_client import DEFAULT_BASE, RelayClient, RelayError
-except ImportError:  # running from the repository checkout
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sdk" / "python"))
-    from anet_relay_client import DEFAULT_BASE, RelayClient, RelayError
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from relay_mcp_common import VID, WAIT, McpServer, RelayClient, Tool, run_main
 
 SERVER_NAME = "anet-relay"
-SERVER_VERSION = "0.2.0"
-PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 
 INSTRUCTIONS = (
     "ANet Relay controls small quadcopters (real and simulated) on the local network. "
@@ -38,11 +28,10 @@ INSTRUCTIONS = (
     "A person can take over (possess) any aircraft at any time; control calls then fail with "
     "possessed_by_human and the claim resumes automatically when they hand it back (event relay_handback). "
     "Real aircraft need confirm='ARM' to arm and must pass preflight checks. goto targets must stay inside "
-    "the safety volume reported by relay_fleet. Use relay_stop only in an emergency: it cuts the motors."
+    "the safety volume reported by relay_fleet. Use relay_stop only in an emergency: it cuts the motors. "
+    "relay_sticks_for pushes the sticks for a few seconds (a language model cannot fly a 50 Hz loop); "
+    "relay_refly repeats an earlier recorded flight."
 )
-
-VID = {"type": "string", "description": "Vehicle id from relay_fleet, e.g. sim-1 or real-10-7-7-36"}
-WAIT = {"type": "boolean", "description": "Wait until the skill finishes (default true)", "default": True}
 
 
 def _tool(
@@ -232,6 +221,40 @@ TOOLS = [
         },
         ["vehicle"],
     ),
+    _tool(
+        "relay_sticks_for",
+        "Hold a stick position for `seconds` (at most 10), then centre the sticks. The aircraft must be "
+        "armed in a manual mode. roll/pitch/yaw in [-1, 1] (roll right, pitch forward and yaw "
+        "clockwise are positive), throttle in [0, 1] (0.5 holds altitude in "
+        "altitude-hold modes). A person taking over cancels it.",
+        {
+            "vehicle": VID,
+            "roll": {"type": "number", "minimum": -1, "maximum": 1, "default": 0},
+            "pitch": {"type": "number", "minimum": -1, "maximum": 1, "default": 0},
+            "yaw": {"type": "number", "minimum": -1, "maximum": 1, "default": 0},
+            "throttle": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.5},
+            "seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 10},
+            "wait": WAIT,
+        },
+        ["vehicle", "seconds"],
+    ),
+    _tool(
+        "relay_refly",
+        "Fly again from an earlier recording (session_id from the records list). mode auto picks the "
+        "recommended source: plan (the recorded action sequence), path (the recorded track as waypoints, "
+        "translated to the aircraft's current origin) or sticks (the recorded stick inputs on the original "
+        "time axis, scaled by speed). Real aircraft on the ground need confirm='ARM'. A person taking over "
+        "cancels it.",
+        {
+            "vehicle": VID,
+            "session_id": {"type": "integer", "minimum": 1, "description": "record id"},
+            "mode": {"type": "string", "enum": ["auto", "plan", "path", "sticks"], "default": "auto"},
+            "speed": {"type": "number", "minimum": 0.25, "maximum": 2, "description": "sticks mode only"},
+            "confirm": {"type": "string", "enum": ["ARM"], "description": "real aircraft on the ground"},
+            "wait": WAIT,
+        },
+        ["vehicle", "session_id"],
+    ),
 ]
 TOOL_NAMES = {t["name"] for t in TOOLS}
 
@@ -267,231 +290,119 @@ def _compact(v: dict) -> dict:
     return out
 
 
-class Server:
-    def __init__(self, base: str, name: str, out=None) -> None:
-        self.relay = RelayClient(base)
-        self.name = name
-        self.out = out or sys.stdout
-        self.write_lock = threading.Lock()
-        self.session_lock = threading.Lock()
-
-    # ------------------------------------------------------------------ session
-
-    def ensure_session(self, reopen: bool = False) -> None:
-        with self.session_lock:
-            if self.relay.session_id and not reopen:
-                return
-            self.relay.close()
-            self.relay.open_session(self.name)
-            _log(f"opened session {self.relay.session_id} as {self.name}")
-
-    def call_tool(self, name: str, args: dict) -> Any:
-        self.ensure_session()
-        try:
-            return self._dispatch(name, args)
-        except RelayError as exc:
-            if exc.code in ("session_expired", "session_required", "auth_required"):
-                self.ensure_session(reopen=True)
-                return self._dispatch(name, args)
-            raise
-
-    def _dispatch(self, name: str, a: dict) -> Any:
-        r = self.relay
-        vid = a.get("vehicle")
-        wait = bool(a.get("wait", True))
-        if name == "relay_fleet":
-            fleet = r.fleet()
-            return {
-                "safety_volume": fleet["safety_volume"],
-                "sessions": fleet["sessions"],
-                "this_session": r.session_id,
-                "vehicles": [_compact(v) for v in fleet["vehicles"]],
-                "alerts": [x for x in fleet["alerts"] if not x["acked"]],
-            }
-        if name == "relay_vehicle":
-            return r.vehicle(vid)
-        if name == "relay_topology":
-            return r.topology()
-        if name == "relay_events":
-            limit = int(a.get("limit", 50))
-            after = a.get("after")
-            # Without a cursor return the newest events; with one, the next page after it.
-            batch = r.events(after=int(after or 0), limit=limit, vehicle=vid, tail=after is None)
-            events = batch["events"]
-            return {
-                "last_seq": batch["last_seq"],
-                "events": [
-                    {k: e[k] for k in ("seq", "t", "kind", "vehicle", "text_en", "data")} for e in events
-                ],
-            }
-        if name == "relay_claim":
-            return r.claim(vid)
-        if name == "relay_release_claim":
-            return r.unclaim(vid)
-        if name == "relay_arm":
-            return r.arm(vid, confirm=a.get("confirm"))
-        if name == "relay_disarm":
-            return r.disarm(vid)
-        if name == "relay_mode":
-            return r.mode(vid, a["name"])
-        if name == "relay_takeoff":
-            return {
-                "skill": r.takeoff(vid, alt=float(a.get("alt", 1.0)), wait=wait, confirm=a.get("confirm"))
-            }
-        if name == "relay_land":
-            return {"skill": r.land(vid, wait=wait)}
-        if name == "relay_hold":
-            return {"skill": r.hold(vid, seconds=float(a.get("seconds") or 0.0), wait=True)}
-        if name == "relay_move":
-            forward, right, up = (float(a.get(k) or 0.0) for k in ("forward", "right", "up"))
-            return {"skill": r.move(vid, forward, right, up, wait=wait)}
-        if name == "relay_yaw":
-            return {"skill": r.yaw(vid, float(a["deg"]), wait=wait)}
-        if name == "relay_plan":
-            return {"plan": r.plan(vid, a["steps"], name=self.name, confirm=a.get("confirm"))}
-        if name == "relay_goto":
-            return {
-                "skill": r.goto(vid, float(a["x"]), float(a["y"]), float(a["z"]), yaw=a.get("yaw"), wait=wait)
-            }
-        if name == "relay_stop":
-            return r.stop(vid)
-        if name == "relay_course_start":
-            return r.course_start(vid, a.get("course_id") or "cage-loop")
-        raise KeyError(name)
-
-    # ------------------------------------------------------------------ JSON-RPC
-
-    def send(self, message: dict) -> None:
-        line = json.dumps(message, ensure_ascii=False, separators=(",", ":"))
-        with self.write_lock:
-            self.out.write(line + "\n")
-            self.out.flush()
-
-    def reply(self, rid: Any, result: Any = None, error: tuple[int, str] | None = None) -> None:
-        if error is not None:
-            self.send({"jsonrpc": "2.0", "id": rid, "error": {"code": error[0], "message": error[1]}})
-        else:
-            self.send({"jsonrpc": "2.0", "id": rid, "result": result})
-
-    def handle_line(self, line: str) -> threading.Thread | None:
-        line = line.strip()
-        if not line:
-            return None
-        try:
-            msg = json.loads(line)
-        except ValueError:
-            self.reply(None, error=(-32700, "Parse error"))
-            return None
-        if isinstance(msg, list):  # batches (2025-03-26) are answered one by one
-            for item in msg:
-                self.handle_message(item)
-            return None
-        return self.handle_message(msg)
-
-    def handle_message(self, msg: Any) -> threading.Thread | None:
-        if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0" or not isinstance(msg.get("method"), str):
-            if isinstance(msg, dict) and ("result" in msg or "error" in msg):
-                return None  # a response to a request we never send
-            self.reply(msg.get("id") if isinstance(msg, dict) else None, error=(-32600, "Invalid Request"))
-            return None
-        method, rid, params = msg["method"], msg.get("id"), msg.get("params") or {}
-        if rid is None:  # notification: initialized, cancelled, ...
-            return None
-        if method == "initialize":
-            requested = params.get("protocolVersion")
-            version = requested if requested in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0]
-            self.reply(
-                rid,
-                {
-                    "protocolVersion": version,
-                    "capabilities": {"tools": {"listChanged": False}},
-                    "serverInfo": {"name": SERVER_NAME, "title": "ANet Relay", "version": SERVER_VERSION},
-                    "instructions": INSTRUCTIONS,
-                },
+def _dispatch(r: RelayClient, name: str, a: dict) -> Any:
+    vid = a.get("vehicle")
+    wait = bool(a.get("wait", True))
+    if name == "relay_fleet":
+        fleet = r.fleet()
+        return {
+            "safety_volume": fleet["safety_volume"],
+            "sessions": fleet["sessions"],
+            "this_session": r.session_id,
+            "vehicles": [_compact(v) for v in fleet["vehicles"]],
+            "alerts": [x for x in fleet["alerts"] if not x["acked"]],
+        }
+    if name == "relay_vehicle":
+        return r.vehicle(vid)
+    if name == "relay_topology":
+        return r.topology()
+    if name == "relay_events":
+        limit = int(a.get("limit", 50))
+        after = a.get("after")
+        # Without a cursor return the newest events; with one, the next page after it.
+        batch = r.events(after=int(after or 0), limit=limit, vehicle=vid, tail=after is None)
+        return {
+            "last_seq": batch["last_seq"],
+            "events": [
+                {k: e[k] for k in ("seq", "t", "kind", "vehicle", "text_en", "data")} for e in batch["events"]
+            ],
+        }
+    if name == "relay_claim":
+        return r.claim(vid)
+    if name == "relay_release_claim":
+        return r.unclaim(vid)
+    if name == "relay_arm":
+        return r.arm(vid, confirm=a.get("confirm"))
+    if name == "relay_disarm":
+        return r.disarm(vid)
+    if name == "relay_mode":
+        return r.mode(vid, a["name"])
+    if name == "relay_takeoff":
+        return {"skill": r.takeoff(vid, alt=float(a.get("alt", 1.0)), wait=wait, confirm=a.get("confirm"))}
+    if name == "relay_land":
+        return {"skill": r.land(vid, wait=wait)}
+    if name == "relay_hold":
+        return {"skill": r.hold(vid, seconds=float(a.get("seconds") or 0.0), wait=True)}
+    if name == "relay_move":
+        forward, right, up = (float(a.get(k) or 0.0) for k in ("forward", "right", "up"))
+        return {"skill": r.move(vid, forward, right, up, wait=wait)}
+    if name == "relay_yaw":
+        return {"skill": r.yaw(vid, float(a["deg"]), wait=wait)}
+    if name == "relay_plan":
+        return {"plan": r.plan(vid, a["steps"], name=r.session_name, confirm=a.get("confirm"))}
+    if name == "relay_goto":
+        return {
+            "skill": r.goto(vid, float(a["x"]), float(a["y"]), float(a["z"]), yaw=a.get("yaw"), wait=wait)
+        }
+    if name == "relay_stop":
+        return r.stop(vid)
+    if name == "relay_course_start":
+        return r.course_start(vid, a.get("course_id") or "cage-loop")
+    if name == "relay_sticks_for":
+        return {
+            "skill": r.sticks_for(
+                vid,
+                roll=float(a.get("roll") or 0.0),
+                pitch=float(a.get("pitch") or 0.0),
+                yaw=float(a.get("yaw") or 0.0),
+                throttle=float(a.get("throttle", 0.5)),
+                seconds=float(a["seconds"]),
+                wait=wait,
             )
-        elif method == "ping":
-            self.reply(rid, {})
-        elif method == "tools/list":
-            self.reply(rid, {"tools": TOOLS})
-        elif method == "tools/call":
-            name = params.get("name")
-            if name not in TOOL_NAMES:
-                self.reply(rid, error=(-32602, f"Unknown tool: {name}"))
-                return None
-            args = params.get("arguments") or {}
-            if not isinstance(args, dict):
-                self.reply(rid, error=(-32602, "arguments must be an object"))
-                return None
-            worker = threading.Thread(target=self._run_tool, args=(rid, name, args), daemon=True)
-            worker.start()  # long skills must not block ping or other calls
-            return worker
-        elif method in ("resources/list", "prompts/list"):
-            self.reply(rid, {method.split("/")[0]: []})
-        else:
-            self.reply(rid, error=(-32601, f"Method not found: {method}"))
-        return None
-
-    def _run_tool(self, rid: Any, name: str, args: dict) -> None:
-        try:
-            result = self.call_tool(name, args)
-            text = json.dumps(result, ensure_ascii=False, indent=1)
-            self.reply(rid, {"content": [{"type": "text", "text": text}], "isError": False})
-        except RelayError as exc:
-            body = {"error": exc.code, "message": exc.message}
-            if exc.message_zh:
-                body["message_zh"] = exc.message_zh
-            if exc.detail:
-                body["detail"] = exc.detail
-            self.reply(
-                rid,
-                {
-                    "content": [{"type": "text", "text": json.dumps(body, ensure_ascii=False)}],
-                    "isError": True,
-                },
-            )
-        except (KeyError, TypeError, ValueError) as exc:
-            self.reply(
-                rid, {"content": [{"type": "text", "text": f"invalid arguments: {exc}"}], "isError": True}
-            )
-        except Exception:  # pragma: no cover - keep the server alive
-            _log(traceback.format_exc())
-            self.reply(
-                rid,
-                {"content": [{"type": "text", "text": "internal error in the MCP server"}], "isError": True},
-            )
-
-    def serve(self, stream=None) -> None:
-        stream = stream or sys.stdin
-        try:
-            self.ensure_session()
-        except RelayError as exc:
-            _log(f"Relay not reachable yet ({exc.message}); the session opens on the first tool call")
-        workers: list[threading.Thread] = []
-        for line in stream:
-            worker = self.handle_line(line)
-            if worker is not None:
-                workers.append(worker)
-        for worker in workers:
-            worker.join(timeout=120)
-        self.relay.close()
+        }
+    if name == "relay_refly":
+        return r.refly(
+            vid,
+            int(a["session_id"]),
+            mode=a.get("mode") or "auto",
+            speed=a.get("speed"),
+            confirm=a.get("confirm"),
+            wait=wait,
+        )
+    raise KeyError(name)
 
 
-def _log(text: str) -> None:
-    sys.stderr.write(f"anet-relay-mcp: {text}\n")
-    sys.stderr.flush()
+def _tools() -> list[Tool]:
+    return [
+        Tool(
+            t["name"],
+            t["description"],
+            t["inputSchema"]["properties"],
+            t["inputSchema"]["required"],
+            (lambda r, a, n=t["name"]: _dispatch(r, n, a)),
+            t["annotations"]["readOnlyHint"],
+            t["annotations"]["destructiveHint"],
+        )
+        for t in TOOLS
+    ]
+
+
+class Server(McpServer):
+    def __init__(self, base: str, name: str, out=None, operator_token: str | None = None) -> None:
+        super().__init__(
+            base,
+            name,
+            server_name=SERVER_NAME,
+            title="ANet Relay",
+            instructions=INSTRUCTIONS,
+            tools=_tools(),
+            operator_token=operator_token,
+            out=out,
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="anet-relay-mcp", description="ANet Relay MCP server (stdio)")
-    parser.add_argument("--name", default="mcp", help="agent session name shown in Relay (default mcp)")
-    parser.add_argument(
-        "--base", default=os.environ.get("RELAY_API", DEFAULT_BASE), help="Relay API base URL"
-    )
-    args = parser.parse_args(argv)
-    sys.stdin.reconfigure(encoding="utf-8")
-    sys.stdout.reconfigure(encoding="utf-8")
-    Server(args.base, args.name).serve()
-    return 0
+    return run_main("anet-relay-mcp", "ANet Relay MCP server (stdio)", "mcp", Server, argv)
 
 
 if __name__ == "__main__":
