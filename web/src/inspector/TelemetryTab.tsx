@@ -16,6 +16,7 @@ import { useLength } from '@/settings/prefs'
 import { Block, Kv, KvList } from './parts'
 import { gpsText } from './OverviewTab'
 import { usePoll } from './usePoll'
+import { VoxelLoader } from '@/ui/voxel/VoxelLoader'
 
 type T = ReturnType<typeof useT8>
 
@@ -207,7 +208,11 @@ function RawMavlink({ id }: { id: string }) {
       {poll.error && !names.length ? (
         <p className="text-hud-sub text-[var(--g50)]">{t('tele.raw.loadFailed', { reason: err?.text?.(lang) ?? err?.message ?? '' })}</p>
       ) : names.length === 0 ? (
-        <p className="text-hud-sub text-[var(--g500)]">{poll.loading ? '…' : t('tele.raw.empty')}</p>
+        poll.loading ? (
+          <VoxelLoader size={16} />
+        ) : (
+          <p className="text-hud-sub text-[var(--g500)]">{t('tele.raw.empty')}</p>
+        )
       ) : (
         <table className="w-full text-[11px]" data-lf-table="">
           <thead>

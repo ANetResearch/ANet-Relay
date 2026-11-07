@@ -16,6 +16,7 @@ import { GroundContact, Lights } from './Lights'
 import { PadSlots, SafetyVolume, SpawnPoints } from './Markers'
 import { isSoftwareGL, stageQuality } from './gpu'
 import { fallbackTemplate, MODEL_URL, prepareTemplate } from './model'
+import { markStageModelReady } from '../loading'
 
 /** Exposure that keeps the GoFilm 20's grey plastics readable on g950 under the 02 §6.1 light levels. */
 const EXPOSURE = 1.35
@@ -37,11 +38,13 @@ const imageTextures: NonNullable<Parameters<typeof useGLTF>[3]> = (loader) => {
 function Model() {
   const gltf = useGLTF(MODEL_URL, false, false, imageTextures)
   const template = React.useMemo(() => prepareTemplate(gltf.scene), [gltf.scene])
+  React.useEffect(() => markStageModelReady(), [])
   return <Fleet template={template} />
 }
 
 function FallbackModel() {
   const template = React.useMemo(() => fallbackTemplate(token('g300').color), [])
+  React.useEffect(() => markStageModelReady(), [])
   return <Fleet template={template} />
 }
 
@@ -71,6 +74,7 @@ class CanvasBoundary extends React.Component<{ children: React.ReactNode; fallba
 
 function NoWebGL() {
   const t = useT6()
+  React.useEffect(() => markStageModelReady(), [])
   return (
     <div className="stage-nogl" role="status" data-stage-nogl="">
       <span className="text-hud-title font-[560] text-[var(--g100)]">{t('stage.noWebgl')}</span>

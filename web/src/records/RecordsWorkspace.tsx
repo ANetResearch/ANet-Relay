@@ -16,6 +16,8 @@ import { useLength } from '@/settings/prefs'
 import { dayKey, groupByDay, recordFor, type RecordSummary } from './model'
 import { useRecordsCtl } from './ctl'
 import { Replay } from './Replay'
+import { VoxelLoader } from '@/ui/voxel/VoxelLoader'
+import { VoxelWipe } from '@/ui/voxel/VoxelWipe'
 import './records.css'
 
 export interface RecordsWorkspaceProps {
@@ -120,6 +122,10 @@ export function RecordsWorkspace({ focus }: RecordsWorkspaceProps) {
           <EmptyState title={t('records.empty')} body={t('records.emptyBody')} />
         ) : records && filtered.length === 0 ? (
           <p className="px-3 py-3 text-hud-sub text-[var(--g500)]">{t('records.noMatch', { q })}</p>
+        ) : !records ? (
+          <div className="px-3 py-3" data-records-loading="">
+            <VoxelLoader size={24} />
+          </div>
         ) : (
           <ScrollArea className="min-h-0 flex-1">
             <div className="flex flex-col gap-1 px-2 pb-2">
@@ -146,12 +152,13 @@ export function RecordsWorkspace({ focus }: RecordsWorkspaceProps) {
           </ScrollArea>
         )}
       </section>
-      <section className={cn('l1 flex min-w-0 flex-1 flex-col overflow-hidden rounded-[var(--radius)]')} aria-live="polite">
+      <section className={cn('l1 relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-[var(--radius)]')} aria-live="polite">
         {selected ? (
           <Replay key={selected.id} record={selected} focusT={focusT} />
         ) : (
           <EmptyState title={t('records.title')} body={t('records.select')} width={260} />
         )}
+        <VoxelWipe trigger={selected?.id ?? null} />
       </section>
     </div>
   )

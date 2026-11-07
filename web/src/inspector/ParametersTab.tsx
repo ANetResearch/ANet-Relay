@@ -14,6 +14,7 @@ import { Icon, StateIcon } from '@/ui/icons'
 import { TypeToConfirm } from '@/ui/relay'
 import { useT8 } from '@/fleet/copy'
 import { usePoll } from './usePoll'
+import { VoxelLoader } from '@/ui/voxel/VoxelLoader'
 
 export interface Param {
   name: string
@@ -191,7 +192,13 @@ export function ParametersTab({ vehicleId }: { vehicleId: string }) {
       {loadErr ? (
         <p className="px-3 py-3 text-hud-sub text-[var(--g50)]">{t('param.loadFailed', { reason: loadErr })}</p>
       ) : rows.length === 0 ? (
-        <p className="px-3 py-3 text-hud-sub text-[var(--g500)]">{q ? t('param.noMatch', { q }) : data ? t('param.empty') : '…'}</p>
+        q || data ? (
+          <p className="px-3 py-3 text-hud-sub text-[var(--g500)]">{q ? t('param.noMatch', { q }) : t('param.empty')}</p>
+        ) : (
+          <div className="px-3 py-3" data-param-loading="">
+            <VoxelLoader size={24} />
+          </div>
+        )
       ) : (
         <div ref={scrollRef} className="param-scroll min-h-0 flex-1 overflow-y-auto" role="table" aria-rowcount={rows.length}>
           <div style={{ height: virt.getTotalSize(), position: 'relative' }}>
