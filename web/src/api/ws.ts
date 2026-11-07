@@ -7,10 +7,19 @@ import type { RelayEvent } from './events'
 
 export type StreamState = 'idle' | 'connecting' | 'open' | 'closed'
 
+/** Server -> client request to run an interface action (04 §3.1). */
+export interface UiCommandMessage {
+  id: string
+  action: string
+  args: Record<string, unknown>
+  by: string
+}
+
 export interface StreamHandlers {
   onHello?(h: Hello): void
   onFleet?(f: Fleet): void
   onEvent?(e: RelayEvent): void
+  onUiCommand?(c: UiCommandMessage): void
   onState?(s: StreamState, info: { attempt: number; nextRetryMs: number | null }): void
 }
 
@@ -40,6 +49,7 @@ export type StreamMessage =
   | { type: 'hello'; hello: Hello }
   | { type: 'fleet'; fleet: Fleet }
   | { type: 'event'; event: RelayEvent }
+  | { type: 'ui_command'; command: UiCommandMessage }
   | { type: 'other' }
 
 /** Tolerant envelope parser: {type|kind, data|fleet|event|...payload}. */
@@ -59,6 +69,13 @@ export function parseMessage(raw: unknown): StreamMessage {
   if (type === 'fleet') {
     const f = (m.data ?? m.fleet ?? m) as Fleet
     if (f && Array.isArray(f.vehicles)) return { type: 'fleet', fleet: f }
+    return { type: 'other' }
+  }
+  if (type === 'ui_command') {
+    if (typeof m.id === 'string' && typeof m.action === 'string') {
+      const args = m.args && typeof m.args === 'object' && !Array.isArray(m.args) ? (m.args as Record<string, unknown>) : {}
+      return { type: 'ui_command', command: { id: m.id, action: m.action, args, by: typeof m.by === 'string' ? m.by : 'operator' } }
+    }
     return { type: 'other' }
   }
   if (type === 'event') {
@@ -149,6 +166,17 @@ export class RelayStream {
     return true
   }
 
+  /** Sends one JSON message as is (ui_state, ui_result, 04 §3.1). Returns false when the socket is not open. */
+  send(message: unknown): boolean {
+    if (!this.sock || this.sock.readyState !== OPEN) return false
+    try {
+      this.sock.send(JSON.stringify(message))
+      return true
+    } catch {
+      return false
+    }
+  }
+
   /** Drops any coalesced frame for `vehicle` (call when input stops: blur, release, link lost). */
   cancelSticks(vehicle?: string): void {
     const ids = vehicle ? [vehicle] : [...this.pending.keys(), ...this.flushTimers.keys()]
@@ -187,6 +215,7 @@ export class RelayStream {
       if (m.type === 'hello') this.handlers.onHello?.(m.hello)
       else if (m.type === 'fleet') this.handlers.onFleet?.(m.fleet)
       else if (m.type === 'event') this.handlers.onEvent?.(m.event)
+      else if (m.type === 'ui_command') this.handlers.onUiCommand?.(m.command)
     }
     sock.onerror = () => {
       /* onclose follows */

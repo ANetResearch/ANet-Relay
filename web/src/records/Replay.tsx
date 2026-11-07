@@ -18,6 +18,7 @@ import { usePoll } from '@/inspector/usePoll'
 import { useLength } from '@/settings/prefs'
 import { ControlTrack, EventTrack, LineChart, makeScale, TimeAxis, useNearestEvent, useWidth } from './Charts'
 import { indexAt, recordDomain, type RecordDetail, type RecordSummary } from './model'
+import { useRecordsCtl } from './ctl'
 import { exitReplay, setReplay, useReplay, type ReplayFrame } from './replayState'
 import { StageView } from './StageView'
 
@@ -163,6 +164,20 @@ export function Replay({ record, focusT }: { record: RecordSummary; focusT: numb
   }
 
   const domain = d ? recordDomain(d, backendNow()) : null
+
+  // play / pause / seek requested by application control (04 §3.2); requests older than this viewport are ignored.
+  // seek takes unix seconds, or seconds from the start of the record when below 1e8.
+  const replayReq = useRecordsCtl((s) => s.replay)
+  const [seenReq, setSeenReq] = React.useState(replayReq)
+  if (replayReq !== seenReq) {
+    setSeenReq(replayReq)
+    if (replayReq?.cmd.action === 'play') setPlaying(true)
+    else if (replayReq?.cmd.action === 'pause') setPlaying(false)
+    else if (replayReq?.cmd.action === 'seek' && domain) {
+      const t = replayReq.cmd.t
+      setCursor(t < 1e8 ? domain[0] + t : t)
+    }
+  }
   const scale = domain ? makeScale(domain[0], domain[1], width) : null
   const cur = cursor === null || !domain ? (domain ? domain[0] : null) : Math.min(Math.max(cursor, domain[0]), domain[1])
   const cursorRef = React.useRef<number | null>(cur)

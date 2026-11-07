@@ -5,19 +5,31 @@
 // every motion of a real aircraft waits for the operator's approval in the chat.
 // Bundled into agent.bundle.mjs by scripts/build-copilot.mjs for the packaged app.
 import { Agent } from "@earendil-works/pi-agent-core";
-import { createModels, createProvider, Type } from "@earendil-works/pi-ai";
+import { createModels, createProvider } from "@earendil-works/pi-ai";
 import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 
+import { appTools } from "./tools-app.mjs";
+import { compactVehicle, defineTool, enc, flightHelpers, SESSION_NAME, text, Type, VID } from "./tools-common.mjs";
+import { dangerResolver, deviceTools } from "./tools-device.mjs";
+
 export const APIS = ["openai-completions", "anthropic-messages", "openai-responses"];
 const PROVIDER = "relay-copilot";
-const SESSION_NAME = "copilot";
 const HEARTBEAT_MS = 5000;
 const APPROVAL_TIMEOUT_MS = 120_000;
-const SKILL_TIMEOUT_MS = 90_000;
-const PLAN_TIMEOUT_MS = 240_000;
-const MOTION_TOOLS = new Set(["relay_takeoff", "relay_move", "relay_yaw", "relay_hover", "relay_land", "relay_plan"]);
+/** Flight tools that move an aircraft; on a real one each waits for the operator's approval (04 §6.2). */
+const MOTION_TOOLS = new Set([
+  "relay_takeoff",
+  "relay_move",
+  "relay_yaw",
+  "relay_hover",
+  "relay_land",
+  "relay_plan",
+  "relay_sticks_for",
+  "relay_refly",
+]);
+export const TOOL_SCOPES = ["flight", "flight+device", "all"];
 
 // ---------------------------------------------------------------------------
 // Model
@@ -127,7 +139,6 @@ export class RelayHttp {
 // ---------------------------------------------------------------------------
 // Tools
 
-const VID = Type.String({ description: "Aircraft id from relay_fleet, e.g. sim-1 or real-10-7-7-36" });
 const STEP = Type.Object(
   {
     action: Type.Union(["takeoff", "hover", "move", "yaw", "land"].map((a) => Type.Literal(a))),
@@ -141,82 +152,9 @@ const STEP = Type.Object(
   { additionalProperties: false },
 );
 
-function compactVehicle(v) {
-  return {
-    id: v.id,
-    label: v.label,
-    kind: v.kind,
-    autopilot: v.autopilot,
-    link: v.link?.state,
-    armed: v.armed,
-    landed: v.landed,
-    mode: v.mode,
-    altitude_m: v.altitude_m,
-    heading_deg: v.heading_deg,
-    battery: v.battery && { voltage: v.battery.voltage, remaining_pct: v.battery.remaining_pct, level: v.battery.level },
-    controller: v.controller,
-    claim: v.claim?.name ?? null,
-    possessed: Boolean(v.possession),
-    capabilities: v.capabilities,
-    preflight_ok: v.preflight?.ok,
-    skill: v.skill,
-    plan: v.plan && { state: v.plan.state, index: v.plan.index, count: v.plan.count, detail: v.plan.detail },
-  };
-}
-
-const text = (value) => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }], details: {} });
-const sleep = (ms, signal) =>
-  new Promise((resolve, reject) => {
-    const onAbort = () => {
-      clearTimeout(t);
-      reject(new Error("aborted"));
-    };
-    const t = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
-
 /** Build the Copilot tool list on a Relay API client. */
 export function relayTools(relay) {
-  const vehicle = (id) => relay.call("GET", `/vehicles/${encodeURIComponent(id)}`);
-
-  const claimFor = async (id) => {
-    const v = await vehicle(id);
-    if (v.possession) {
-      const err = new Error(
-        `possessed_by_human: the operator is flying ${v.label} (${v.possession.input}). Ask them to release it (P, or hold Options) to hand it to you.`,
-      );
-      err.code = "possessed_by_human";
-      throw err;
-    }
-    if (v.claim && v.claim.name !== SESSION_NAME) {
-      throw new Error(`claimed_by_other: ${v.claim.name} holds ${v.label}. Do not take it over unless the user asks.`);
-    }
-    if (!v.claim) await relay.call("POST", `/vehicles/${encodeURIComponent(id)}/claim`);
-    return v;
-  };
-
-  const waitSkill = async (id, skillId, signal, timeoutMs = SKILL_TIMEOUT_MS) => {
-    const end = Date.now() + timeoutMs;
-    while (Date.now() < end) {
-      const v = await vehicle(id);
-      const s = v.skill;
-      if (!s || s.id !== skillId) return { state: "superseded", vehicle: compactVehicle(v) };
-      if (s.state !== "running") return { state: s.state, detail: s.detail, vehicle: compactVehicle(v) };
-      await sleep(250, signal);
-    }
-    return { state: "timeout" };
-  };
-
-  const skill = async (id, name, params, signal) => {
-    await claimFor(id);
-    const started = await relay.call("POST", `/vehicles/${encodeURIComponent(id)}/skills/${name}`, params);
-    const result = await waitSkill(id, started.skill.id, signal);
-    if (result.state === "failed") throw new Error(`${name} failed: ${result.detail}`);
-    return result;
-  };
+  const { vehicle, claimFor, waitSkill, skill, waitPlan } = flightHelpers(relay);
 
   return [
     {
@@ -305,27 +243,12 @@ export function relayTools(relay) {
       executionMode: "sequential",
       execute: async (_id, p, signal, onUpdate) => {
         await claimFor(p.vehicle);
-        const started = await relay.call("POST", `/vehicles/${encodeURIComponent(p.vehicle)}/plan`, {
+        const started = await relay.call("POST", `/vehicles/${enc(p.vehicle)}/plan`, {
           steps: p.steps,
           name: "copilot",
           confirm: "ARM",
         });
-        const planId = started.plan.id;
-        const end = Date.now() + PLAN_TIMEOUT_MS;
-        let shown = -1;
-        while (Date.now() < end) {
-          const v = await vehicle(p.vehicle);
-          const plan = v.plan;
-          if (!plan || plan.id !== planId) throw new Error("the sequence was replaced by another command");
-          if (plan.index !== shown && plan.state === "running") {
-            shown = plan.index;
-            onUpdate?.(text(`step ${plan.index + 1} of ${plan.count}: ${plan.steps[plan.index]?.action}`));
-          }
-          if (plan.state === "done") return text({ state: "done", results: plan.results, vehicle: compactVehicle(v) });
-          if (plan.state !== "running") throw new Error(`sequence ${plan.state} at step ${plan.index + 1}: ${plan.detail}`);
-          await sleep(300, signal);
-        }
-        throw new Error("the sequence did not finish in time");
+        return text(await waitPlan(p.vehicle, started.plan.id, signal, onUpdate));
       },
     },
     {
@@ -349,31 +272,113 @@ export function relayTools(relay) {
       parameters: Type.Object({ vehicle: VID }),
       execute: async (_id, p) => text(await relay.call("POST", `/vehicles/${encodeURIComponent(p.vehicle)}/stop`)),
     },
+    defineTool(
+      "relay_sticks_for",
+      "Push sticks",
+      "Hold stick positions for N seconds (at most 10), then centre them: roll/pitch/yaw in -1..1 (roll right+, pitch forward+, yaw clockwise+), throttle 0..1. " +
+        "For fine, open-loop control the other tools cannot express. The aircraft must be armed and in a manual or altitude-hold mode.",
+      Type.Object({
+        vehicle: VID,
+        roll: Type.Number({ minimum: -1, maximum: 1 }),
+        pitch: Type.Number({ minimum: -1, maximum: 1 }),
+        yaw: Type.Number({ minimum: -1, maximum: 1 }),
+        throttle: Type.Number({ minimum: 0, maximum: 1 }),
+        seconds: Type.Number({ minimum: 0.1, maximum: 10 }),
+      }),
+      (p, ctx) => skill(p.vehicle, "sticks", { roll: p.roll, pitch: p.pitch, yaw: p.yaw, throttle: p.throttle, seconds: p.seconds }, ctx.signal),
+    ),
+    defineTool(
+      "relay_refly",
+      "Fly a record again",
+      "Fly a recorded flight again on this aircraft (see app_refly_options): mode plan (the recorded sequence), path (the recorded track as waypoints), " +
+        "sticks (the recorded stick timeline at speed 0.25..2) or auto (recommended). Waits until it finishes.",
+      Type.Object({
+        vehicle: VID,
+        session_id: Type.Integer({ minimum: 1 }),
+        mode: Type.Optional(Type.Union(["auto", "plan", "path", "sticks"].map((m) => Type.Literal(m)))),
+        speed: Type.Optional(Type.Number({ minimum: 0.25, maximum: 2 })),
+      }),
+      async (p, ctx) => {
+        await claimFor(p.vehicle);
+        const started = await relay.call("POST", `/vehicles/${enc(p.vehicle)}/refly`, {
+          session_id: p.session_id,
+          mode: p.mode ?? "auto",
+          speed: p.speed,
+          confirm: "ARM",
+        });
+        if (started.plan) return waitPlan(p.vehicle, started.plan.id, ctx.signal, ctx.onUpdate);
+        if (started.skill) {
+          const result = await waitSkill(p.vehicle, started.skill.id, ctx.signal);
+          if (result.state === "failed") throw new Error(`refly failed: ${result.detail}`);
+          return result;
+        }
+        return started;
+      },
+    ),
   ];
 }
 
 // ---------------------------------------------------------------------------
 // Copilot
 
-export function systemPrompt(lang) {
-  return [
+/** The tool list for a scope setting (04 §6.2): flight, flight+device or all. */
+export function toolsFor(relay, scope = "all", danger = dangerResolver(relay)) {
+  const tools = relayTools(relay);
+  if (scope === "flight") return tools;
+  tools.push(...deviceTools(relay, danger));
+  if (scope === "flight+device") return tools;
+  tools.push(...appTools(relay));
+  return tools;
+}
+
+export function systemPrompt(lang, scope = "all") {
+  const parts = [
     "You are Copilot, the assistant built into ANet Relay, a ground station for small quadcopters on a local network.",
-    "You can read aircraft status and fly aircraft with the relay_* tools. Simulated aircraft have ids sim-N; real ones real-<ip>.",
+    "Simulated aircraft have ids sim-N; real ones real-<ip>.",
     "Units: metres, seconds, degrees. Moves are relative to the aircraft's nose; yaw is positive clockwise (right).",
+    "Tool sets:",
+    "- relay_* (flight): read status and fly with takeoff, hover, move, yaw, land, whole sequences (relay_plan), timed stick pushes (relay_sticks_for) and flying a recorded flight again (relay_refly).",
+  ];
+  if (scope !== "flight") {
+    parts.push(
+      "- device_* (device): the aircraft down to a single motor, actuator output, RC channel, parameter or MAVLink command: overview, messages, parameters, raw command catalogue and commands, motor test, actuator, RC override, attitude and velocity targets, message rates, reboot, calibration, home, termination, arm (also forced), modes.",
+    );
+  }
+  if (scope === "all") {
+    parts.push(
+      "- app_* (application): the ANet Relay window and backend: language, workspace, selection, stage view, inspector, settings, connect dialog, preferences, controllers and possession, records and replay, the Copilot window, the main window, screenshots, network scan, connecting, simulators, settings, alerts, records and refly options. The window shows a notice for what you do there.",
+    );
+  }
+  parts.push(
     "Rules:",
     "- For several actions in a row (for example take off, hover, move, turn, land), plan them and call relay_plan once.",
     "- Before flying, check relay_fleet or relay_vehicle when you are not sure which aircraft is meant or whether it is ready.",
     "- If the user did not name an aircraft, use the selected aircraft given in the message context; if none, ask.",
     "- A person can possess any aircraft at any time and always wins. If a tool reports possessed_by_human, stop and tell the user to release the aircraft first. Never retry around it.",
-    "- Real aircraft only move after the operator approves each command in the chat; if they decline, do not insist.",
+    "- Real aircraft only move after the operator approves each command in the chat; this covers every motion tool and every device tool that can spin a motor, drive an output, override RC, reboot, calibrate, terminate, force-arm, write a parameter or fly a target. If they decline, do not insist. The approval is the confirmation: never ask the user to type a confirm word.",
+  );
+  if (scope !== "flight") {
+    parts.push(
+      "- Use the least powerful tool that does the job. Prefer relay_* skills over device_attitude, device_velocity, device_rc or device_command. Read first (device_overview, device_param_get), then write, and report old and new values.",
+      "- Motor tests need a disarmed aircraft; tell the user to remove the propellers of a real aircraft before you request one. Use device_motors_stop if anything looks wrong.",
+      "- device_terminate and relay_stop cut the motors; use them only for an emergency the user asks for.",
+    );
+  } else {
+    parts.push("- Use relay_stop only for an emergency the user asks for. Prefer relay_land.");
+  }
+  if (scope === "all") {
+    parts.push("- Interface actions need no approval but change what the operator sees: do them only when asked, and say what you changed. Do not close dialogs the operator is working in.");
+  }
+  parts.push(
     "- Without a position estimate horizontal moves are open-loop estimates: say so when you report distances.",
-    "- Use relay_stop only for an emergency the user asks for. Prefer relay_land.",
-    "- Keep answers short and factual. Report what was flown and the results, not your reasoning.",
+    "- Keep answers short and factual. Report what was done and the results, not your reasoning.",
+    "- Each message starts with a context line: the selected aircraft and the interface language. When the interface language is zh, answer in Simplified Chinese.",
     lang === "zh" ? "Answer in Simplified Chinese." : "Answer in the language the user writes in.",
-  ].join("\n");
+  );
+  return parts.join("\n");
 }
 
-function summarise(name, args) {
+function summarise(name, args, danger) {
   const a = args || {};
   switch (name) {
     case "relay_takeoff":
@@ -388,8 +393,11 @@ function summarise(name, args) {
       return { action: "land" };
     case "relay_plan":
       return { action: "plan", steps: a.steps };
-    default:
-      return { action: name };
+    default: {
+      // everything else: the renderer shows the tool name and its arguments
+      const { vehicle: _vehicle, ...rest } = a;
+      return { action: name, tool: name, danger: danger ?? "motion", args: rest };
+    }
   }
 }
 
@@ -402,15 +410,23 @@ function summarise(name, args) {
  * @param {(event: object) => void} o.emit renderer events
  * @param {() => string} [o.lang]
  */
-export function createCopilot({ relay, models, model, emit, lang = () => "en" }) {
+export function createCopilot({ relay, models, model, emit, lang = () => "en", scope = () => "all" }) {
   const approvals = new Map();
   let approvalSeq = 0;
   let vehicleKinds = new Map();
+  const danger = dangerResolver(relay);
+
+  /** The approval level a tool call needs on a real aircraft, or null (04 §6.2). */
+  const levelOf = async (name, args) => {
+    if (MOTION_TOOLS.has(name)) return "motion";
+    if (name.startsWith("device_")) return danger(name, args || {});
+    return null;
+  };
 
   const kindOf = async (id) => {
     if (!vehicleKinds.has(id)) {
       try {
-        const v = await relay.call("GET", `/vehicles/${encodeURIComponent(id)}`);
+        const v = await relay.call("GET", `/vehicles/${enc(id)}`);
         vehicleKinds.set(id, { kind: v.kind, label: v.label });
       } catch {
         return null;
@@ -419,7 +435,7 @@ export function createCopilot({ relay, models, model, emit, lang = () => "en" })
     return vehicleKinds.get(id);
   };
 
-  const requestApproval = (toolCallId, name, args, info) =>
+  const requestApproval = (toolCallId, name, args, info, level) =>
     new Promise((resolve) => {
       const id = `ap-${++approvalSeq}`;
       const timer = setTimeout(() => {
@@ -433,19 +449,20 @@ export function createCopilot({ relay, models, model, emit, lang = () => "en" })
         emit({ type: "approval_closed", id, approved: ok });
         resolve(ok);
       });
-      emit({ type: "approval", id, toolCallId, tool: name, vehicle: args.vehicle, label: info.label, request: summarise(name, args) });
+      emit({ type: "approval", id, toolCallId, tool: name, vehicle: args.vehicle, label: info.label, request: summarise(name, args, level) });
     });
 
   const agent = new Agent({
-    initialState: { systemPrompt: systemPrompt(lang()), model, tools: relayTools(relay), thinkingLevel: "off" },
+    initialState: { systemPrompt: systemPrompt(lang(), scope()), model, tools: toolsFor(relay, scope(), danger), thinkingLevel: "off" },
     streamFn: models.streamSimple.bind(models),
     toolExecution: "sequential",
     identity: { attribution: null },
     beforeToolCall: async ({ toolCall, args }) => {
-      if (!MOTION_TOOLS.has(toolCall.name)) return undefined;
+      const level = await levelOf(toolCall.name, args);
+      if (!level) return undefined;
       const info = await kindOf(args.vehicle);
       if (!info || info.kind !== "real") return undefined;
-      const ok = await requestApproval(toolCall.id, toolCall.name, args, info);
+      const ok = await requestApproval(toolCall.id, toolCall.name, args, info, level);
       return ok ? undefined : { block: true, reason: "The operator declined this command. Do not retry it unless asked." };
     },
   });
@@ -495,7 +512,17 @@ export function createCopilot({ relay, models, model, emit, lang = () => "en" })
   return {
     async prompt(userText, context = {}) {
       vehicleKinds = new Map();
-      const prefix = context.vehicle ? `[Selected aircraft: ${context.vehicle}]\n` : "";
+      // The window knows which aircraft is selected and which language is shown (GET /app/ui, 04 §3.2).
+      let state = null;
+      try {
+        const ui = await relay.call("GET", "/app/ui");
+        state = ui?.state ?? (ui?.lang ? ui : null);
+      } catch {
+        // no window connected: fall back to what the caller knows
+      }
+      const selected = state?.selected ?? context.vehicle ?? null;
+      const uiLang = state?.lang === "zh" || state?.lang === "en" ? state.lang : lang();
+      const prefix = (selected ? `[Selected aircraft: ${selected}]\n` : "") + `[Interface language: ${uiLang}]\n`;
       await agent.prompt(prefix + userText);
     },
     abort() {
@@ -505,7 +532,7 @@ export function createCopilot({ relay, models, model, emit, lang = () => "en" })
     reset() {
       this.abort();
       agent.reset();
-      agent.state.tools = relayTools(relay);
+      agent.state.tools = toolsFor(relay, scope(), danger);
     },
     approve(id, ok) {
       const resolve = approvals.get(id);

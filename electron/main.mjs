@@ -6,7 +6,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { Backend, describeExit } from "./backend.mjs";
-import { createCopilotHost } from "./copilot/host.mjs";
+import { configuredOpacity, createCopilotHost } from "./copilot/host.mjs";
+import { createCopilotWindow } from "./copilot/window.mjs";
 import { buildMenu, MENU_ACTIONS } from "./menu.mjs";
 import {
   backendLaunch,
@@ -45,6 +46,7 @@ let quitting = false;
 let starting = false;
 let dialogAbort = null;
 let copilotHost = null;
+let copilotWin = null;
 const bridgeWindows = new Map();
 
 /** Backend supervision state mirrored to the renderer (02 §15). */
@@ -75,7 +77,15 @@ function isAppUrl(raw) {
   }
 }
 
+/** The main window or the floating Copilot window, showing the app's own page. */
 function isTrustedSender(event) {
+  const frame = event.senderFrame;
+  if (!frame || !isAppUrl(frame.url)) return false;
+  return frame === mainWindow?.webContents.mainFrame || copilotWin?.owns(event) === true;
+}
+
+/** Window and screenshot control belongs to the main window's page only. */
+function isMainSender(event) {
   const frame = event.senderFrame;
   return Boolean(frame) && frame === mainWindow?.webContents.mainFrame && isAppUrl(frame.url);
 }
@@ -198,6 +208,63 @@ function openBridgePage(raw) {
 }
 
 // ---------------------------------------------------------------------------
+// Application control through the main process (04 §3.2 window and screenshot)
+
+const SCREENSHOT_MAX_WIDTH = 1920;
+
+function windowState() {
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return { focused: false, minimized: false, maximized: false, fullscreen: false };
+  return { focused: win.isFocused(), minimized: win.isMinimized(), maximized: win.isMaximized(), fullscreen: win.isFullScreen() };
+}
+
+function pushWindowState() {
+  sendToRenderer("relay:window-state-changed", windowState());
+}
+
+async function windowAction(action) {
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return windowState();
+  switch (action) {
+    case "focus":
+      focusWindow();
+      break;
+    case "minimize":
+      win.minimize();
+      break;
+    case "maximize":
+      if (win.isMinimized()) win.restore();
+      win.maximize();
+      break;
+    case "restore":
+      if (win.isFullScreen()) win.setFullScreen(false);
+      if (win.isMaximized()) win.unmaximize();
+      if (win.isMinimized()) win.restore();
+      break;
+    case "fullscreen":
+      win.setFullScreen(!win.isFullScreen());
+      break;
+    default:
+      return windowState();
+  }
+  // window managers apply these asynchronously
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  return windowState();
+}
+
+/** PNG of the main window's page, at most maxWidth wide; null when it cannot be captured. */
+async function screenshot(maxWidth) {
+  const win = mainWindow;
+  if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return null;
+  const limit = Math.min(SCREENSHOT_MAX_WIDTH, Math.max(160, Math.round(Number(maxWidth) || 1280)));
+  let image = await win.webContents.capturePage();
+  if (image.isEmpty()) return null;
+  if (image.getSize().width > limit) image = image.resize({ width: limit, quality: "best" });
+  const { width, height } = image.getSize();
+  return { png_base64: image.toPNG().toString("base64"), width, height };
+}
+
+// ---------------------------------------------------------------------------
 // IPC (preload surface, electron/relay.d.ts)
 
 function registerIpc() {
@@ -228,6 +295,11 @@ function registerIpc() {
     if (setLanguage(lang)) installMenu();
     return true;
   });
+  const handleMain = (channel, fn) =>
+    ipcMain.handle(channel, (event, ...args) => (isMainSender(event) ? fn(...args) : false));
+  handleMain("relay:window-action", (action) => windowAction(String(action)));
+  handleMain("relay:window-state", () => windowState());
+  handleMain("relay:screenshot", (maxWidth) => screenshot(maxWidth));
   handle("relay:backend-state", () => backendState);
   handle("relay:restart-backend", () => restartBackend());
   handle("relay:quit", () => {
@@ -235,8 +307,26 @@ function registerIpc() {
     return true;
   });
 
+  copilotWin = createCopilotWindow({
+    preload: path.join(import.meta.dirname, "preload.cjs"),
+    file: path.join(userDataDir(), "copilot-window.json"),
+    load: (win) => win.loadURL(copilotUrl()).catch((error) => console.error(`[relay] copilot window load failed: ${error?.message ?? error}`)),
+    opacity: () => configuredOpacity() / 100,
+    quitting: () => quitting,
+    onVisibility: (visible) => {
+      sendToRenderer("relay:copilot-window-state-changed", { visible });
+      const wc = copilotWin?.webContents();
+      if (wc) wc.send("relay:copilot-window-state-changed", { visible });
+    },
+    guard: (win) => guardWebContents(win, () => win.loadURL(copilotUrl()).catch(() => {})),
+  });
   copilotHost = createCopilotHost({
-    window: () => mainWindow,
+    copilotWindow: copilotWin,
+    mainWindow: () => mainWindow,
+    openSettings: () => {
+      focusWindow();
+      sendToRenderer("relay:menu", { action: "settings", section: "copilot" });
+    },
     relayBase: () => (backendState.state === "ready" ? (backend?.origin ?? null) : null),
     language,
     trusted: isTrustedSender,
@@ -312,8 +402,19 @@ function createWindow() {
   win.once("ready-to-show", () => win.show());
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
+    copilotWin?.destroy();
   });
+  for (const ev of ["focus", "blur", "minimize", "restore", "maximize", "unmaximize", "enter-full-screen", "leave-full-screen"]) {
+    win.on(ev, pushWindowState);
+  }
 
+  guardWebContents(win, () => loadRenderer(win));
+  loadRenderer(win);
+  return win;
+}
+
+/** Navigation guards of the app's own windows: external links open in the browser; a crashed page reloads. */
+function guardWebContents(win, reload) {
   const wc = win.webContents;
   wc.setWindowOpenHandler(({ url }) => {
     openExternal(url);
@@ -330,11 +431,14 @@ function createWindow() {
   wc.on("render-process-gone", (_event, details) => {
     if (quitting || details.reason === "clean-exit") return;
     console.error(`[relay] renderer gone: ${details.reason}; reloading`);
-    loadRenderer(win);
+    reload();
   });
+}
 
-  loadRenderer(win);
-  return win;
+/** The same web app, rendering only the Copilot panel (04 §6.1). */
+function copilotUrl() {
+  const base = DEV_URL || APP_INDEX_URL;
+  return `${base}${base.includes("?") ? "&" : "?"}window=copilot`;
 }
 
 function loadRenderer(win) {

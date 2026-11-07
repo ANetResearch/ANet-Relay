@@ -12,6 +12,8 @@ export type RelayMenuAction =
 
 export interface RelayMenuEvent {
   action: RelayMenuAction;
+  /** settings only: the section to open, e.g. "copilot" */
+  section?: string;
   /** stop-all only: true when the shell already sent POST /api/v1/stop-all. */
   shellIssued?: boolean;
 }
@@ -48,10 +50,14 @@ export interface CopilotConfig {
   /** false when the OS offers no keychain: the key is stored in a 0600 file instead */
   secureStorage: boolean;
   configured: boolean;
+  /** which tool sets the agent gets (04 §6.2) */
+  toolScope: CopilotToolScope;
+  /** floating window opacity in percent, 60..100 (04 §6.1) */
+  opacity: number;
 }
 
 /** apiKey: a string sets it, null or "" clears it, absent keeps the stored key. */
-export type CopilotConfigInput = Partial<Pick<CopilotConfig, "api" | "baseUrl" | "model">> & { apiKey?: string | null };
+export type CopilotConfigInput = Partial<Pick<CopilotConfig, "api" | "baseUrl" | "model" | "toolScope" | "opacity">> & { apiKey?: string | null };
 
 export type CopilotEvent =
   | { type: "busy"; busy: boolean }
@@ -65,6 +71,9 @@ export type CopilotEvent =
   | { type: "approval_closed"; id: string; approved: boolean; reason?: string }
   | { type: "error"; error: string };
 
+export type CopilotToolScope = "flight" | "flight+device" | "all";
+export type CopilotWindowAction = "show" | "hide" | "toggle";
+
 export interface RelayCopilot {
   getConfig(): Promise<CopilotConfig>;
   saveConfig(cfg: CopilotConfigInput): Promise<CopilotConfig>;
@@ -76,6 +85,30 @@ export interface RelayCopilot {
   approve(id: string, ok: boolean): Promise<boolean>;
   getState(): Promise<{ busy: boolean }>;
   onEvent(callback: (event: CopilotEvent) => void): () => void;
+  /** Show, hide or toggle the floating Copilot window (04 §6.1). */
+  window(action: CopilotWindowAction): Promise<{ visible: boolean }>;
+  getWindowState(): Promise<{ visible: boolean }>;
+  onWindowState(callback: (state: { visible: boolean }) => void): () => void;
+  /** Ask the main window to open Settings > Copilot. */
+  openSettings(): Promise<boolean>;
+}
+
+export type AppWindowAction = "focus" | "minimize" | "maximize" | "restore" | "fullscreen";
+
+export interface AppWindowState {
+  focused: boolean;
+  minimized: boolean;
+  maximized: boolean;
+  fullscreen: boolean;
+}
+
+/** Application control through the main process (04 §3.2); served to the main window's page only. */
+export interface RelayApp {
+  window(action: AppWindowAction): Promise<AppWindowState>;
+  getWindowState(): Promise<AppWindowState>;
+  onWindowState(callback: (state: AppWindowState) => void): () => void;
+  /** Main window capture, at most maxWidth pixels wide; null when it cannot be captured. */
+  screenshot(maxWidth: number): Promise<{ png_base64: string; width: number; height: number } | null>;
 }
 
 export interface RelayShell {
@@ -97,6 +130,7 @@ export interface RelayShell {
   onBackendState(callback: (state: RelayBackendState) => void): () => void;
   onMenu(callback: (event: RelayMenuEvent) => void): () => void;
   copilot: RelayCopilot;
+  app: RelayApp;
 }
 
 declare global {

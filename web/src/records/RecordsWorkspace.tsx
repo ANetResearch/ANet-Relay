@@ -14,6 +14,7 @@ import { useT8 } from '@/fleet/copy'
 import { usePoll } from '@/inspector/usePoll'
 import { useLength } from '@/settings/prefs'
 import { dayKey, groupByDay, recordFor, type RecordSummary } from './model'
+import { useRecordsCtl } from './ctl'
 import { Replay } from './Replay'
 import './records.css'
 
@@ -80,6 +81,15 @@ export function RecordsWorkspace({ focus }: RecordsWorkspaceProps) {
       setSelectedId(r.id)
       setFocusT(focus.t)
     }
+  }
+
+  // a record opened by application control (04 §3.2 open_record)
+  const openReq = useRecordsCtl((s) => s.open)
+  const [appliedOpen, setAppliedOpen] = React.useState<typeof openReq>(null)
+  if (openReq && appliedOpen !== openReq) {
+    setAppliedOpen(openReq)
+    setSelectedId(openReq.id)
+    setFocusT(null)
   }
 
   const filtered = React.useMemo(() => {

@@ -1,8 +1,10 @@
 // Copilot end to end (03 §16): settings stored by the shell, the agent in the main process talking to a scripted
 // OpenAI-compatible endpoint, a sequence flown on a simulator, and the approval gate for a real aircraft.
+import fs from 'node:fs'
 import http from 'node:http'
+import os from 'node:os'
 import path from 'node:path'
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { ARTIFACTS, freeTcpPortOn, freeUdpPort, launchApp, rest, startFake, stopProcess, until, type RelayApp } from './harness'
 
 type Msg = { role: string; content?: unknown; tool_calls?: unknown[] }
@@ -52,6 +54,20 @@ function fakeLlm(): Promise<{ url: string; requests: Msg[][]; close(): Promise<v
 }
 
 let r: RelayApp
+
+/** The floating Copilot window (04 §6.1) is its own page; the main window stays `r.page`. */
+async function copilotPage(app: RelayApp['app']): Promise<Page> {
+  const page = await until(() => app.windows().find((w) => w.url().includes('window=copilot')), 'copilot window', 20000)
+  await page.waitForLoadState('domcontentloaded')
+  return page
+}
+
+const copilotWindowInfo = (app: RelayApp['app']) =>
+  app.evaluate(({ BrowserWindow }) => {
+    const w = BrowserWindow.getAllWindows().find((x) => x.webContents.getURL().includes('window=copilot'))
+    if (!w) return null
+    return { visible: w.isVisible(), onTop: w.isAlwaysOnTop(), modal: w.isModal(), hasParent: Boolean(w.getParentWindow()), bounds: w.getBounds() }
+  })
 let llm: Awaited<ReturnType<typeof fakeLlm>>
 let fake: Awaited<ReturnType<typeof startFake>> | undefined
 
@@ -70,7 +86,9 @@ test('copilot: settings, a sequence on a simulator, approval for a real aircraft
 
   // settings: endpoint, model and key; the key never comes back to the renderer
   await page.locator('[data-copilot-toggle]').click()
-  await page.locator('[data-copilot-setup]').click()
+  const cp = await copilotPage(r.app)
+  await expect(page.locator('[data-copilot-toggle][aria-pressed="true"]')).toBeVisible()
+  await cp.locator('[data-copilot-setup]').click() // the floating window asks the main window for Settings > Copilot
   await page.locator('[data-copilot-base]').fill(llm.url)
   await page.locator('[data-copilot-model]').fill('fake-model')
   await page.locator('[data-copilot-key]').fill('sk-test-0123456789abcd')
@@ -85,12 +103,13 @@ test('copilot: settings, a sequence on a simulator, approval for a real aircraft
   // a sequence on a simulator, flown by the copilot session
   await rest(r, 'POST', '/sims', { count: 1, autopilot: 'px4', position: false })
   await page.locator('[data-fleet-card="sim-1"]').click()
-  await page.locator('[data-copilot-input]').fill('Take off, hover, forward 1 m, turn 45 degrees and land as one sequence')
-  await page.keyboard.press('Enter')
-  await expect(page.locator('[data-tool="relay_plan"]')).toBeVisible({ timeout: 15000 })
-  await page.screenshot({ path: path.join(shots, '02-running.png') })
-  await expect(page.locator('[data-tool="relay_plan"][data-state="ok"]')).toBeVisible({ timeout: 90000 })
-  await expect(page.getByText('Finished. The sequence was flown')).toBeVisible({ timeout: 15000 })
+  await expect(cp.getByText('Selected: SIM-1')).toBeVisible({ timeout: 10000 })
+  await cp.locator('[data-copilot-input]').fill('Take off, hover, forward 1 m, turn 45 degrees and land as one sequence')
+  await cp.keyboard.press('Enter')
+  await expect(cp.locator('[data-tool="relay_plan"]')).toBeVisible({ timeout: 15000 })
+  await cp.screenshot({ path: path.join(shots, '02-running.png') })
+  await expect(cp.locator('[data-tool="relay_plan"][data-state="ok"]')).toBeVisible({ timeout: 90000 })
+  await expect(cp.getByText('Finished. The sequence was flown')).toBeVisible({ timeout: 15000 })
   const events = await rest<{ events: { kind: string; data?: Record<string, unknown> }[] }>(r, 'GET', '/events?after=0&limit=1000&tail=true')
   expect(events.events.some((e) => e.kind === 'plan_finished')).toBe(true)
   expect(events.events.some((e) => e.kind === 'claim_started' && e.data?.name === 'copilot')).toBe(true)
@@ -105,12 +124,52 @@ test('copilot: settings, a sequence on a simulator, approval for a real aircraft
   await rest(r, 'POST', '/vehicles', { host, port: udp })
   await until(async () => (await rest<{ link: { state: string } }>(r, 'GET', `/vehicles/${vid}`)).link.state === 'ok', 'fake aircraft link', 30000)
   await page.locator(`[data-fleet-card="${vid}"]`).click()
-  await page.locator('[data-copilot-input]').fill('Take off')
-  await page.keyboard.press('Enter')
-  await expect(page.locator('[data-approval]')).toBeVisible({ timeout: 15000 })
-  await page.screenshot({ path: path.join(shots, '04-approval.png') })
-  await page.locator('[data-decline]').click()
-  await expect(page.locator('[data-tool="relay_takeoff"][data-state="error"]')).toBeVisible({ timeout: 15000 })
+  await expect(cp.getByText('Selected: ')).toBeVisible({ timeout: 10000 })
+  await cp.locator('[data-copilot-input]').fill('Take off')
+  await cp.keyboard.press('Enter')
+  await expect(cp.locator('[data-approval]')).toBeVisible({ timeout: 15000 })
+  await cp.screenshot({ path: path.join(shots, '04-approval.png') })
+  await cp.locator('[data-decline]').click()
+  await expect(cp.locator('[data-tool="relay_takeoff"][data-state="error"]')).toBeVisible({ timeout: 15000 })
   const v = await rest<{ armed: boolean }>(r, 'GET', `/vehicles/${vid}`)
   expect(v.armed).toBe(false)
+})
+
+test('copilot window: floating, placed anywhere, remembered, main window stays usable', async () => {
+  await r?.close()
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-e2e-cpw-'))
+  r = await launchApp({ lang: 'en', size: { width: 1440, height: 900 }, dataDir })
+  const { page, app } = r
+  try {
+    await page.locator('[data-copilot-toggle]').click()
+    const cp = await copilotPage(app)
+    await expect(cp.locator('[data-copilot-drag]')).toBeVisible()
+    const info = await copilotWindowInfo(app)
+    expect(info).toMatchObject({ visible: true, onTop: true, modal: false, hasParent: false })
+
+    // drag it to the left of the main window; the main window still takes clicks while it is shown
+    await app.evaluate(({ BrowserWindow }) => {
+      const w = BrowserWindow.getAllWindows().find((x) => x.webContents.getURL().includes('window=copilot'))!
+      w.setBounds({ x: 24, y: 80, width: 420, height: 560 })
+    })
+    await page.getByText('Records', { exact: true }).first().click()
+    await expect(page.locator('[data-workspace="records"]')).toBeVisible()
+    expect((await copilotWindowInfo(app))?.visible).toBe(true)
+
+    // hide through the window's own button, then the top bar reflects it and the position is on disk
+    await cp.locator('[data-copilot-hide]').click()
+    await expect(page.locator('[data-copilot-toggle][aria-pressed="false"]')).toBeVisible()
+    expect((await copilotWindowInfo(app))?.visible).toBe(false)
+    const file = path.join(dataDir, 'copilot-window.json')
+    const saved = await until(() => (fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, 'utf8')) as { x: number; y: number; width: number; height: number }) : null), 'saved bounds', 5000)
+    expect(saved).toMatchObject({ x: 24, y: 80 })
+
+    // Ctrl+J shows it again, in the same place
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+J' : 'Control+J')
+    await until(async () => (await copilotWindowInfo(app))?.visible, 'copilot window shown again', 5000)
+    expect((await copilotWindowInfo(app))?.bounds).toMatchObject({ x: 24, y: 80 })
+  } finally {
+    await r.close()
+    fs.rmSync(dataDir, { recursive: true, force: true })
+  }
 })

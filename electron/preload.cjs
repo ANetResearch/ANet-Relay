@@ -31,6 +31,10 @@ const COPILOT_EVENTS = new Set([
 ]);
 const validCopilot = (p) => p !== null && typeof p === "object" && COPILOT_EVENTS.has(p.type);
 const validMenu = (p) => p !== null && typeof p === "object" && MENU_ACTIONS.has(p.action);
+const validWindowState = (p) => p !== null && typeof p === "object" && typeof p.visible === "boolean";
+const validAppWindow = (p) => p !== null && typeof p === "object" && typeof p.focused === "boolean";
+const WINDOW_ACTIONS = new Set(["show", "hide", "toggle"]);
+const APP_WINDOW_ACTIONS = new Set(["focus", "minimize", "maximize", "restore", "fullscreen"]);
 const validBackend = (p) => p !== null && typeof p === "object" && BACKEND_STATES.has(p.state);
 
 if (boot) {
@@ -70,6 +74,25 @@ if (boot) {
         approve: (id, ok) => ipcRenderer.invoke("relay:copilot-approve", { id: String(id), ok: Boolean(ok) }),
         getState: () => ipcRenderer.invoke("relay:copilot-state"),
         onEvent: (callback) => subscribe("relay:copilot", validCopilot, callback),
+        /** Floating Copilot window (04 §6.1): show | hide | toggle; resolves with {visible}. */
+        window: (action) => {
+          if (!WINDOW_ACTIONS.has(action)) return Promise.reject(new TypeError("action must be show, hide or toggle"));
+          return ipcRenderer.invoke("relay:copilot-window", action);
+        },
+        getWindowState: () => ipcRenderer.invoke("relay:copilot-window-state"),
+        onWindowState: (callback) => subscribe("relay:copilot-window-state-changed", validWindowState, callback),
+        /** Ask the main window to open Settings > Copilot. */
+        openSettings: () => ipcRenderer.invoke("relay:copilot-open-settings"),
+      }),
+      /** Application control through the main process (04 §3.2). Only the main window's page is served. */
+      app: Object.freeze({
+        window: (action) => {
+          if (!APP_WINDOW_ACTIONS.has(action)) return Promise.reject(new TypeError("unknown window action"));
+          return ipcRenderer.invoke("relay:window-action", action);
+        },
+        getWindowState: () => ipcRenderer.invoke("relay:window-state"),
+        onWindowState: (callback) => subscribe("relay:window-state-changed", validAppWindow, callback),
+        screenshot: (maxWidth) => ipcRenderer.invoke("relay:screenshot", Number(maxWidth) || 1280),
       }),
     }),
   );

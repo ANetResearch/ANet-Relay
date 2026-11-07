@@ -26,6 +26,8 @@ export type MenuAction = 'stop-all' | 'toggle-fleet' | 'toggle-inspector' | 'tog
 
 export interface MenuEvent {
   action: MenuAction
+  /** settings only: the section to open (the Copilot window's settings button asks for 'copilot') */
+  section?: string
   /** stop-all only: the shell already sent POST /stop-all */
   shellIssued?: boolean
 }
@@ -41,9 +43,15 @@ export interface CopilotConfig {
   keyHint: string | null
   secureStorage: boolean
   configured: boolean
+  /** which tool sets the agent gets (04 §6.2) */
+  toolScope: CopilotToolScope
+  /** floating window opacity, 60..100 (04 §6.1) */
+  opacity: number
 }
 
-export type CopilotConfigInput = Partial<Pick<CopilotConfig, 'api' | 'baseUrl' | 'model'>> & { apiKey?: string | null }
+export type CopilotToolScope = 'flight' | 'flight+device' | 'all'
+
+export type CopilotConfigInput = Partial<Pick<CopilotConfig, 'api' | 'baseUrl' | 'model' | 'toolScope' | 'opacity'>> & { apiKey?: string | null }
 
 export type CopilotEvent =
   | { type: 'busy'; busy: boolean }
@@ -57,6 +65,13 @@ export type CopilotEvent =
   | { type: 'approval_closed'; id: string; approved: boolean; reason?: string }
   | { type: 'error'; error: string }
 
+export type CopilotWindowAction = 'show' | 'hide' | 'toggle'
+
+/** State of the floating Copilot window (04 §6.1). */
+export interface CopilotWindowState {
+  visible: boolean
+}
+
 export interface RelayCopilotBridge {
   getConfig(): Promise<CopilotConfig>
   saveConfig(cfg: CopilotConfigInput): Promise<CopilotConfig>
@@ -67,6 +82,37 @@ export interface RelayCopilotBridge {
   approve(id: string, ok: boolean): Promise<boolean>
   getState(): Promise<{ busy: boolean }>
   onEvent(cb: (e: CopilotEvent) => void): () => void
+  /** Show, hide or toggle the floating window; resolves with its new state. */
+  window(action: CopilotWindowAction): Promise<CopilotWindowState>
+  getWindowState(): Promise<CopilotWindowState>
+  onWindowState(cb: (s: CopilotWindowState) => void): () => void
+  /** Ask the main window to open Settings > Copilot (the floating window has no settings of its own). */
+  openSettings(): Promise<boolean>
+}
+
+export type AppWindowAction = 'focus' | 'minimize' | 'maximize' | 'restore' | 'fullscreen'
+
+/** State of the main window as the shell sees it (04 §3.1 UiState.window). */
+export interface AppWindowState {
+  focused: boolean
+  minimized: boolean
+  maximized: boolean
+  fullscreen: boolean
+}
+
+export interface AppScreenshot {
+  png_base64: string
+  width: number
+  height: number
+}
+
+/** Application control through the main process (04 §3.2 window and screenshot). */
+export interface RelayAppBridge {
+  window(action: AppWindowAction): Promise<AppWindowState>
+  getWindowState(): Promise<AppWindowState>
+  onWindowState(cb: (s: AppWindowState) => void): () => void
+  /** Main window capture, downscaled to at most maxWidth pixels wide. */
+  screenshot(maxWidth: number): Promise<AppScreenshot | null>
 }
 
 export interface RelayBridge {
@@ -86,6 +132,8 @@ export interface RelayBridge {
   onMenu(cb: (e: MenuEvent) => void): () => void
   /** absent in shells older than 0.2 */
   copilot?: RelayCopilotBridge
+  /** absent in shells older than 0.2.1 */
+  app?: RelayAppBridge
 }
 
 declare global {

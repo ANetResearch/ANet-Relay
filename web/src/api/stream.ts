@@ -5,6 +5,8 @@ export interface StickSink {
   sendSticks(vehicle: string, s: { roll: number; pitch: number; yaw: number; throttle: number }): boolean
   cancelSticks(vehicle?: string): void
   reconnect(): void
+  /** Sends one JSON message (ui_state, ui_result); false when the socket is not open. */
+  send?(message: unknown): boolean
 }
 
 let instance: StickSink | null = null
@@ -24,4 +26,9 @@ export function sendSticks(vehicle: string, s: { roll: number; pitch: number; ya
 
 export function cancelSticks(vehicle?: string): void {
   instance?.cancelSticks(vehicle)
+}
+
+/** Generic client message over the operator socket (04 §3.1). Dropped, never queued, while the socket is down. */
+export function sendJson(message: unknown): boolean {
+  return instance?.send ? instance.send(message) : false
 }
