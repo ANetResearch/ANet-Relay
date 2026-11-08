@@ -142,7 +142,7 @@ def test_sdk_judges_a_program_and_runs_a_duel(base):
     agent.open_session("sdk-judge")
     try:
         listed = agent.challenge_list()["challenges"]
-        assert [c["id"] for c in listed][:2] == ["liftoff", "hover"] and len(listed) == 9
+        assert [c["id"] for c in listed][:2] == ["liftoff", "hover"] and len(listed) == 10
         job = agent.challenge_submit("liftoff", "liftoff", timeout=120)
         assert job["state"] == "done", job
         result = job["result"]
