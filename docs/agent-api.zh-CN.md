@@ -24,6 +24,8 @@ with RelayClient() as relay:                # 缺省 http://127.0.0.1:8765，或
     relay.land("sim-1")
 ```
 
+> 上面的高层技能需要智能体控制等级为 `full`（设置 → 安全，仅操作员可改）。在缺省等级 `sticks` 下，智能体只能通过摇杆与机载程序飞行：见[智能体控制等级](#智能体控制等级)与[程序工作流](#程序工作流)。
+
 3. 或者通过 MCP 接入大语言模型（第 8 节）：飞行、设备级、应用控制各一套服务。
 
 `sdk/python/examples/` 下的六个示例都在模拟机上运行：
@@ -64,6 +66,17 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | 3 | 技能 `goto`、`rtl`，穿环航线；闭环 `move` | `position`（新鲜的本地位置估计） |
 
 每架飞机在快照中报告 `capabilities: {manual, althold, position}`。缺少能力时返回 `capability_missing` 或 `no_position_estimate`。模拟机三者齐备；真机只有接入光流、动作捕捉或 UWB 等本地定位源时才具备 `position`。
+
+### 智能体控制等级
+
+设置 `agent_flight_level`（设计 06 §5）决定智能体会话可以如何飞行，只有操作员可以修改（设置 → 安全，或携带操作员令牌调用 `PUT /settings`）。窗口中的操作员不受此等级限制。
+
+| 等级 | 智能体会话可以 |
+|---|---|
+| `sticks`（缺省） | 推杆（WebSocket 流、`POST /vehicles/{id}/sticks`、`sticks` 技能）、解锁与上锁、切换到手动类模式（ArduPilot STABILIZE / ACRO / DRIFT，PX4 MANUAL / STABILIZED / ACRO）、射击、部署并运行机载程序，以及安全动作：急停与 `land`（其事件标注 `safety`） |
+| `full` | 本文的全部接口，与 0.3 相同 |
+
+在 `sticks` 等级下，技能 `takeoff`、`hold`、`move`、`yaw`、`goto`、`rtl`、`velocity`、`attitude`，包含这些动作的动作序列，以动作序列或轨迹方式再飞，定高、定点与自动类模式，设备级接口中的飞行类命令，以及 4 通道以上的 RC 覆盖，均返回 403 `sticks_only`（`detail.level = "sticks"`，`detail.action` 指明被拒绝的操作）。飞行 MCP 服务只列出仍可用的工具（20 个中的 13 个；每次 `tools/list` 都重新读取设置），Copilot 同样去掉这些工具，并提示模型编写程序。在这一等级下，稳定飞行由机载程序完成：智能体按自己的节奏修改程序、调整参数、查看结果，程序负责 50 Hz 的闭环。
 
 ## 3. 坐标系与单位
 
@@ -289,6 +302,71 @@ POST /api/v1/vehicles/sim-1/plan
 
 快照只携带 `vehicle.sim.airframe = {preset, seed}`：具体数值不出现在快照与程序观测中，只能在飞行中体现。事件 `sim_airframe_changed`（`data.preset`、`data.seed`、`data.by`）。模拟机在收到 `SET_MESSAGE_INTERVAL` 或 `REQUEST_MESSAGE` 时发送 `SCALED_IMU`（机载板 FRD 坐标的比力，单位 mG；角速度 mrad/s），它不属于任何数据流分组。
 
+### 机载程序
+
+机载程序（设计 06 §2）是一段受限 Python 程序，包含 `PARAMS`、`init(ctx)` 与 `step(obs, ctx) -> Sticks`，由 Relay 在隔离的程序宿主中以 50 Hz 运行在飞机的杆量通路上。它只能看到飞机自身测得的量（`obs`：姿态、角速度、加速度、气压高度、可选的位置、电池、电机输出、对抗状态、目标），输出四个杆量与扳机。[`programs-guide.md`](programs-guide.md) 是编写程序的精简参考（Copilot 的系统提示与 MCP 工具 `program_guide` 使用同一文本）；完整文档见 `programs.zh-CN.md`。
+
+| 方法与路径 | 权限 | 用途 |
+|---|---|---|
+| `GET /programs` | – | 内置示例（`hover_trim`、`liftoff`、`patrol`、`hunter_easy`、`hunter_medium`、`hunter_hard`，只读）与已保存的程序 |
+| `POST /programs` | 会话或操作员 | `{name, source?, description?, params?, tests?, note?, copy_of?}` → `{program, validation}` |
+| `GET /programs/{pid}` · `GET /programs/{pid}/revisions` | – | 单个程序（`source`、`params`、`tests`、`rev`）；最近 50 个版本，最新在前，含作者与说明 |
+| `PUT /programs/{pid}` | 会话或操作员 | `{source}` 或 `{patch: [{start, end, text}]}`（行号从 1 起、含首尾，均按当前版本计；`end = start - 1` 表示在 `start` 前插入），另可带 `name`、`description`、`params`、`tests`、`note`：产生新版本，返回 `{program, validation}` |
+| `DELETE /programs/{pid}` | 会话或操作员 | 删除已保存的程序 |
+| `POST /programs/{pid}/validate` | 会话或操作员 | `{source?}`：只做语言校验，返回 `{ok, errors: [{line, col, code, message_en, message_zh}], params, param_ranges}` |
+| `POST /programs/{pid}/test` | 会话或操作员 | `{rev?, source?, tests?, seed?}`：运行单元测试，返回 `{results, passed, total}` |
+| `POST /vehicles/{id}/program` | 控制者或操作员 | `{program, rev?, params?, mode: pilot \| copilot, sensors?, arena?, seed?, airframe?}`：部署；程序以 `PROGRAM · <名称>` 的身份持有摇杆 |
+| `POST /vehicles/{id}/program/stop` · `.../resume` | 控制者或操作员 | 停止；恢复已暂停的程序 |
+| `PATCH /vehicles/{id}/program/params` | 控制者或操作员 | `{name: value}`：实时调参，类型与范围取自 `PARAMS` 与 `PARAM_RANGES` |
+| `GET /vehicles/{id}/program/log?after=&limit=` | – | 日志环（500 行）：`{lines: [{seq, t, level, text}], last_seq}` |
+| `POST /vehicles/{id}/program/allow` | 操作员 | `{allow, confirm: "PROGRAM"}`：允许真机运行程序（链路断开后重置） |
+
+快照携带 `vehicle.program`（`{id, name, rev, state, status: running | paused | faulted | stopped, fps, faults, last_error, mode, ...}`）与 `programs_allowed`。始终成立的规则：人附身会暂停 `pilot` 模式的程序，释放后不会自动恢复；急停、链路丢失与坠毁会停止程序；认领结束、会话自己推杆以及任何技能或动作序列都会取代程序；杆量 0.8 s 超时规则不变。真机只有在操作员打开 **允许这架飞机运行程序** 且起飞前检查通过时才接受程序，其 `fire` 输出被忽略。
+
+### 题目、对抗与排名
+
+题目（设计 06 §3.2）是固定场景，在无头评测器中以快于实时的速度判分，带可见种子与隐藏种子（机体缺陷不同）；对抗让多个程序互相比赛，并维护 Elo 排名表。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /challenges` | 题目：`liftoff`、`hover`、`heading`、`square`、`rings`、`pursuit`、`duel_easy`、`duel_medium`、`duel_hard` |
+| `POST /challenges/{id}/submit` | `{program, rev?}` → 评测任务 |
+| `GET /jobs/{id}` | `{state, progress, result: {score, passed, metrics, seeds, trace_id}}` |
+| `POST /duels` | `{programs: [2..8 个 id], rounds, seed, scenario?}` → 评测任务 |
+| `GET /ladder` · `GET /traces/{id}` | Elo 排名表；单局判分的轨迹（10 Hz，全部飞机） |
+
+在尚未提供这些路径的 Relay 上，SDK、MCP 工具与 Copilot 报告 `judge_unavailable`。
+
+### 程序工作流
+
+智能体的工作循环，这里以缺省 `sticks` 等级下的 SDK 为例（MCP 工具与 Copilot 工具同名：`program_create`、`program_update`、`program_validate`、`program_test`、`challenge_submit`、`program_deploy`、`program_params` 等）：
+
+```python
+with RelayClient() as relay:
+    relay.open_session("my-agent")
+    # 1. 编写：以内置的 hover_trim 为起点
+    pid = relay.program_create("My hover", copy_of="hover_trim", note="start")["program"]["id"]
+    relay.program_update(pid, patch=[{"start": 5, "end": 5, "text": 'PARAMS = {"target_alt": 1.2, "kp": 0.25, "kd": 0.18, "ki": 0.12, "hover": 0.55, "climb_limit": 0.5}'}], note="higher, heavier")
+    # 2. 校验：语言规则，逐条给出行列
+    assert relay.program_validate(pid)["ok"]
+    # 3. 测试：在程序宿主中运行单元测试
+    print(relay.program_test(pid))
+    # 4. 提交题目（无头评测，含隐藏种子）
+    print(relay.challenge_submit("hover", pid)["result"])
+    # 5. 部署到关闭悬停辅助、机体粗糙的模拟机
+    relay.claim("sim-1")
+    relay.sim_assist("sim-1", False)
+    relay.mode("sim-1", "STABILIZE")
+    relay.arm("sim-1")
+    relay.program_deploy("sim-1", pid, airframe={"preset": "rough", "seed": 7})
+    # 6. 观察并实时调参，结束后停止
+    print(relay.program_status("sim-1"), relay.program_log("sim-1")["lines"][-5:])
+    relay.program_params("sim-1", ki=0.2)
+    relay.program_stop("sim-1")
+```
+
+每次修改都是一个新版本，记录作者（`operator` 或会话名）与说明，因此任何成绩都能追溯到产生它的代码。先实时调参；结构不对时再改代码；然后重新提交题目——隐藏种子会暴露只对一个机体调好的程序。
+
 ### 局域网联机
 
 联机场地（05 §7）让同一广播域内的 Relay 终端互见彼此的模拟机、发射虚拟子弹并计分。在窗口中加入（顶栏 **联机**，设置 `peer_enabled`），只使用一个独立的 UDP 套接字（设置 `peer_port`，缺省 47114，组播 `239.255.71.14`、TTL 1，另加子网定向广播）。来自网络的任何数据都不会进入控制路径：杆量、解锁、认领、参数、技能、动作序列与设备级接口均不受对端数据包驱动。**真机永不加入联机场地，也永不受虚拟子弹影响**：只有模拟机会被共享、可以射击、可以被命中。
@@ -337,6 +415,7 @@ POST /api/v1/vehicles/sim-1/plan
 | `device_command` / `motor_test` / `motor_test_stopped` / `actuator_set` / `rc_override` / `message_interval` / `home_set` / `rebooting` / `calibration_started` / `terminated` | 设备级操作 |
 | `app_command` | 会话或操作员执行的界面动作（`data.action`、`data.by`） |
 | `procedure_started` / `procedure_step` / `procedure_waiting` / `procedure_finished` / `procedure_aborted` | 标定流程，带 `data.run_id`、`data.step`、`data.verdict` 或 `data.reason` |
+| `program_started` / `program_stopped` / `program_paused` / `program_resumed` / `program_faulted` / `program_host_restarted` / `program_gate` | 机载程序：部署、停止及原因、附身暂停、故障、宿主重启、真机开关 |
 
 完整列表见 `web/src/api/schema.json`（`EventKind`）。错误使用统一结构，`code` 在各版本间保持稳定：
 
@@ -355,19 +434,23 @@ POST /api/v1/vehicles/sim-1/plan
 | 503 | `link_not_ready`、`backend_busy`、`ui_unavailable` |
 | 504 | `ui_timeout` |
 
+机载程序与控制等级新增：403 `sticks_only`；400 `program_invalid`、`program_param_invalid`；404 `program_not_found`、`revision_not_found`；409 `program_readonly`、`program_load_failed`、`no_program`、`program_not_paused`、`programs_not_allowed`；503 `program_host_unavailable`。客户端在没有评测接口的 Relay 上另报 `judge_unavailable`（404）。
+
 ## 8. MCP 服务
 
 Relay 提供三套基于 stdio 的 Model Context Protocol 服务（JSON-RPC 2.0，只用标准库；支持协议版本 2024-11-05 至 2025-11-25），可以单独接入，也可以同时接入：
 
 | 服务 | 文件 | 工具 | 面向 |
 |---|---|---|---|
-| `anet-relay` | `mcp/anet_relay_mcp.py` | 20 个 `relay_*` | 飞行：机群、认领、解锁、模式、技能、动作序列、短时杆量、再飞、穿环航线、急停 |
+| `anet-relay` | `mcp/anet_relay_mcp.py` | 20 个 `relay_*`（`sticks` 等级下 13 个） | 飞行：机群、认领、解锁、模式、技能、动作序列、短时杆量、再飞、穿环航线、急停 |
 | `anet-relay-device` | `mcp/anet_relay_device_mcp.py` | 36 个 `device_*` | 设备级：设备总览、MAVLink 消息、参数读写、原始指令、单电机测试、执行器、遥控覆盖、消息频率、重启、校准、home、姿态与速度控制、飞行终止、标定流程与报告 |
-| `anet-relay-app` | `mcp/anet_relay_app_mcp.py` | 41 个 `app_*` | 应用控制：应用与窗口状态、手柄、语言、工作区、选择飞机、检查器、对话框、截图、扫描网络、连接与移除飞机、模拟机、设置、告警、记录与导出、再飞来源、附身、Copilot 窗口、全部急停 |
+| `anet-relay-app` | `mcp/anet_relay_app_mcp.py` | 42 个 `app_*` 与 19 个程序工具 | 应用控制：应用与窗口状态、手柄、语言、工作区、选择飞机、检查器、对话框、截图、扫描网络、连接与移除飞机、模拟机、设置、告警、记录与导出、再飞来源、附身、Copilot 窗口、全部急停；机载程序：`program_guide`、`program_*`、`challenge_list`、`challenge_submit`、`job_status`、`duel_run`、`ladder`、`airframe_set` |
 
 每套服务在启动时打开一个智能体会话，名称取 `--name`（缺省分别为 `mcp`、`mcp-device`、`mcp-app`），自动续租，并在客户端断开时关闭会话；Relay 重启后，服务在下一次调用时重新打开会话，此时需要重新认领。认领属于会话：用某一套服务控制飞机时，请用同一套服务的认领工具（`relay_claim` 或 `device_claim`）。工具参数在发往 Relay 之前校验，缺少或多余的参数以 `invalid arguments` 返回。失败以 `isError: true` 的工具结果返回，并附错误码，模型可据此应对（例如遇到 `possessed_by_human` 时等待）。
 
 应用控制服务的工具在 `agents_app_control` 开启时即可使用，不需要操作员令牌。`--operator-token`（或环境变量 `RELAY_OPERATOR_TOKEN`）只在需要以操作员身份调用时提供，一般不需要。
+
+应用控制服务中作用于飞机的程序工具（`program_deploy`、`program_stop`、`program_resume`、`program_params`）会以该服务的会话认领飞机；若飞行服务的会话已持有认领，请先在那里释放（`relay_release_claim`）。`program_deploy` 带 `arm: true` 时会先切换到手动类模式并解锁再部署（真机还需 `confirm: "ARM"`）。
 
 **Claude Desktop**（`claude_desktop_config.json`）：
 
@@ -436,6 +519,10 @@ Relay 不在 8765 端口运行时，追加 `"--base", "http://127.0.0.1:<port>"`
 | `message_interval(id, message, hz)` · `request_message(id, message)` · `reboot(id, confirm)` · `calibrate(id, sensor, confirm)` · `set_home(id, here, lat, lon, alt)` · `terminate(id, confirm)` | 消息频率、重启、校准、home、飞行终止 |
 | `procedures()` · `procedure_start(id, procedure, hover_s, skip, auto_answer)` · `procedure(id)` · `procedure_answer(id, step, answer, confirm)` · `procedure_abort(id)` · `wait_procedure(id, timeout, waiting=True)` · `test_runs(id)` · `test_run(run_id)` · `test_run_export(run_id, fmt)` | 标定流程与报告 |
 | `arena()` · `fire(id, seconds)` | 联机场地视图与模拟机扳机 |
+| `program_list()` · `program_get(pid)` · `program_revisions(pid)` · `program_create(name, source, description, params, tests, note, copy_of)` · `program_update(pid, source, patch, note, ...)` · `program_delete(pid)` · `program_validate(pid, source)` · `program_test(pid, rev, source, tests, seed)` | 机载程序：存储、版本、校验与单元测试 |
+| `program_deploy(id, pid, rev, params, mode, sensors, arena, seed, airframe)` · `program_stop(id)` · `program_resume(id)` · `program_params(id, **values)` · `program_status(id)` · `program_log(id, after, limit)` · `program_allow(id, allow, confirm)` | 运行中的程序（`program_allow` 需要操作员令牌） |
+| `challenge_list()` · `challenge_submit(challenge, pid, rev, wait=True)` · `job_status(job)` · `wait_job(job)` · `duel_run(pids, rounds, seed, scenario, wait=True)` · `ladder()` · `trace(id)` | 评测、对抗与排名；没有评测接口时报 `judge_unavailable` |
+| `airframe_get(id)` · `airframe_set(id, preset, params, seed)` | 模拟机机体缺陷 |
 | `app()` · `ui_state()` · `gamepads()` · `app_actions()` · `ui(action, **args)` | 应用与窗口状态、界面动作 |
 | `scan_network(networks)` · `connect_vehicle(host, port)` · `remove_vehicle(id)` · `add_sims(count, autopilot, hover_assist)` · `remove_sims(ids)` · `sim_assist(id, on)` · `settings()` · `update_settings(**patch)` · `ack_alert(id)` · `stop_all()` | 应用操作：打开会话时以会话身份调用，否则使用操作员令牌 |
 
@@ -458,3 +545,4 @@ Relay 不在 8765 端口运行时，追加 `"--base", "http://127.0.0.1:<port>"`
 - **配置：** 设置 → Copilot：接口类型（OpenAI 兼容端点选 `openai-completions`，另有 `anthropic-messages`、`openai-responses`）、Base URL、模型 ID、API Key、工具范围与窗口不透明度（60%–100%）。**测试连接** 会发送一次简短请求。Key 通过操作系统钥匙串（Electron `safeStorage`）加密保存在应用数据目录，不会回传到界面；端点只会收到对话内容和工具结果。
 - **工具范围：** `flight`（飞行：状态、技能、动作序列、短时杆量、再飞、急停）、`flight+device`（另加设备级工具）、`all`（缺省，另加应用控制工具：语言、工作区、选择飞机、扫描网络、模拟机、设置、手柄、记录、窗口与截图）。工具与第 5 节的接口一一对应。
 - **安全：** 对真机的每个运动指令与设备级写入（起飞、平移、转向、悬停、降落、动作序列、再飞、电机测试、执行器、重启、校准、终止等），聊天中都会出现审批卡片，操作员批准前不会发送任何指令（120 秒未处理视为拒绝）；需要审批时浮动窗口会自动显示并提示。确认词由审批代替，Copilot 不会自行填写。接管和急停对 Copilot 与其他智能体同样有效。
+- **程序与控制等级：** Copilot 在每条消息前读取 `agent_flight_level`。在 `sticks`（缺省）等级下，它没有起飞、平移、转向、悬停、动作序列与再飞工具，系统提示会说明高层飞行不可用、稳定飞行需要编写程序；在 `full` 等级下这些工具恢复。在任何工具范围内它都具备程序工具（`program_list`、`program_get`、`program_create`、`program_update`、`program_validate`、`program_test`、`program_deploy`、`program_stop`、`program_resume`、`program_params`、`program_status`、`program_log`、`challenge_list`、`challenge_submit`、`job_status`、`duel_run`、`ladder`、`airframe_set`）以及 `relay_arm`、`relay_disarm`、`relay_mode`，系统提示末尾附有 [`programs-guide.md`](programs-guide.md)。编写与修改程序无需审批；在真机上部署或恢复程序、解锁与切换模式，与其他运动指令一样需要操作员批准。
