@@ -88,14 +88,17 @@ the system keychain.
   level sections of the agent API guide.
 - Opening films: eight cooperation films (formation, hand-over, ground and air,
   a quadruped launching a drone, a VTOL leading a swarm, assembly into a
-  formation, a gate race and a night search).
+  formation, a gate race and a night search), and nine camera-move films
+  (barrel roll, pull-back with spin, fisheye, spiral climb, vortex orbit, FPV
+  flip, helix, dolly zoom and whip pan).
 
 ### Changed
 
 - Opening: the film now comes first, then the diagonal voxel cut and the voxel
   logo, a short hold and the reveal (about 7.8 s for the director's cut, 4.4 s
-  for the short cut). The director's cut plays a cooperation film and the
-  chase; the short cut rotates through all ten films by launch count. Skipping
+  for the short cut). The director's cut plays a camera-move film and a
+  cooperation film; the short cut rotates through all nineteen films by launch
+  count. Skipping
   goes straight to the complete logo, held at least 300 ms. While the backend
   starts, the logo waits with the progress line under it.
 - Copilot API keys: stored in `copilot-secrets.json` in the app data folder,

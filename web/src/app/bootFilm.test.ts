@@ -18,7 +18,7 @@ import {
   CLIPS,
   commitBootPlan,
   COOP_CLIPS,
-  FULL_CLOSER,
+  CAM_CLIPS,
   fullClips,
   INITIAL_FILM,
   logoAt,
@@ -79,24 +79,25 @@ describe('boot tokens', () => {
 })
 
 describe('clips', () => {
-  it('lists the ten films on disk, cut-breakthrough gone', () => {
+  it('lists the nineteen films on disk, cut-breakthrough gone', () => {
     const disk = readdirSync(resolve(import.meta.dirname, '../../public/boot'))
     for (const c of CLIPS) {
       expect(disk).toContain(`${c}.webm`)
       expect(disk).toContain(`${c}.jpg`)
     }
-    expect(CLIPS).toHaveLength(10)
-    expect(new Set(CLIPS).size).toBe(10)
+    expect(CLIPS).toHaveLength(19)
+    expect(new Set(CLIPS).size).toBe(19)
     expect(COOP_CLIPS).toHaveLength(8)
+    expect(CAM_CLIPS).toHaveLength(9)
     expect(CLIPS as readonly string[]).not.toContain('cut-breakthrough')
     expect(disk.filter((f) => f.endsWith('.webm')).sort()).toEqual([...CLIPS].map((c) => `${c}.webm`).sort())
   })
-  it('the director’s cut is a cooperation film, then the chase, rotating by launch count', () => {
-    expect(fullClips(0)).toEqual(['cut-formation', 'cut-chase'])
-    expect(COOP_CLIPS.map((_, n) => fullClips(n)[0])).toEqual([...COOP_CLIPS])
-    expect(fullClips(8)).toEqual(fullClips(0))
+  it('the director’s cut is a camera-move film, then a cooperation film, rotating by launch count', () => {
+    expect(fullClips(0)).toEqual(['cut-cam-roll', 'cut-formation'])
+    expect(CAM_CLIPS.map((_, n) => fullClips(n)[0])).toEqual([...CAM_CLIPS])
+    expect(COOP_CLIPS.map((_, n) => fullClips(n)[1])).toEqual([...COOP_CLIPS])
+    expect(fullClips(72)).toEqual(fullClips(0))
     expect(fullClips(-1)).toEqual(fullClips(0))
-    for (let n = 0; n < 16; n++) expect(fullClips(n)[1]).toBe(FULL_CLOSER)
   })
 })
 
@@ -105,7 +106,7 @@ describe('timeline', () => {
     const tl = timeline('full')
     expect([tl.cold, tl.film, tl.cut, tl.assemble, tl.hold, tl.hold + tl.reveal]).toEqual([80, 4300, 4700, 6900, 7300, 7800])
     expect(tl.clips).toEqual(fullClips(0))
-    expect(tl.segments.map((s) => s.clip)).toEqual(['cut-formation', 'cut-chase'])
+    expect(tl.segments.map((s) => s.clip)).toEqual(['cut-cam-roll', 'cut-formation'])
     expect(tl.segments[0].start).toBe(80)
     expect(tl.segments[1].end).toBe(4300)
     expect(tl.flashes).toHaveLength(1)
@@ -167,11 +168,11 @@ describe('timeline', () => {
 
 describe('plan', () => {
   const base = { mode: null, seen: '0.4.0', version: '0.4.0', n: 0, reduced: false }
-  it('defaults to Short, rotating through all ten clips by launch count', () => {
-    const plans = Array.from({ length: 11 }, (_, n) => planBoot({ ...base, n }))
+  it('defaults to Short, rotating through all nineteen clips by launch count', () => {
+    const plans = Array.from({ length: 20 }, (_, n) => planBoot({ ...base, n }))
     expect(plans.every((p) => p.variant === 'short')).toBe(true)
     expect(plans.map((p) => p.clips[0])).toEqual([...CLIPS, CLIPS[0]])
-    expect(plans.map((p) => p.writeN)).toEqual(Array.from({ length: 11 }, (_, n) => n + 1))
+    expect(plans.map((p) => p.writeN)).toEqual(Array.from({ length: 20 }, (_, n) => n + 1))
   })
   it('plays the director’s cut on the first launch of each version, then Short', () => {
     expect(planBoot({ ...base, seen: null })).toMatchObject({ variant: 'full', clips: fullClips(0), writeSeen: '0.4.0', writeN: 1 })
@@ -180,7 +181,7 @@ describe('plan', () => {
   })
   it('takes Full and Minimal as set; Full rotates its cooperation film', () => {
     expect(planBoot({ ...base, mode: 'full' }).variant).toBe('full')
-    expect([0, 1, 2].map((n) => planBoot({ ...base, mode: 'full', n }).clips[0])).toEqual(COOP_CLIPS.slice(0, 3))
+    expect([0, 1, 2].map((n) => planBoot({ ...base, mode: 'full', n }).clips[0])).toEqual(CAM_CLIPS.slice(0, 3))
     expect(planBoot({ ...base, mode: 'minimal', seen: null })).toMatchObject({ variant: 'minimal', clips: [], writeSeen: null })
   })
   it('reduced motion never loads a film', () => {

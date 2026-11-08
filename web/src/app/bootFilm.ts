@@ -10,18 +10,18 @@ export type BootVariant = BootMode | 'reduced'
 export const BOOT_MODES: readonly BootMode[] = ['full', 'short', 'minimal']
 export const DEFAULT_BOOT_MODE: BootMode = 'short'
 
-/** The eight cooperation films of 06 §8; the director's cut opens on one of them, rotating by launch count. */
+/** The eight cooperation films of 06 §8. */
 export const COOP_CLIPS = ['cut-formation', 'cut-handover', 'cut-groundair', 'cut-quadruped', 'cut-vtol', 'cut-assembly', 'cut-gateduel', 'cut-search'] as const
-/** Boot films in web/public/boot/ (WebM VP9 with a JPEG poster each); the short cut rotates through all ten in this order. */
-export const CLIPS = ['cut-chase', 'cut-split', ...COOP_CLIPS] as const
+/** The nine camera-move films of 06 §8 (barrel roll, pull-back with spin, fisheye, spiral, vortex, FPV flip, helix, dolly zoom, whip pan). */
+export const CAM_CLIPS = ['cut-cam-roll', 'cut-cam-pullspin', 'cut-cam-fisheye', 'cut-cam-spiral', 'cut-cam-vortex', 'cut-cam-fpvflip', 'cut-cam-helix', 'cut-cam-dolly', 'cut-cam-whip'] as const
+/** Boot films in web/public/boot/ (WebM VP9 with a JPEG poster each); the short cut rotates through all nineteen in this order, camera moves first. */
+export const CLIPS = [...CAM_CLIPS, ...COOP_CLIPS, 'cut-chase', 'cut-split'] as const
 export type Clip = (typeof CLIPS)[number]
-/** The director's cut closes on the chase after its cooperation film. */
-export const FULL_CLOSER: Clip = 'cut-chase'
 
-/** The director's cut of launch `n`: a cooperation film, then the chase (06 §8). */
+/** The director's cut of launch `n`: a camera-move film, then a cooperation film, each rotating by launch count (06 §8). */
 export function fullClips(n = 0): readonly Clip[] {
   const k = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0
-  return [COOP_CLIPS[k % COOP_CLIPS.length], FULL_CLOSER]
+  return [CAM_CLIPS[k % CAM_CLIPS.length], COOP_CLIPS[k % COOP_CLIPS.length]]
 }
 
 /** localStorage keys. `mode` mirrors Settings > General because the boot runs before the backend answers. */
