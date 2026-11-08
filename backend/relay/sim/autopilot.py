@@ -25,6 +25,15 @@ Airframe defects (06 §4, WP-2a): ``airframe`` (``sim.airframe.Airframe``, ideal
 weight, CG offset, level calibration error, motor efficiency, propeller damage and IMU noise, again only
 while hover assist is off. ATTITUDE, SCALED_IMU, VIBRATION and SERVO_OUTPUT_RAW then report what the board
 measures (noise, the level error, per-motor outputs); SCALED_IMU streams only when asked for.
+
+Flight controller (07 §1): the modes above produce attitude targets and a collective output
+(``physics.Command``); ``FlightController`` turns them into four rotor commands the way PX4 and ArduPilot do:
+an angle loop (P) on the board's attitude estimate gives Euler-rate targets, converted to body rates; a rate
+loop per axis (PID, derivative on the measurement through a low-pass filter, clamped integrator that resets
+on the ground and holds while the mixer saturates) gives angular-acceleration demands; the mixer turns them
+into per-rotor thrust with the nominal geometry and desaturates with roll and pitch first (thrust only
+reduced, then roll / pitch scaled, yaw last), like PX4 with airmode off. SERVO_OUTPUT_RAW reports the mixer's
+outputs. The gains are internal to the simulator (sessions fly at the ``sticks`` level, 06 §5).
 """
 
 from __future__ import annotations
@@ -38,10 +47,18 @@ from ..mav.decode import px4_param_decode, px4_param_encode
 from ..mav.mavlink import Encoder, M, Parser
 from .airframe import Airframe, specific_force_body
 from .physics import (
+    ARM,
     DRAG_LINEAR,
     DRAG_QUADRATIC,
     DT,
+    IXX,
+    IYY,
+    IZZ,
+    K_M,
     MASS,
+    MAX_YAW_RATE,
+    ROTOR_THRUST_MAX,
+    THR_MDL_FAC,
     Command,
     G,
     Quad,
@@ -239,6 +256,141 @@ PX4_PARAMS: list[tuple[str, float, int]] = [
 ]
 
 
+# Simulated flight controller (07 §1).
+ANGLE_P = 12.0  # Euler-rate target per radian of attitude error, 1/s
+ANGLE_RATE_MAX = math.radians(400.0)
+RATE_P = (60.0, 60.0, 10.0)  # angular-acceleration demand per rad/s of rate error (roll, pitch, yaw), 1/s
+RATE_I = (300.0, 300.0, 1.0)  # per rad of integrated rate error, 1/s^2
+RATE_D = (0.5, 0.5, 0.0)  # per rad/s^2 of measured angular acceleration (derivative on the measurement)
+RATE_I_MAX = (300.0, 300.0, 25.0)  # rad/s^2
+D_CUTOFF_HZ = 40.0
+_KR = IXX / (4.0 * ARM * ROTOR_THRUST_MAX)  # rotor thrust fraction per rad/s^2 of roll demand
+_KP = IYY / (4.0 * ARM * ROTOR_THRUST_MAX)
+_KY = IZZ / (4.0 * K_M * ROTOR_THRUST_MAX)
+_D_ALPHA = 1.0 - math.exp(-2.0 * math.pi * D_CUTOFF_HZ * DT)
+_RP0, _RP1, _RP2 = RATE_P
+_RI0, _RI1, _RI2 = RATE_I
+_RD0, _RD1, _RD2 = RATE_D
+_RM0, _RM1, _RM2 = RATE_I_MAX
+_TB = THR_MDL_FAC
+_TA = 1.0 - THR_MDL_FAC
+
+
+class FlightController:
+    """Angle P -> rate PID -> mixer with desaturation -> four rotor thrust fractions (07 §1).
+
+    ``update(cmd, quad, dt)`` returns ``out`` (a list it reuses): the thrust fraction 0..1 of rotors 1-4 in
+    quad-x order. The controller sees the board's estimate (the level calibration error of the airframe is
+    in it) and the gyro; it knows the nominal geometry only, so a CG offset, unequal motors or a damaged
+    propeller show up as disturbances its integrators learn.
+    """
+
+    def __init__(self) -> None:
+        self.out = [0.0, 0.0, 0.0, 0.0]
+        self.reset()
+
+    def reset(self) -> None:
+        self.i = [0.0, 0.0, 0.0]
+        self.d = [0.0, 0.0, 0.0]
+        self.prev: tuple[float, float, float] | None = None
+        self.sat_rp = False
+        self.sat_yaw = False
+        self.out[0] = self.out[1] = self.out[2] = self.out[3] = 0.0
+
+    def outputs(self) -> list[float]:
+        """Motor outputs 0..1 (what the ESCs are told), for SERVO_OUTPUT_RAW."""
+        return [throttle_for_fraction(f) for f in self.out]
+
+    def update(self, cmd: Command, quad: Quad, dt: float) -> list[float]:
+        s = quad.s
+        roll, pitch = s.roll, s.pitch
+        af = quad.airframe if quad.effects else None
+        if af is not None:  # the board's level is off by the calibration error (06 §4)
+            roll -= af.trim[0]
+            pitch -= af.trim[1]
+        # Angle loop: Euler-rate targets, then body rates (p, q, r).
+        lim = ANGLE_RATE_MAX
+        er = ANGLE_P * (cmd.roll - roll)
+        ep = ANGLE_P * (cmd.pitch - pitch)
+        er = lim if er > lim else -lim if er < -lim else er
+        ep = lim if ep > lim else -lim if ep < -lim else ep
+        ey = cmd.yaw_rate
+        ey = MAX_YAW_RATE if ey > MAX_YAW_RATE else -MAX_YAW_RATE if ey < -MAX_YAW_RATE else ey
+        sr, cr = math.sin(roll), math.cos(roll)
+        sp, cp = math.sin(pitch), math.cos(pitch)
+        # Rate loop: errors, derivative of the measurement (low-passed), integrators.
+        w = s.rates
+        p, q, r = w[0], w[1], w[2]
+        e0 = er - sp * ey - p
+        e1 = cr * ep + sr * cp * ey - q
+        e2 = -sr * ep + cr * cp * ey - r
+        d = self.d
+        prev = self.prev
+        if prev is not None:
+            k = _D_ALPHA / dt
+            d0 = d[0] + ((p - prev[0]) - d[0] * dt) * k
+            d1 = d[1] + ((q - prev[1]) - d[1] * dt) * k
+            d[0], d[1] = d0, d1
+        else:
+            d0, d1 = d[0], d[1]
+        self.prev = (p, q, r)
+        i = self.i
+        i0, i1, i2 = i
+        if s.on_ground:
+            i0 = i1 = i2 = 0.0  # PX4 / ArduPilot: no integration while landed
+        else:
+            if not self.sat_rp:
+                i0 += _RI0 * e0 * dt
+                i0 = _RM0 if i0 > _RM0 else -_RM0 if i0 < -_RM0 else i0
+                i1 += _RI1 * e1 * dt
+                i1 = _RM1 if i1 > _RM1 else -_RM1 if i1 < -_RM1 else i1
+            if not self.sat_yaw:
+                i2 += _RI2 * e2 * dt
+                i2 = _RM2 if i2 > _RM2 else -_RM2 if i2 < -_RM2 else i2
+        i[0], i[1], i[2] = i0, i1, i2
+        # Mixer (quad-x: 1 front-right CCW, 2 rear-left CCW, 3 front-left CW, 4 rear-right CW).
+        rr = -_KR * (_RP0 * e0 + i0 - _RD0 * d0)
+        pp = _KP * (_RP1 * e1 + i1 - _RD1 * d1)
+        yy = _KY * (_RP2 * e2 + i2)
+        u = cmd.throttle
+        u = 1.0 if u > 1.0 else 0.0 if u < 0.0 else u
+        f = (_TA + _TB * u) * u
+        m1, m2, m3, m4 = rr + pp, -rr - pp, pp - rr, rr - pp
+        big = abs(m1) if abs(m1) > abs(m3) else abs(m3)  # m2 = -m1, m4 = -m3
+        sat_rp = False
+        if f + big > 1.0:  # reduce thrust only (airmode off), balanced against the low side
+            over = f + big - 1.0
+            under = big - f if big > f else 0.0
+            f += -over if under <= 0.0 else min(0.0, (under - over) / 2.0)
+            sat_rp = True
+        room = f if f < 1.0 - f else 1.0 - f  # then scale roll / pitch into the room left
+        if big > room:
+            scale = room / big if room > 0.0 else 0.0
+            m1, m2, m3, m4 = m1 * scale, m2 * scale, m3 * scale, m4 * scale
+            sat_rp = True
+        b1, b2, b3, b4 = f + m1, f + m2, f + m3, f + m4
+        # yaw last, in whatever room is left: rotors 1 and 2 take +yaw, 3 and 4 take -yaw
+        if yy > 0.0:
+            up = min(1.0 - b1, 1.0 - b2, b3, b4)
+        else:
+            up = min(b1, b2, 1.0 - b3, 1.0 - b4)
+        ay = -yy if yy < 0.0 else yy
+        self.sat_yaw = ay > up
+        if ay > up:
+            yy = (up if up > 0.0 else 0.0) * (1.0 if yy > 0.0 else -1.0)
+        self.sat_rp = sat_rp
+        out = self.out
+        o = b1 + yy
+        out[0] = 1.0 if o > 1.0 else 0.0 if o < 0.0 else o
+        o = b2 + yy
+        out[1] = 1.0 if o > 1.0 else 0.0 if o < 0.0 else o
+        o = b3 - yy
+        out[2] = 1.0 if o > 1.0 else 0.0 if o < 0.0 else o
+        o = b4 - yy
+        out[3] = 1.0 if o > 1.0 else 0.0 if o < 0.0 else o
+        return out
+
+
 def _text_bytes(text: str) -> bytes:
     return text.encode("utf-8")[:50]
 
@@ -281,6 +433,7 @@ class SimAutopilot:
         self.hover_assist = bool(hover_assist)
         self.quad = Quad(effects=not self.hover_assist, turbulence=turbulence, seed=seed_for(name))
         self.quad.set_airframe(airframe or Airframe())  # WP-2a: survives reset() like hover assist
+        self.fc = FlightController()  # 07 §1
         self.estimator_status = False  # PX4: ESTIMATOR_STATUS streams once hover assist has been off
         self.t: float | None = None
         self.boot: float | None = None
@@ -340,6 +493,7 @@ class SimAutopilot:
     def reset(self) -> None:
         """Back to the spawn point, disarmed, full battery, crash cleared. Parameters are kept."""
         self.quad.reset()
+        self.fc.reset()
         self._reset_state()
         self._text(M.MAV_SEVERITY_INFO, "Simulation reset")
 
@@ -355,9 +509,7 @@ class SimAutopilot:
         s = self.quad.s
         if s.crashed:
             return
-        s.crashed = True
-        s.crash_reason = reason
-        s.motor = 0.0
+        self.quad._crash(reason, "shot_down")
         self.assist_ramp = None
 
     def param(self, name: str, default: float = 0.0) -> float:
@@ -768,7 +920,7 @@ class SimAutopilot:
             if not self.armed:
                 return M.MAV_RESULT_ACCEPTED
             if force:
-                s.motor = 0.0
+                self.quad.stop_motors()
                 self._disarm("Disarming motors (forced)")
                 return M.MAV_RESULT_ACCEPTED
             if not s.on_ground:
@@ -899,7 +1051,7 @@ class SimAutopilot:
 
     def _terminate(self, on: bool) -> int:
         if on and self.armed:
-            self.quad.s.motor = 0.0
+            self.quad.stop_motors()
             self._disarm("Flight termination: motors stopped")
         return M.MAV_RESULT_ACCEPTED
 
@@ -1306,10 +1458,9 @@ class SimAutopilot:
         if output <= MOTOR_OUTPUTS:
             if not self.armed:
                 return 1000
-            af = self.quad.active_airframe()
-            if af is not None and not self.quad.s.crashed:  # WP-2a: the mixer's per-motor outputs
-                return int(1000 + 1000 * af.motor_outputs(thrust_fraction(self.quad.s.motor))[output - 1])
-            return int(1000 + 1000 * self.quad.s.motor)
+            if self.quad.s.crashed:
+                return 1000
+            return int(1000 + 1000 * throttle_for_fraction(self.fc.out[output - 1]))  # the mixer (07 §1)
         return 0
 
     def _spin(self) -> float:
@@ -1523,7 +1674,7 @@ class SimAutopilot:
         tilt = max(0.5, math.cos(s.roll) * math.cos(s.pitch))
         needed = MASS * (G + az_cmd) / tilt
         sag = min(1.0, self.quad.battery.cell_voltage / 3.3) if self.quad.battery.cell_voltage > 0 else 1.0
-        fraction = needed / (self.quad.max_thrust * max(0.2, sag))
+        fraction = needed / (self.quad.max_thrust * max(0.2, sag * sag))  # rotor speed follows the voltage
         return min(1.0, max(0.0, throttle_for_fraction(fraction)))
 
     def _vertical(self, z_target: float, vz_ff: float, dt: float, up: float, dn: float) -> float:
@@ -1577,7 +1728,8 @@ class SimAutopilot:
         cmd = Command()
         up, dn = self._climb_limits()
         if not self.armed:
-            self.quad.step(cmd, armed=False, dt=dt)
+            self.fc.reset()
+            self.quad.step(None, armed=False, dt=dt)
             return
         if behaviour == "stab":
             limit = self._max_tilt()
@@ -1661,7 +1813,7 @@ class SimAutopilot:
                 cmd.throttle = self._vertical(s.p[2], -LAND_SPEED, dt, up, max(dn, LAND_SPEED))
         elif behaviour == "rtl":
             cmd = self._rtl(now, dt, up, dn)
-        self.quad.step(cmd, armed=True, dt=dt)
+        self.quad.step(self.fc.update(cmd, self.quad, dt), armed=True, dt=dt)
 
     def _learn_hover(self, dt: float) -> None:
         """Track the motor output in steady level flight as the hover estimate (as MOT_THST_HOVER learns)."""

@@ -9,6 +9,7 @@ from conftest import SimPilot
 from relay.mav.mavlink import M
 from relay.model import StickInput
 from relay.sim import airframe as afm
+from relay.sim import physics
 from relay.sim.airframe import Airframe, AirframeModel, generate, resolve
 
 
@@ -198,24 +199,32 @@ def test_payload_raises_hover_throttle_until_it_cannot_lift():
     assert Airframe().hover_throttle() == pytest.approx(0.5, abs=0.002)
 
 
-def test_cg_offset_integral_corrects_70_percent_in_2_s():
+def test_cg_offset_is_a_real_moment_the_rate_integrator_learns():
+    # v0.5 (07 §1): the CG offset is thrust applied off the centre of mass. Right after lift-off the
+    # moment pitches the nose down until the pitch-rate integrator has learned it; then the airframe flies
+    # level with the front rotors working harder. (v0.4 modelled a 70 % / 2 s correction with a 30 % lean.)
     p = pilot(custom(cg_offset_cm=[1.0, 0.0]))
-    model = p.sim.quad.airframe
-    full = model.tilt_d[1]
-    assert full == pytest.approx(-math.radians(2.5))  # CG forward: nose down
-    lift(p, 0.3)
-    hover(p, 0.4)
-    early = p.sim.quad.s.pitch
-    hover(p, 12.0)
-    late = p.sim.quad.s.pitch
-    assert early < 0.75 * full  # most of the disturbance shows right after lift-off
-    assert late == pytest.approx(0.3 * full, rel=0.05)  # the 30 % residual steady tilt
+    fc = p.sim.fc
+    worst = [0.0]
+
+    def track(_t):
+        if not p.sim.quad.s.on_ground:
+            worst[0] = min(worst[0], p.sim.quad.s.pitch)
+
+    hover(p, 2.0, sample=track)
+    assert worst[0] < -math.radians(0.5)  # nose down at first
+    hover(p, 10.0)
+    s = p.sim.quad.s
+    assert abs(s.pitch) < math.radians(0.1)  # learned: level again
+    assert fc.i[1] == pytest.approx(physics.MASS * physics.G * 0.01 / physics.IYY, rel=0.05)
+    servo = p.sim._build("SERVO_OUTPUT_RAW", p.t)
+    front, rear = (servo.servo1_raw, servo.servo3_raw), (servo.servo2_raw, servo.servo4_raw)
+    assert min(front) > max(rear) + 50  # the mixer's real outputs: the front pair carries the CG
     reported = p.sim._build("ATTITUDE", p.t)
-    assert reported.pitch == pytest.approx(late)  # the board sees this tilt (no noise set)
-    assert p.sim.quad.s.v[1] > 0.05  # and the aircraft drifts forward (north, heading 0)
+    assert reported.pitch == pytest.approx(s.pitch)  # the board sees the true attitude (no noise set)
     p.sticks = StickInput(0, 0, 0, 0.0)
     p.run(6.0)
-    assert p.sim.quad.s.on_ground and model.integ == [0.0, 0.0, 0.0]  # reset once landed
+    assert p.sim.quad.s.on_ground and fc.i == [0.0, 0.0, 0.0]  # reset once landed
 
 
 def test_level_trim_reads_level_but_drifts():
@@ -233,15 +242,19 @@ def test_level_trim_reads_level_but_drifts():
 
 
 def test_motor_efficiency_turns_the_aircraft():
+    # v0.5: the CCW pair makes more thrust and so more reaction torque; the slow yaw integrator takes it up
+    # over several seconds (v0.4: a fixed 30 % residual yaw rate).
     p = pilot(custom(motor_gain=[0.06, 0.06, -0.06, -0.06]))
-    assert p.sim.quad.airframe.yaw_d > 0  # the CCW pair is stronger: the body yaws clockwise
+    assert p.sim.quad.airframe.yaw_imbalance > 0  # the CCW pair is stronger: the body yaws clockwise
     lift(p)
     yaw0 = p.sim.quad.s.yaw
-    hover(p, 10.0)
+    hover(p, 1.0)
+    early = p.sim._build("ATTITUDE", p.t).yawspeed
+    hover(p, 9.0)
     turned = math.degrees(physics_wrap(p.sim.quad.s.yaw - yaw0))
     assert turned > 20.0
-    rate = p.sim._build("ATTITUDE", p.t).yawspeed
-    assert math.degrees(rate) == pytest.approx(0.3 * math.degrees(p.sim.quad.airframe.yaw_d), rel=0.1)
+    late = p.sim._build("ATTITUDE", p.t).yawspeed
+    assert math.degrees(early) > 5.0 and 0.0 < late < 0.6 * early  # turning, more slowly as it learns
 
 
 def physics_wrap(a: float) -> float:
@@ -270,10 +283,17 @@ def test_saturation_loses_control_authority():
     af = custom(cg_offset_cm=[3.0, 0.0], payload_kg=0.11)
     model = AirframeModel(af)
     F = 0.95
-    assert any(F * w > 1.0 for w in model.weights)
-    model.step(0.004, F, True, 0.9)
-    assert model.saturated[1] < 0.0  # an uncorrected nose-down remainder
+    assert any(F * w > 1.0 for w in model.weights)  # the static trim already needs more than one rotor has
     assert model.thrust_fraction(F) < F * model.efficiency()
+    p = pilot(af)
+    p.sticks = StickInput(0, 0, 0, F)
+    worst, saturated = 0.0, False
+    for _ in range(150):
+        p.run(0.02)
+        if not p.sim.quad.s.on_ground:
+            worst = max(worst, p.sim.quad.tilt)
+            saturated = saturated or p.sim.fc.sat_rp
+    assert saturated and worst > math.radians(10.0)  # the mixer runs out of room: the nose goes down
 
 
 def test_imu_noise_and_scaled_imu():

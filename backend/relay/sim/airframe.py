@@ -1,29 +1,31 @@
-"""Airframe defects of a simulated quadrotor (06 §4, WP-2a).
+"""Airframe defects of a simulated quadrotor (06 §4, WP-2a; physical since v0.5, 07 §1).
 
 An ``Airframe`` is the assembly a simulator flies with: take-off weight, centre-of-gravity offset, level
 calibration error, per-motor efficiency, one damaged propeller and IMU noise. ``generate(preset, seed)``
 builds the ``ideal`` / ``typical`` / ``rough`` presets deterministically from a seed; ``custom`` is any
 explicit set of values. ``AirframeModel`` is the runtime part ``physics.Quad`` consults, and only while the
 quad's physical effects are on (hover assist off, 05 §5.1): with hover assist on, or with nominal values,
-the flight model is exactly the 05 one.
+the flight model is the nominal one.
 
-Model (body frame x forward, y right; ArduPilot QUAD X motor order 1 front-right CCW, 2 rear-left CCW,
-3 front-left CW, 4 rear-right CW):
+Every defect acts through the six-degree-of-freedom model (body frame x forward, y right; quad-x motor
+order 1 front-right CCW, 2 rear-left CCW, 3 front-left CW, 4 rear-right CW):
 
-* Motor efficiency ``k_i = (1 + motor_gain_i)``, the damaged propeller additionally loses
-  ``PROP_LOSS * prop_damage`` of its thrust.
-* The mixer solves per-motor thrust weights ``w_i`` (sum 4) that put the thrust centroid under the centre
-  of gravity and cancel the yaw reaction torque; motor ``i`` then delivers ``k_i * min(1, F * w_i)`` of its
-  maximum for a collective thrust fraction ``F``. A weight above 1 / F saturates that motor: the centroid
-  can no longer follow the CG, and the uncorrected remainder tilts and turns the airframe (control loss).
-* The angle loop sees the imbalance it has to correct at equal motor commands as a disturbance: an
-  equivalent tilt ``tilt_d`` (CG offset to thrust centroid, ``TILT_RAD_PER_M``) and yaw rate ``yaw_d``.
-  Airborne, an integrator corrects ``I_SHARE`` (70 %) of it with time constant ``I_TAU_S`` (2 s); the
-  remaining 30 % is a steady tilt (drift toward the CG) or yaw drift. On the ground the integrator resets.
-* Level calibration error: the flight controller's level is off by ``level_trim_deg``, so the airframe flies
-  that much tilted with centred sticks, while ATTITUDE (the board's estimate) reads level.
-* Propeller damage adds frame vibration (VIBRATION, accelerometer noise) and a small attitude jitter.
+* Take-off weight: ``mass_kg + payload_kg`` is the mass the rotors lift (the payload hangs at the CG).
+* Centre-of-gravity offset: the rotor thrusts act about the shifted centre of mass, so equal outputs make a
+  real pitching / rolling moment that the simulated flight controller's rate integrators have to learn
+  after every lift-off (they reset on the ground, as on PX4 and ArduPilot), and near full output the mixer
+  runs out of room: the airframe tilts away (control loss).
+* Motor efficiency: rotor ``i`` has ``k_f * (1 + motor_gain_i)``; unequal gains between the CCW and the CW
+  pair leave a reaction-torque imbalance that the slow yaw integrator only gradually takes up.
+* Propeller damage: the damaged rotor loses ``PROP_LOSS * prop_damage`` of its thrust and its thrust
+  fluctuates (``JITTER_THRUST``, correlation time ``JITTER_TAU_S``), which shakes the attitude, plus frame
+  vibration (VIBRATION, accelerometer noise).
+* Level calibration error: the flight controller's attitude estimate is off by ``level_trim_deg``, so the
+  airframe flies that much tilted with centred sticks, while ATTITUDE (the estimate) reads level.
 * ``imu_noise`` scales white noise on the reported attitude, rates and accelerations.
+
+``weights`` / ``thrust_fraction`` / ``hover_throttle`` are the static trim: the per-rotor thrust shares that
+put the thrust centroid under the CG and cancel the reaction torque, i.e. what the integrators converge to.
 
 Values a program never sees (06 §4): the snapshot carries only ``{preset, seed}``; the numbers are served
 to the operator and the controlling session through ``GET /sims/{vid}/airframe``.
@@ -36,7 +38,7 @@ import random
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from .physics import MASS, THRUST_TO_WEIGHT, G, throttle_for_fraction
+from .physics import ARM, MASS, ROTOR_DIR, THRUST_TO_WEIGHT, G, throttle_for_fraction
 
 PRESETS = ("ideal", "typical", "rough", "custom")
 GENERATED = ("ideal", "typical", "rough")
@@ -55,19 +57,13 @@ LIMITS: dict[str, tuple[float, float]] = {
 }
 VECTORS = {"cg_offset_cm": 2, "level_trim_deg": 2, "motor_gain": 4}
 
-# Geometry and loop model.
-ARM_M = 0.046  # lever arm of each motor about the roll and pitch axes (65 mm arms on an X frame)
+# Geometry (the physics rotor layout, in arm units for the static trim).
+ARM_M = ARM  # lever arm of each rotor about the roll and pitch axes (25 cm wheelbase, quad-x)
 MOTOR_X = (1.0, -1.0, 1.0, -1.0)  # forward, in arm units
 MOTOR_Y = (1.0, -1.0, -1.0, 1.0)  # right
-MOTOR_YAW = (1.0, 1.0, -1.0, -1.0)  # reaction torque sign (CCW props turn the body clockwise, yaw +)
-TILT_RAD_PER_M = math.radians(2.5) / 0.01  # angle-loop error per metre of CG-to-thrust-centroid offset
-SAT_TILT_RAD_PER_M = TILT_RAD_PER_M * 8.0  # uncorrectable remainder when a motor saturates
-YAW_RAD_S = math.radians(200.0)  # yaw-rate error per unit of normalised yaw imbalance
-SAT_YAW_RAD_S = YAW_RAD_S * 4.0
-I_SHARE = 0.7  # share of the disturbance the integrator corrects
-I_TAU_S = 2.0
+MOTOR_YAW = ROTOR_DIR  # reaction torque sign (CCW props turn the body clockwise, yaw +)
 PROP_LOSS = 0.3  # thrust lost by a fully damaged propeller
-JITTER_RAD = math.radians(0.8)  # attitude jitter from a fully damaged propeller
+JITTER_THRUST = 0.05  # thrust fluctuation (1 sigma) of a fully damaged propeller
 JITTER_TAU_S = 0.08
 VIB_DAMAGE = 50.0  # m/s^2 of extra VIBRATION at full damage and full throttle
 
@@ -307,10 +303,12 @@ class AirframeModel:
     def __post_init__(self) -> None:
         af = self.spec
         k = [1.0 + g for g in af.motor_gain]
-        k[min(4, max(1, af.damaged_prop)) - 1] *= 1.0 - PROP_LOSS * af.prop_damage
+        self.damaged = min(4, max(1, af.damaged_prop)) - 1
+        k[self.damaged] *= 1.0 - PROP_LOSS * af.prop_damage
         self.k = k
         self.mass = af.total_mass
-        self.cg = (af.cg_offset_cm[0] / 100.0 / ARM_M, af.cg_offset_cm[1] / 100.0 / ARM_M)  # arm units
+        self.cg_m = (af.cg_offset_cm[0] / 100.0, af.cg_offset_cm[1] / 100.0)  # forward, right
+        self.cg = (self.cg_m[0] / ARM_M, self.cg_m[1] / ARM_M)  # arm units
         self.trim = (math.radians(af.level_trim_deg[0]), math.radians(af.level_trim_deg[1]))
         dx, dy = self.cg
         matrix = [
@@ -320,27 +318,23 @@ class AirframeModel:
             [1.0, 1.0, 1.0, 1.0],
         ]
         self.weights = _solve(matrix, [0.0, 0.0, 0.0, 4.0]) or [1.0, 1.0, 1.0, 1.0]
-        # What the angle and yaw loops have to correct at equal motor commands.
         total = sum(k)
-        cx = sum(k[i] * MOTOR_X[i] for i in range(4)) / total
-        cy = sum(k[i] * MOTOR_Y[i] for i in range(4)) / total
-        self.tilt_d = (TILT_RAD_PER_M * (dy - cy) * ARM_M, -TILT_RAD_PER_M * (dx - cx) * ARM_M)  # roll, pitch
-        self.yaw_d = YAW_RAD_S * sum(k[i] * MOTOR_YAW[i] for i in range(4)) / total
+        # Reaction-torque imbalance at equal outputs, as a share of one rotor's thrust (+: the body yaws
+        # clockwise); what the yaw integrator has to take up.
+        self.yaw_imbalance = sum(k[i] * MOTOR_YAW[i] for i in range(4)) / total
         self.reset()
 
     def reset(self) -> None:
         seed = self.spec.seed
         self.rng = random.Random(seed ^ _PHYS_SALT)
         self.sensor_rng = random.Random(seed ^ _SENSOR_SALT)
-        self.integ = [0.0, 0.0, 0.0]  # roll, pitch, yaw-rate correction learned in flight
-        self.jitter = [0.0, 0.0]
-        self.saturated = (0.0, 0.0, 0.0)
-        self.offset = (0.0, 0.0, 0.0)
+        self.jitter = [1.0, 1.0, 1.0, 1.0]  # per-rotor thrust multiplier from the damaged propeller
+        self._wobble = 0.0
 
-    # ---------------------------------------------------------------- thrust
+    # ---------------------------------------------------------------- static trim
 
     def fractions(self, F: float) -> list[float]:
-        """Per-motor commanded thrust fraction for collective ``F`` (before efficiency), clamped to 0..1."""
+        """Per-rotor thrust fraction the trimmed mixer commands for collective ``F``, clamped to 0..1."""
         return [min(1.0, max(0.0, F * w)) for w in self.weights]
 
     def thrust_fraction(self, F: float) -> float:
@@ -352,52 +346,24 @@ class AirframeModel:
         return sum(self.k[i] * self.weights[i] for i in range(4)) / 4.0
 
     def motor_outputs(self, F: float) -> list[float]:
-        """Per-motor throttle 0..1 for SERVO_OUTPUT_RAW."""
+        """Per-motor output 0..1 of the trimmed mixer."""
         return [throttle_for_fraction(f) for f in self.fractions(F)]
 
-    # ---------------------------------------------------------------- attitude
+    # ---------------------------------------------------------------- the damaged propeller
 
-    def step(self, dt: float, F: float, airborne: bool, spinning: float) -> None:
-        """Advance the integrator, the saturation remainder and the damage jitter by one physics step."""
-        if airborne:
-            a = min(1.0, dt / I_TAU_S)
-            targets = (I_SHARE * self.tilt_d[0], I_SHARE * self.tilt_d[1], I_SHARE * self.yaw_d)
-            for i in range(3):
-                self.integ[i] += (targets[i] - self.integ[i]) * a
-        else:
-            self.integ = [0.0, 0.0, 0.0]
-        # Saturation: the centroid of the thrust actually delivered misses the CG.
-        fr = self.fractions(F)
-        delivered = [self.k[i] * fr[i] for i in range(4)]
-        total = sum(delivered)
-        if airborne and total > 1e-6 and any(F * w > 1.0 for w in self.weights):
-            ex = self.cg[0] - sum(delivered[i] * MOTOR_X[i] for i in range(4)) / total
-            ey = self.cg[1] - sum(delivered[i] * MOTOR_Y[i] for i in range(4)) / total
-            ez = sum(delivered[i] * MOTOR_YAW[i] for i in range(4)) / total
-            self.saturated = (
-                SAT_TILT_RAD_PER_M * ey * ARM_M,
-                -SAT_TILT_RAD_PER_M * ex * ARM_M,
-                SAT_YAW_RAD_S * ez,
-            )
-        else:
-            self.saturated = (0.0, 0.0, 0.0)
+    def step(self, dt: float, spinning: float) -> None:
+        """Advance the damaged propeller's thrust fluctuation by one physics step."""
         damage = self.spec.prop_damage
-        if damage > 0.0 and spinning > 0.0:
+        if damage <= 0.0:
+            return
+        if spinning > 0.0:
             decay = math.exp(-dt / JITTER_TAU_S)
             spread = math.sqrt(1.0 - decay * decay)
-            sigma = JITTER_RAD * damage * min(1.0, spinning * 2.0)
-            for i in range(2):
-                self.jitter[i] = self.jitter[i] * decay + sigma * spread * self.rng.gauss(0.0, 1.0)
-        elif damage > 0.0:
-            self.jitter = [0.0, 0.0]
-        if airborne:
-            self.offset = (
-                self.trim[0] + self.tilt_d[0] - self.integ[0] + self.saturated[0] + self.jitter[0],
-                self.trim[1] + self.tilt_d[1] - self.integ[1] + self.saturated[1] + self.jitter[1],
-                self.yaw_d - self.integ[2] + self.saturated[2],
-            )
+            sigma = JITTER_THRUST * damage * min(1.0, spinning * 2.0)
+            self._wobble = self._wobble * decay + sigma * spread * self.rng.gauss(0.0, 1.0)
         else:
-            self.offset = (0.0, 0.0, 0.0)
+            self._wobble = 0.0
+        self.jitter[self.damaged] = 1.0 + self._wobble
 
     # ---------------------------------------------------------------- sensors
 

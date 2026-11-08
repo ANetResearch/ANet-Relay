@@ -220,17 +220,20 @@ def test_ground_effect_lowers_near_ground_hover_throttle():
     assert plain.hover_throttle(0.03) == pytest.approx(plain.hover_throttle(1.0))
 
 
-def test_motor_spins_down_slower_than_up_with_effects():
+def test_rotors_spin_down_slower_than_up():
+    # v0.5 (07 §1): the Gazebo rotor model, the same with and without effects (v0.4 lagged the throttle).
     def settle(effects: bool, start: float, target: float) -> float:
         quad = physics.Quad(effects=effects)
-        quad.s.motor = start
+        w0 = physics.OMEGA_MAX * math.sqrt(physics.thrust_fraction(start))
+        quad.s.omega = [w0] * 4
         quad.s.on_ground = False
         quad.s.p[2] = 5.0
-        quad.step(physics.Command(throttle=target), armed=True)
-        return abs(quad.s.motor - start)
+        f = physics.thrust_fraction(target)
+        quad.step((f, f, f, f), armed=True)
+        return abs(quad.s.omega[0] - w0)
 
-    assert settle(True, 0.3, 0.7) > settle(True, 0.7, 0.3)
-    assert settle(False, 0.3, 0.7) == pytest.approx(settle(False, 0.7, 0.3))
+    for effects in (True, False):
+        assert settle(effects, 0.3, 0.7) > 1.5 * settle(effects, 0.7, 0.3)
 
 
 def trajectory(name: str, turbulence: float = 0.6) -> list[tuple[float, float, float]]:
@@ -257,8 +260,9 @@ def test_effects_never_touch_the_assisted_model():
     quad = physics.Quad(turbulence=1.0, seed=7)
     quad.s.on_ground = False
     quad.s.p[2] = 2.0
+    f = physics.thrust_fraction(0.5)
     for _ in range(250):
-        quad.step(physics.Command(throttle=0.5), armed=True)
+        quad.step((f, f, f, f), armed=True)
     assert quad.gust == [0.0, 0.0, 0.0] and quad.wash == 0.0
 
 
