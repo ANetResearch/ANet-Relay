@@ -60,14 +60,43 @@ export const useBoard = create<BoardState>()((set, get) => ({
   },
 }))
 
-let inflight: AbortController | null = null
+let inflight: { ctl: AbortController; by: BoardBy } | null = null
+let pending = false
+let lastAt = -Infinity
+let timer: ReturnType<typeof setTimeout> | null = null
 
-/** Reads the board of the open tab; a 404 (backend without a leaderboard) marks it unavailable. */
+/** At most this many board reads a second: board_rev moves with every round fired during a fight. */
+export const BOARD_MIN_GAP_MS = 250
+
+/**
+ * Reads the board of the open tab; a 404 (backend without a leaderboard) marks it unavailable. Requests made while a
+ * read is in flight are coalesced into one more read after it, no sooner than BOARD_MIN_GAP_MS after the last one:
+ * aborting on every revision would starve the panel while rounds are flying. Only a tab change aborts the read.
+ */
 export async function refetchBoard(): Promise<void> {
-  inflight?.abort()
-  const ctl = new AbortController()
-  inflight = ctl
   const by = useBoard.getState().by
+  if (inflight && inflight.by === by) {
+    pending = true
+    return
+  }
+  inflight?.ctl.abort()
+  inflight = null
+  const wait = lastAt + BOARD_MIN_GAP_MS - performance.now()
+  if (wait > 0) {
+    pending = true
+    timer ??= setTimeout(() => {
+      timer = null
+      if (pending) {
+        pending = false
+        void refetchBoard()
+      }
+    }, wait)
+    return
+  }
+  pending = false
+  const ctl = new AbortController()
+  inflight = { ctl, by }
+  lastAt = performance.now()
   if (!useBoard.getState().board) useBoard.setState({ status: 'loading' })
   try {
     const board = await arenaApi.leaderboard(by, ctl.signal)
@@ -78,7 +107,13 @@ export async function refetchBoard(): Promise<void> {
     const missing = e instanceof RelayApiError && (e.status === 404 || e.status === 405)
     useBoard.setState({ status: missing ? 'unavailable' : 'error' })
   } finally {
-    if (inflight === ctl) inflight = null
+    if (inflight?.ctl === ctl) {
+      inflight = null
+      if (pending) {
+        pending = false
+        void refetchBoard()
+      }
+    }
   }
 }
 
@@ -93,7 +128,11 @@ export async function refetchScenario(): Promise<void> {
 
 /** Tests only. */
 export function resetBoard(): void {
-  inflight?.abort()
+  inflight?.ctl.abort()
   inflight = null
+  pending = false
+  lastAt = -Infinity
+  if (timer) clearTimeout(timer)
+  timer = null
   useBoard.setState({ board: null, at: 0, status: 'idle', scenario: null })
 }
