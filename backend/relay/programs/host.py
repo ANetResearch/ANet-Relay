@@ -1,10 +1,14 @@
-"""The program host (06 §2.4): a separate process that runs every deployed program.
+"""The program host (06 §2.4): a separate process that runs one deployment's program.
+
+The backend starts one per deployment, so programs share nothing; the protocol still carries several keys.
 
 The backend starts it as ``<python> -m relay --program-host`` (frozen: ``<backend executable>
 --program-host``; ``relay/__main__.py`` dispatches before importing the server) with a minimal
 environment, no inherited handles and pipes on stdin / stdout. On POSIX it then limits its own address
 space (``RLIMIT_AS`` 512 MB), CPU time (``RLIMIT_CPU``, a soft limit that moves forward only while the
-host keeps answering) and file size (``RLIMIT_FSIZE`` 0), ignores SIGINT and caps the recursion depth.
+host keeps answering) and file size (``RLIMIT_FSIZE`` 0), lowers its priority (``os.nice``), ignores SIGINT
+and caps the recursion depth. The backend also watches its resident memory from outside on every platform
+(``hostclient``, ``procmem``).
 
 Protocol (fixed framing): every message is an 8-byte header ``b"RP"``, version (u8), type (u8), payload
 length (u32 little-endian), followed by that many bytes of UTF-8 JSON. Requests carry an ``id``; the host
@@ -16,8 +20,9 @@ Budgets: each ``step`` has a 2 ms soft budget (``over`` in the result) and a har
 (``hard_ms``, from the batch); module load and ``init`` 100 ms; a unit test step 50 ms. The interrupt is a
 ``BaseException`` that ``except Exception`` cannot catch, raised from SIGALRM on the main thread on POSIX
 and through ``PyThreadState_SetAsyncExc`` from a watchdog thread otherwise. Persistent state per program
-(module globals and ``ctx.mem``) is measured once a second and the program is dropped above
-``STATE_LIMIT_BYTES``.
+(module globals and ``ctx.mem``, including what its functions close over, iterators and suspended generators)
+is measured once a second and the program is dropped above ``STATE_LIMIT_BYTES``. Live parameter changes
+arrive with a ``STEP`` item (``params``) as well as with ``PARAMS``.
 
 ``Engine`` is the execution core; ``main()`` wraps it in the pipe protocol. The backend may also use an
 ``Engine`` in its own process (``service.InProcessHost``, tests and headless evaluators).
@@ -58,6 +63,7 @@ STATE_LIMIT_OBJECTS = 100_000
 MEMORY_LIMIT = 512 * 1024 * 1024
 CPU_SLICE_S = 10
 RECURSION_LIMIT = 400
+HOST_NICE = 5
 
 TEST_DEFAULTS: dict[str, Any] = {
     "t": 1.0,
@@ -206,6 +212,21 @@ class _Guard:
                 )
 
 
+_GUARDS: dict[int, _Guard] = {}
+_GUARDS_LOCK = threading.Lock()
+
+
+def _shared_guard() -> _Guard:
+    """One guard per thread: SIGALRM has one handler per process, so every ``Engine`` of the main thread
+    (several in one evaluator process) must arm the same guard."""
+    tid = threading.get_ident()
+    with _GUARDS_LOCK:
+        guard = _GUARDS.get(tid)
+        if guard is None:
+            guard = _GUARDS[tid] = _Guard()
+        return guard
+
+
 # ============================================================================ engine
 
 
@@ -244,11 +265,65 @@ def _state_size(values: list[Any], limit_bytes: int, limit_objects: int) -> tupl
         elif isinstance(obj, (list, tuple, set, frozenset)):
             stack.extend(obj)
         else:
-            slots = getattr(type(obj), "__slots__", None)
-            if slots and type(obj).__module__ == __package__ + ".lib":
-                for name in slots:
-                    stack.append(getattr(obj, name, None))
+            stack.extend(_held_by(obj))
     return total, count
+
+
+# iterator types whose __reduce__ names what they hold (map, zip, filter, reversed, enumerate, iter(...))
+_ITERATOR_TYPES = tuple(
+    {
+        map,
+        filter,
+        zip,
+        reversed,
+        enumerate,
+        type(iter([])),
+        type(iter(())),
+        type(iter("")),
+        type(iter(range(1))),
+        type(iter(set())),
+        type(iter({})),
+        type(iter({}.values())),
+        type(iter({}.items())),
+        type(reversed([])),
+    }
+)
+_GENERATOR = type(x for x in ())
+
+
+def _held_by(obj: Any) -> list[Any]:
+    """What a non-container keeps alive: the values a program's function closes over or defaults to, the
+    sequences an iterator walks, a suspended generator's locals and the slots of library objects."""
+    kind = type(obj)
+    if kind is _FUNCTION:
+        if obj.__code__.co_filename != FILENAME:
+            return []
+        cells = [c.cell_contents for c in obj.__closure__ or () if _cell_full(c)]
+        return [*cells, *(obj.__defaults__ or ()), *(obj.__kwdefaults__ or {}).values()]
+    if kind is _GENERATOR:
+        frame = obj.gi_frame
+        return list(frame.f_locals.values()) if frame is not None else []
+    if isinstance(obj, _ITERATOR_TYPES):
+        try:
+            reduced = obj.__reduce__()
+        except Exception:
+            return []
+        return list(reduced[1:]) if isinstance(reduced, tuple) else []
+    slots = getattr(kind, "__slots__", None)
+    if slots and kind.__module__ == __package__ + ".lib":
+        return [getattr(obj, name, None) for name in slots]
+    return []
+
+
+def _cell_full(cell: Any) -> bool:
+    try:
+        cell.cell_contents  # noqa: B018 - an empty cell raises
+    except ValueError:
+        return False
+    return True
+
+
+_FUNCTION = type(_cell_full)
 
 
 class Instance:
@@ -266,7 +341,7 @@ class Engine:
 
     def __init__(self) -> None:
         self.programs: dict[str, Instance] = {}
-        self.guard = _Guard()
+        self.guard = _shared_guard()
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -325,10 +400,19 @@ class Engine:
 
     # ------------------------------------------------------------------ frames
 
-    def step(self, key: str, obs: dict[str, Any], hard_ms: float = HARD_STEP_MS) -> dict[str, Any]:
+    def step(
+        self,
+        key: str,
+        obs: dict[str, Any],
+        hard_ms: float = HARD_STEP_MS,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """One frame; ``params`` (live parameter changes, already checked by the backend) apply first."""
         inst = self.programs.get(key)
         if inst is None:
             return {"ok": False, "error": "program not loaded", "fatal": True}
+        if params:
+            inst.params.update(params)
         ctx = inst.ctx
         t = obs.get("t")
         if isinstance(t, (int, float)) and math.isfinite(t):
@@ -444,11 +528,17 @@ class Engine:
 
 def _harden() -> dict[str, Any]:
     """Process limits on POSIX; returns what was applied (reported in HELLO)."""
-    applied: dict[str, Any] = {"as": None, "cpu": None, "fsize": None}
+    applied: dict[str, Any] = {"as": None, "cpu": None, "fsize": None, "nice": None}
     try:
         signal.signal(signal.SIGINT, signal.SIG_IGN)
     except (ValueError, OSError):
         pass
+    if hasattr(os, "nice"):  # the fleet thread wins the CPU over every program host (Windows: creationflags)
+        try:
+            os.nice(HOST_NICE)
+            applied["nice"] = HOST_NICE
+        except OSError:
+            pass
     try:
         import resource  # POSIX only
     except ImportError:
@@ -509,7 +599,10 @@ def serve(stdin: Any, stdout: Any) -> int:
                 for item in msg.get("items") or []:
                     remaining = (deadline - time.perf_counter()) * 1000.0
                     result = engine.step(
-                        str(item.get("key")), item.get("obs") or {}, max(0.5, min(hard, remaining))
+                        str(item.get("key")),
+                        item.get("obs") or {},
+                        max(0.5, min(hard, remaining)),
+                        item.get("params") if isinstance(item.get("params"), dict) else None,
                     )
                     result["id"] = rid
                     result["key"] = item.get("key")

@@ -167,7 +167,10 @@ TEMPLATES: dict[str, tuple[str, str]] = {
         "{vehicle} program {name} faulted: {detail}. Control returned to the safety layer.",
         "{vehicle} 的程序 {name} 故障：{detail}。控制已交还安全层。",
     ),
-    "program_host_restarted": ("The program host was restarted: {reason}.", "程序宿主已重启：{reason}。"),
+    "program_host_restarted": (
+        "The program host of {vehicle} was restarted: {reason}.",
+        "{vehicle} 的程序宿主已重启：{reason}。",
+    ),
     "program_gate": ("{vehicle}: onboard programs {detail}.", "{vehicle}：机载程序{detail}。"),
     # WP-2b challenges and duels (06 §3.4); {detail} is filled from detail_en / detail_zh
     "judge_finished": ("{detail}.", "{detail}。"),

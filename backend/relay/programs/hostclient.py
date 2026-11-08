@@ -4,13 +4,17 @@ headless evaluators that are already isolated processes).
 
 Interface used by ``service.ProgramService`` (and later packages):
 
-* ``start()`` / ``close()`` / ``alive``
-* ``load(key, source, params, seed) -> {ok, error?, state, logs}`` (blocking, ``LOAD_TIMEOUT_S``)
+* ``start()`` / ``close()`` / ``kill()`` / ``discard()`` (kill without waiting) / ``alive``
+* ``load(key, source, params, seed) -> {ok, error?, state, logs}`` (blocking, ``LOAD_TIMEOUT_S``; the service
+  calls it off the fleet thread)
 * ``unload(key)``, ``set_params(key, params)``
-* ``step(items, deadline_s) -> StepReply``: ``items`` = ``[(key, obs_dict), ...]``; ``StepReply.results``
-  maps each answered key to its result, ``timed_out`` is set when the batch missed the deadline and
-  ``running`` names the program that was executing then (the first without a result)
+* ``step(items, deadline_s, hard_ms) -> StepReply``: ``items`` = ``[(key, obs_dict[, params]), ...]``;
+  ``StepReply.results`` maps each answered key to its result, ``timed_out`` is set when the batch missed the
+  deadline and ``running`` names the program that was executing then (the first without a result).
+  ``begin_step`` / ``finish_step`` split it so that the fleet thread drives every aircraft's host at once.
 * ``run_tests(source, params, tests, seed, timeout_s)`` (one-shot process for ``HostClient``)
+* ``killed_for``: ``"memory"`` once the watchdog killed the host for its resident memory
+  (``MEMORY_LIMIT_BYTES``, read from outside the host by ``procmem.rss`` on every platform)
 """
 
 from __future__ import annotations
@@ -28,14 +32,17 @@ from pathlib import Path
 from typing import Any
 
 from . import host as proto
+from . import procmem
 
 log = logging.getLogger("relay.programs")
 
 START_TIMEOUT_S = 10.0
-LOAD_TIMEOUT_S = 1.0
+LOAD_TIMEOUT_S = 5.0
 REQUEST_TIMEOUT_S = 1.0
 TEST_TIMEOUT_S = 10.0
 STDERR_KEEP = 40
+MEMORY_LIMIT_BYTES = proto.MEMORY_LIMIT
+MEMORY_POLL_S = 0.05
 
 
 def host_command() -> list[str]:
@@ -75,6 +82,24 @@ class StepReply:
     elapsed_ms: float = 0.0
 
 
+@dataclass
+class PendingStep:
+    """A batch sent by ``begin_step`` and collected by ``finish_step`` (``reply``: nothing was sent)."""
+
+    keys: list[str]
+    started: float
+    deadline: float
+    rid: int | None = None
+    reply: StepReply | None = None
+
+
+def _item(item: tuple[Any, ...]) -> dict[str, Any]:
+    out = {"key": item[0], "obs": item[1]}
+    if len(item) > 2 and item[2]:
+        out["params"] = item[2]
+    return out
+
+
 class HostClient:
     """One host process. Every call is made from one thread (the fleet thread)."""
 
@@ -89,6 +114,8 @@ class HostClient:
         self._stuck: str | None = None  # the program that was running when that STEP timed out
         self.stderr: list[str] = []
         self.pid: int | None = None
+        self.killed_for: str | None = None
+        self.memory_limit = MEMORY_LIMIT_BYTES
 
     # ------------------------------------------------------------------ process
 
@@ -103,8 +130,10 @@ class HostClient:
     def start(self) -> None:
         self.close()
         kwargs: dict[str, Any] = {}
-        if sys.platform == "win32":
-            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        if sys.platform == "win32":  # below the backend's priority, as os.nice does on POSIX (host._harden)
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
+                subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0
+            )
         cwd = str(Path(self.env.get("PYTHONPATH") or Path(sys.executable).parent))
         try:
             self.proc = subprocess.Popen(
@@ -126,6 +155,11 @@ class HostClient:
             target=self._read, args=(self.proc, self._frames), name="program-host-out", daemon=True
         ).start()
         threading.Thread(target=self._drain, args=(self.proc,), name="program-host-err", daemon=True).start()
+        self.killed_for = None
+        if self.memory_limit:
+            threading.Thread(
+                target=self._watch_memory, args=(self.proc,), name="program-host-mem", daemon=True
+            ).start()
         deadline = time.monotonic() + START_TIMEOUT_S
         frame = self._next(deadline)
         if frame is None or frame[0] != proto.HELLO:
@@ -157,6 +191,40 @@ class HostClient:
             proc.kill()
             with contextlib.suppress(subprocess.TimeoutExpired):
                 proc.wait(timeout=1.0)
+
+    def discard(self) -> None:
+        """Kill the host and reap it on a worker thread: the fleet thread never waits for a host."""
+        proc = self.proc
+        self.proc = None
+        self._busy = None
+        if proc is None:
+            return
+        with contextlib.suppress(OSError):
+            if proc.poll() is None:
+                proc.kill()
+
+        def reap() -> None:
+            with contextlib.suppress(subprocess.TimeoutExpired, OSError):
+                proc.wait(timeout=5.0)
+            for stream in (proc.stdin, proc.stdout, proc.stderr):
+                with contextlib.suppress(OSError, ValueError, AttributeError):
+                    stream.close()  # type: ignore[union-attr]
+
+        threading.Thread(target=reap, name="program-host-reap", daemon=True).start()
+
+    def _watch_memory(self, proc: subprocess.Popen) -> None:
+        """Kill ``proc`` when its resident memory passes ``memory_limit`` (every platform, from outside)."""
+        while proc.poll() is None:
+            used = procmem.rss(proc)
+            if used is None:
+                return  # no reading on this platform
+            if used > self.memory_limit:
+                self.killed_for = "memory"
+                log.warning("program host %s uses %d MB; killed", proc.pid, used // (1024 * 1024))
+                with contextlib.suppress(OSError):
+                    proc.kill()
+                return
+            time.sleep(MEMORY_POLL_S)
 
     @staticmethod
     def _read(proc: subprocess.Popen, out: queue.Queue) -> None:
@@ -244,27 +312,40 @@ class HostClient:
     def set_params(self, key: str, params: dict[str, Any]) -> bool:
         return bool(self.request(proto.PARAMS, {"key": key, "params": params}).get("ok"))
 
-    def step(self, items: list[tuple[str, dict[str, Any]]], deadline_s: float, hard_ms: float) -> StepReply:
-        reply = StepReply()
+    def step(self, items: list[tuple[Any, ...]], deadline_s: float, hard_ms: float) -> StepReply:
+        return self.finish_step(self.begin_step(items, deadline_s, hard_ms))
+
+    def begin_step(self, items: list[tuple[Any, ...]], deadline_s: float, hard_ms: float) -> PendingStep:
+        """Send one batch without waiting; ``items`` = ``[(key, obs[, params]), ...]``."""
         started = time.monotonic()
-        deadline = started + deadline_s
+        pending = PendingStep([str(i[0]) for i in items], started, started + deadline_s)
         try:
             self._drop_stale(time.monotonic())  # a late batch still running: this batch times out too
-            rid = self._send(
+            pending.rid = self._send(
                 proto.STEP,
                 {
-                    "items": [{"key": k, "obs": o} for k, o in items],
+                    "items": [_item(i) for i in items],
                     "hard_ms": hard_ms,
                     "budget_ms": max(1.0, deadline_s * 1000.0 - 1.0),
                 },
             )
         except HostError as exc:
+            reply = StepReply()
             reply.timed_out = str(exc) == "busy"
             reply.dead = not reply.timed_out
             # still busy: the program a late batch was stuck in; died between batches: nobody to blame
             reply.running = self._stuck if reply.timed_out else None
-            return reply
-        self._busy = rid
+            pending.reply = reply
+            return pending
+        self._busy = pending.rid
+        return pending
+
+    def finish_step(self, pending: PendingStep) -> StepReply:
+        """Collect a batch until its deadline."""
+        if pending.reply is not None:
+            return pending.reply
+        reply = StepReply()
+        rid, deadline, started = pending.rid, pending.deadline, pending.started
         while True:
             frame = self._next(deadline)
             if frame is False:
@@ -283,7 +364,7 @@ class HostClient:
                 self._busy = None
                 break
         if reply.timed_out or reply.dead:
-            reply.running = next((k for k, _ in items if k not in reply.results), None)
+            reply.running = next((k for k in pending.keys if k not in reply.results), None)
             self._stuck = reply.running if reply.timed_out else None
         reply.elapsed_ms = (time.monotonic() - started) * 1000.0
         return reply
@@ -327,6 +408,8 @@ class InProcessHost:
 
     busy = False
 
+    killed_for = None
+
     def start(self) -> None:
         self.engine = proto.Engine()
 
@@ -334,6 +417,7 @@ class InProcessHost:
         self.engine = None
 
     kill = close
+    discard = close
 
     def _engine(self) -> proto.Engine:
         if self.engine is None:
@@ -350,14 +434,25 @@ class InProcessHost:
     def set_params(self, key: str, params: dict[str, Any]) -> bool:
         return self._engine().set_params(key, params)
 
-    def step(self, items: list[tuple[str, dict[str, Any]]], deadline_s: float, hard_ms: float) -> StepReply:
+    def step(self, items: list[tuple[Any, ...]], deadline_s: float, hard_ms: float) -> StepReply:
         engine = self._engine()
         reply = StepReply()
         started = time.monotonic()
-        for key, obs in items:
-            reply.results[key] = engine.step(key, obs, hard_ms)
+        for item in items:
+            key, obs = item[0], item[1]
+            reply.results[key] = engine.step(key, obs, hard_ms, item[2] if len(item) > 2 else None)
         reply.elapsed_ms = (time.monotonic() - started) * 1000.0
         return reply
+
+    def begin_step(self, items: list[tuple[Any, ...]], deadline_s: float, hard_ms: float) -> PendingStep:
+        """Runs the batch at once (``step``, which subclasses may override); ``finish_step`` returns it."""
+        now = time.monotonic()
+        pending = PendingStep([str(i[0]) for i in items], now, now + deadline_s)
+        pending.reply = self.step(items, deadline_s, hard_ms)
+        return pending
+
+    def finish_step(self, pending: PendingStep) -> StepReply:
+        return pending.reply or StepReply()
 
     def run_tests(
         self, source: str, params: dict[str, Any], tests: list[dict[str, Any]], seed: int, timeout_s: float
@@ -369,6 +464,7 @@ __all__ = [
     "HostClient",
     "HostError",
     "InProcessHost",
+    "PendingStep",
     "StepReply",
     "host_command",
     "host_env",

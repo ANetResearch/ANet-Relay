@@ -380,20 +380,23 @@ def hang_command(tmp_path: Path) -> list[str]:
     return [sys.executable, str(script)]
 
 
-def test_hung_host_is_restarted_and_the_others_reloaded(svc, stepper, tmp_path):
+def test_a_hung_host_faults_only_its_own_aircraft(svc, stepper, tmp_path):
     hosts = [HostClient(command=hang_command(tmp_path))]
     svc.programs.host_factory = lambda: hosts.pop(0) if hosts else HostClient()
     (a, b), session, agent = boot(svc, stepper, count=2)
     svc.programs.deploy(a, agent, {"program": "hover_trim"})
     svc.programs.deploy(b, agent, {"program": "patrol"})
+    hb = svc.programs.hosts[b]
+    assert svc.programs.hosts[a] is not hb  # one host per deployment
     stepper.run(0.2, renew=[session])
     ra, rb = svc.programs.runs[a], svc.programs.runs[b]
-    assert ra.status == "faulted" and ra.reason == "host"  # it was running when the host hung
-    assert rb.status == "running"
+    assert ra.status == "faulted" and ra.reason == "host"  # it was running when its host hung
+    assert rb.status == "running" and a not in svc.programs.hosts
     stepper.run(1.0, renew=[session])
-    assert rb.frames > 30 and any("reloaded" in line["text"] for line in rb.logs)
+    assert rb.frames >= 58 and rb.faults == 0 and svc.programs.hosts[b] is hb  # never interrupted
     (restart,) = [e for e in svc.events.after(0) if e["kind"] == "program_host_restarted"]
     assert restart["data"]["reason"] == "timeouts" and restart["data"]["culprit"] == ra.key
+    assert restart["vehicle"] == a
     assert "15 ms" in restart["text_en"] and "15 ms" in restart["text_zh"]
 
 
@@ -401,13 +404,14 @@ def test_crashed_host_is_restarted(svc, stepper):
     (vid,), session, agent = boot(svc, stepper)
     svc.programs.deploy(vid, agent, {"program": "hover_trim"})
     stepper.run(0.2, renew=[session])
-    old = svc.programs.host
+    old = svc.programs.hosts[vid]
     old.proc.kill()
     old.proc.wait()
     stepper.run(0.5, renew=[session])
     run = svc.programs.runs[vid]
-    assert svc.programs.host is not old and svc.programs.host.alive
+    assert svc.programs.hosts[vid] is not old and svc.programs.hosts[vid].alive
     assert run.status == "running" and run.fps(svc.clock()) > 10
+    assert any("reloaded" in line["text"] for line in run.logs)
     assert [e["data"]["reason"] for e in svc.events.after(0) if e["kind"] == "program_host_restarted"] == [
         "exited"
     ]
@@ -430,4 +434,4 @@ def test_step_time_is_bounded(svc, stepper):
     stepper.run(0.1, renew=[session])
     run = svc.programs.runs[vid]
     assert run.status == "running" and "limit" in run.last_error and run.overruns >= 1
-    assert svc.programs.host.alive and math.isfinite(run.faults)
+    assert svc.programs.hosts[vid].alive and math.isfinite(run.faults)

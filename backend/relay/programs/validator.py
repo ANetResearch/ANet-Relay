@@ -364,6 +364,15 @@ class _Checker(ast.NodeVisitor):
             for part in spec.values:
                 if isinstance(part, ast.Constant) and isinstance(part.value, str) and _wide(part.value):
                     self.add(node, "forbidden_format", "format width is too large", "格式宽度过大")
+                elif not isinstance(part, ast.Constant):
+                    # f"{x:{w}}" takes its width at run time, past the width check
+                    self.add(
+                        node,
+                        "forbidden_format",
+                        "a format spec must be written out, not computed",
+                        "格式说明必须直接写出，不能在运行时计算",
+                    )
+                    break
         self.generic_visit(node)
 
     def visit_Constant(self, node: ast.Constant) -> None:

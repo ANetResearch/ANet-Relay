@@ -61,7 +61,7 @@ Python 3 语法的子集，部署前由 AST 白名单校验：
 - 内置函数：`abs min max round sum len range enumerate zip sorted reversed int float bool str list dict tuple set isinstance any all map filter divmod pow print`。
 - 源码不超过 64 KB。
 
-程序在独立的程序宿主进程中运行，没有网络与文件访问；单帧预算 2 ms（软限，超出计数），宿主每批 15 ms 未返回则该批全部输出安全杆量，连续 3 批超时宿主被重启。程序只来自本机（界面、Copilot、本机接口）；局域网对抗只交换飞行状态，从不交换代码。
+每次部署在各自独立的程序宿主进程中运行，没有网络与文件访问，一个程序无法读取、拖慢或拖垮其他飞机的程序；单帧预算 2 ms（软限，超出计数），某帧 15 ms 未返回则输出安全杆量，连续 3 帧超时程序以 `faulted` 结束。宿主常驻内存超过 512 MB 时在所有平台上都会被终止，程序以 `memory` 故障结束。程序只来自本机（界面、Copilot、本机接口）；局域网对抗只交换飞行状态，从不交换代码。
 
 ## 4. 观测 `obs`
 

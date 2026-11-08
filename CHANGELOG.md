@@ -17,8 +17,9 @@ the system keychain.
 
 - Onboard programs: restricted Python with `PARAMS`, `init(ctx)` and
   `step(obs, ctx) -> Sticks`, checked against an AST whitelist and run at 50 Hz
-  in an isolated program host process (`--program-host`; on POSIX with memory
-  and CPU limits, no network or file access). The observation holds only what
+  in an isolated program host process per deployment (`--program-host`; no
+  network or file access, a lower priority than the backend, memory and CPU
+  limits on POSIX and a 512 MB resident-memory watchdog on every platform). The observation holds only what
   the aircraft measures: attitude, rates, accelerations, barometric height, a
   position only where a source exists, battery, motor output, arena state and
   contacts. The `relay` library provides `clamp`, `wrap180`, `lerp`,
@@ -134,7 +135,8 @@ code-signed; when SmartScreen warns, choose More info → Run anyway.
   aircraft, 6 to 8 times with two and about 4 times with four.
 - The built-in programs pass `liftoff`, `hover` and `duel_easy`; `heading`,
   `square`, `rings` and `pursuit` have no built-in program that passes them yet.
-- On Windows the program host runs without memory and CPU limits.
+- On Windows the program host has no CPU-time limit; the 15 ms frame deadline
+  and the memory watchdog still end a runaway program.
 
 ## [0.3.1] - 2026-11-07
 

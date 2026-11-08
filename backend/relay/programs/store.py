@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ..errors import err
+from ..errors import RelayError, err
 from . import validator
 
 log = logging.getLogger("relay.programs")
@@ -79,6 +79,30 @@ def check_stored_params(params: Any, source: str) -> dict[str, Any]:
         if key not in result.params:
             raise err("program_param_invalid", name=key, reason="not in PARAMS")
     return {k: coerce_param(k, v, result.params[k], result.param_ranges.get(k)) for k, v in out.items()}
+
+
+def fitting_params(
+    stored: dict[str, Any], defaults: dict[str, Any], ranges: dict[str, list[float]]
+) -> dict[str, Any]:
+    """The stored overrides that still fit a source's PARAMS and PARAM_RANGES (renamed, removed or now out of
+    range ones are dropped), coerced to the defaults' types."""
+    out = {}
+    for key, value in (stored or {}).items():
+        if key not in defaults:
+            continue
+        try:
+            out[key] = coerce_param(key, value, defaults[key], ranges.get(key))
+        except RelayError:
+            continue
+    return out
+
+
+def _carried_params(params: dict[str, Any], source: str) -> dict[str, Any]:
+    """Overrides kept across a source change: those that still fit the new PARAMS (when it validates)."""
+    result = validator.validate(source)
+    if not result.ok:
+        return dict(params)
+    return fitting_params(params, result.params, result.param_ranges)
 
 
 def coerce_param(name: str, value: Any, default: Any, bounds: list[float] | None) -> Any:
@@ -396,6 +420,7 @@ class ProgramStore:
             program = self._find(pid)
             if program.get("builtin"):
                 raise err("program_readonly", program=pid)
+            # check everything first: a refused update changes nothing, not even the name in memory
             source = program["source"]
             if body.get("patch") is not None:
                 if body.get("source") is not None:
@@ -404,27 +429,35 @@ class ProgramStore:
             elif body.get("source") is not None:
                 source = body["source"]
             source = _check_source(source)
-            params = (
-                check_stored_params(body["params"], source)
-                if body.get("params") is not None
-                else program["params"]
-            )
-            changed = source != program["source"] or params != program["params"]
+            if body.get("params") is not None:
+                params = check_stored_params(body["params"], source)
+            elif source != program["source"]:
+                params = _carried_params(program["params"], source)
+            else:
+                params = program["params"]
+            name = None
             if body.get("name") is not None:
                 name = _clean_text(body["name"], NAME_MAX, "name")
                 if not name:
                     raise err("invalid_request", reason="name is required")
+            description = (
+                _clean_text(body["description"], DESCRIPTION_MAX, "description")
+                if body.get("description") is not None
+                else None
+            )
+            tests = check_tests(body["tests"]) if body.get("tests") is not None else None
+            note = _clean_text(body.get("note"), NOTE_MAX, "note") or "edited"
+            changed = source != program["source"] or params != program["params"]
+            if name is not None:
                 program["name"] = name
-            if body.get("description") is not None:
-                program["description"] = _clean_text(body["description"], DESCRIPTION_MAX, "description")
-            if body.get("tests") is not None:
-                program["tests"] = check_tests(body["tests"])
+            if description is not None:
+                program["description"] = description
+            if tests is not None:
+                program["tests"] = tests
             program["source"] = source
             program["params"] = params
             if changed:
-                self._add_revision(
-                    program, author, _clean_text(body.get("note"), NOTE_MAX, "note") or "edited", now
-                )
+                self._add_revision(program, author, note, now)
             program["updated"] = now
             self._save(program)
             return self.get(pid)
@@ -452,4 +485,5 @@ __all__ = [
     "check_params",
     "check_tests",
     "coerce_param",
+    "fitting_params",
 ]

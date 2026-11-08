@@ -86,10 +86,11 @@ A subset of Python 3, checked against an AST allow-list before anything runs:
   isinstance any all map filter divmod pow print`.
 - Source of at most 64 KB.
 
-Programs run in a separate program host process with no network or file access. Each frame has a 2 ms budget (soft,
-counted); a batch that misses 15 ms outputs safe sticks for every program, and 3 missed batches in a row restart
-the host. Programs come only from this computer (the Lab, Copilot, the local API); the LAN arena exchanges flight
-state, never code.
+Every deployment runs in its own program host process with no network or file access, so one program cannot
+reach, slow down or crash another aircraft's program. Each frame has a 2 ms budget (soft, counted); a frame that
+misses 15 ms outputs safe sticks, and 3 missed frames in a row end the program as `faulted`. A host that grows past
+512 MB of resident memory is ended on every platform and the program faults with `memory`. Programs come only from
+this computer (the Lab, Copilot, the local API); the LAN arena exchanges flight state, never code.
 
 ## 4. Observation `obs`
 

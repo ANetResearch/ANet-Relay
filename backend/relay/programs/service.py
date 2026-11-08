@@ -1,8 +1,9 @@
 """Deployment of onboard programs on the fleet thread (06 §2.6).
 
 ``ProgramService`` belongs to ``FleetService`` (``fleet.programs``). It deploys a stored program revision
-to one aircraft, runs every running program once per stick tick (50 Hz, ``tick``) in one batch on the
-program host, and writes the outputs through the fleet's own stick path as the ``program`` source: the
+to one aircraft in a program host of its own (``Run.host``), runs every running program once per stick tick
+(50 Hz, ``tick``: every host gets its frame, then the replies are collected against one 15 ms deadline), and
+writes the outputs through the fleet's own stick path as the ``program`` source: the
 vehicle's controller becomes ``program`` (``Vehicle.controller``), the timeline shows ``PROGRAM · <name>``
 and the 0.8 s stick timeout, stop windows and calibration signs apply unchanged.
 
@@ -15,24 +16,32 @@ Rules:
   Emergency stop, link loss, a crash, removal, reset, a new skill / plan / re-fly, sticks from a session and
   the end of the deploying session's claim stop it. Stopped and faulted programs release the sticks
   (``stop_sticks``), so the autopilot's own failsafe takes over.
+* Isolation: one host process per deployment, so a program cannot read another's data, take its time, use
+  its memory or crash its host. The host starts and loads on the caller's thread before the fleet thread
+  swaps the deployment in (a revision that fails to load leaves the flying one as it was); stopping, faulting
+  and pausing release the sticks first and kill the host without a round trip; live parameters travel with
+  the next frame. The fleet thread never waits for a host beyond the frame deadline.
 * Frames: a raising or invalid frame sends safe sticks (attitude centred, throttle held) and counts a fault;
-  25 consecutive faults fault the program. A batch that misses its 15 ms deadline sends safe sticks with the
-  time of the last good frame (so a hung host still meets the 0.8 s stick timeout); three in a row, or a
-  host that exits, restart the host in the background, fault the program that was running and reload the
-  others (their ``ctx.mem`` starts empty).
+  25 consecutive faults fault the program. A frame that misses its 15 ms deadline sends safe sticks with the
+  time of the last good frame (so a hung host still meets the 0.8 s stick timeout); three in a row, a host
+  that exits during a frame or one the memory watchdog killed fault the program. A host that exits between
+  frames is restarted in the background and the program reloaded (``ctx.mem`` starts empty), at most
+  ``RESTART_LIMIT`` times in ``RESTART_WINDOW_S``.
 * Real aircraft: only after the operator allows programs on that aircraft (confirm word ``PROGRAM``,
   reset whenever the link drops) and with a passing preflight; ``fire`` is ignored.
 * While a program flies an aircraft Relay asks for ATTITUDE 50 Hz, LOCAL_POSITION_NED 20 Hz, VFR_HUD 20 Hz and
   SCALED_IMU 50 Hz, and checks after 3 s that ATTITUDE arrives at 40 Hz or more (``rates_ok``).
 
 Seams for later packages: ``ProgramService(fleet, host_factory=InProcessHost)`` runs programs in process
-(headless evaluators); ``teams`` maps aircraft or contact ids to team names for ``obs.contacts``;
-``deploy_source(...)`` deploys source that is not in the store (scenarios); ``runs`` holds the ``Run`` of
-each aircraft; ``validate`` / ``run_tests`` wrap the validator and the one-shot test host.
+(headless evaluators; one engine per deployment); ``hosts`` maps aircraft to their host; ``teams`` maps
+aircraft or contact ids to team names for ``obs.contacts``; ``deploy_source(...)`` deploys source that is not
+in the store (scenarios); ``runs`` holds the ``Run`` of each aircraft; ``validate`` / ``run_tests`` wrap the
+validator and the one-shot test host.
 """
 
 from __future__ import annotations
 
+import itertools
 import logging
 import secrets
 import threading
@@ -50,7 +59,7 @@ from ..model import StickInput
 from . import obs as obsmod
 from . import validator
 from .hostclient import HostClient, HostError, StepReply, run_tests_isolated
-from .store import ProgramStore, check_params, coerce_param
+from .store import ProgramStore, check_params, coerce_param, fitting_params
 
 if TYPE_CHECKING:
     from ..fleet import FleetService, Vehicle
@@ -92,6 +101,7 @@ REASONS: dict[str, tuple[str, str]] = {
 RESTART_REASONS = {
     "exited": ("the program host exited", "程序宿主已退出"),
     "timeouts": ("3 batches missed the 15 ms deadline", "连续 3 批超过 15 ms 时限"),
+    "memory": ("the program host exceeded its memory limit", "程序宿主超过内存上限"),
 }
 _STOP_CONTROL_REASONS = {
     "link lost": "link_lost",
@@ -156,6 +166,12 @@ class Run:
         self.rates_retried = False
         self.logs: deque[dict[str, Any]] = deque(maxlen=LOG_RING)
         self.log_seq = 0
+        self.host: Any = None  # this deployment's own program host
+        self.timeouts = 0
+        self.restarts: deque[float] = deque(maxlen=16)
+        self.restarting = False
+        self.pending_params: dict[str, Any] = {}  # live changes sent with the next frame
+        self.firing = False  # the program holds the trigger (Arena.fire)
 
     @property
     def active(self) -> bool:
@@ -208,118 +224,106 @@ class ProgramService:
         self.store = ProgramStore(fleet.data_dir)
         self.host_factory = host_factory
         self.test_runner = test_runner or run_tests_isolated
-        self.host: Any = None
         self.runs: dict[str, Run] = {}
         self.teams: dict[str, str] = {}
-        self._seq = 0
-        self._host_lock = threading.Lock()
-        self._timeouts = 0
-        self._restarts: deque[float] = deque(maxlen=16)
-        self._restarting = False
+        self._keys = itertools.count(1)
 
-    # ====================================================================== host
+    # ====================================================================== hosts (one per deployment)
 
-    def _ensure_host(self) -> Any:
-        """Start the host if needed (any thread; the fleet thread only uses a started host)."""
-        with self._host_lock:
-            if self.host is not None and self.host.alive:
-                return self.host
-            host = self.host_factory()
-            try:
-                host.start()
-            except HostError as exc:
-                raise err("program_host_unavailable", reason=str(exc)) from exc
-            self.host = host
-            self._timeouts = 0
-            return host
+    @property
+    def hosts(self) -> dict[str, Any]:
+        """The host of each aircraft's active deployment (diagnostics and tests)."""
+        return {vid: r.host for vid, r in self.runs.items() if r.host is not None}
+
+    def _new_host(self) -> Any:
+        """Start a host for one deployment (any thread except the fleet thread: it may take a while)."""
+        host = self.host_factory()
+        try:
+            host.start()
+        except HostError as exc:
+            raise err("program_host_unavailable", reason=str(exc)) from exc
+        return host
+
+    @staticmethod
+    def _discard(host: Any) -> None:
+        """Kill a host without waiting for it (``HostClient.discard``)."""
+        if host is None:
+            return
+        try:
+            (getattr(host, "discard", None) or host.kill)()
+        except Exception:  # pragma: no cover - a host that is already gone
+            log.exception("discarding a program host")
 
     def close(self) -> None:
-        with self._host_lock:
-            if self.host is not None:
-                self.host.close()
-                self.host = None
+        for r in self.runs.values():
+            host, r.host = r.host, None
+            self._discard(host)
 
-    def _restart_host(self, culprit: str | None, reason: str) -> None:
-        """Kill the host, fault ``culprit`` and reload the other running programs in a new one."""
+    def _host_lost(self, r: Run, culprit: bool, reason: str) -> None:
+        """``r``'s host exited, missed 3 batches or grew past its memory limit. The program itself is to blame
+        (it was running, or the host's memory is its memory): fault it. Otherwise restart the host off the
+        fleet thread and reload the program (``ctx.mem`` starts empty), at most ``RESTART_LIMIT`` times in
+        ``RESTART_WINDOW_S``. Other aircraft's programs run in their own hosts and are not affected."""
         now = self.fleet.clock()
-        wall = self.fleet.wall()
-        old = self.host
-        self.host = None
-        self._timeouts = 0
-        if old is not None:
-            old.kill()
-        self._restarts.append(now)
-        recent = [t for t in self._restarts if now - t <= RESTART_WINDOW_S]
-        give_up = len(recent) > RESTART_LIMIT
-        for r in list(self.runs.values()):
-            if not r.active:
-                continue
-            if give_up or r.key == culprit:
-                self._fault(
-                    r, "host", f"{RESTART_REASONS.get(reason, (reason,))[0]}; the program host was restarted"
-                )
+        host, r.host = r.host, None
+        r.timeouts = 0
+        self._discard(host)
+        r.restarts.append(now)
+        recent = [t for t in r.restarts if now - t <= RESTART_WINDOW_S]
+        give_up = not culprit and len(recent) > RESTART_LIMIT
         en, zh = RESTART_REASONS.get(reason, (reason, reason))
         self.fleet.events.emit(
             "program_host_restarted",
-            data={"reason": reason, "reason_en": en, "reason_zh": zh, "culprit": culprit, "gave_up": give_up},
+            r.vid,
+            data={
+                "reason": reason,
+                "reason_en": en,
+                "reason_zh": zh,
+                "culprit": r.key if culprit else None,
+                "gave_up": give_up,
+            },
+            labels={"vehicle": self._label(r)},
         )
-        log.warning("program host restarted (%s), culprit %s", reason, culprit)
-        if give_up or not any(r.active for r in self.runs.values()):
+        log.warning("program host of %s lost (%s), culprit %s", r.vid, reason, culprit)
+        if culprit or give_up:
+            why = "memory" if reason == "memory" else "host"
+            self._fault(r, why, f"{en}; the program host was restarted")
             return
-        if self.fleet._thread is None:  # stepped by tests: restart inline
-            self._start_and_reload(wall)
-            return
-        if self._restarting:
-            return
-        self._restarting = True
+        self._restart(r)
 
-        def background() -> None:
+    def _restart(self, r: Run) -> None:
+        r.restarting = True
+
+        def work() -> None:
+            host = None
+            error = None
             try:
-                host = self.host_factory()
-                host.start()
+                host = self._new_host()
+                reply = host.load(r.key, r.source, dict(r.params), r.seed)
+                if not reply.get("ok"):
+                    error = f"reload failed: {reply.get('error')}"
+            except RelayError as exc:
+                error = f"the program host could not be restarted: {exc.message_en}"
             except HostError as exc:
-                log.error("program host restart failed: %s", exc)
-                host = None
-            self.fleet.post(lambda: self._adopt(host))
+                error = f"reload failed: {exc}"
+            self.fleet.post(lambda: self._adopt(r, host, error))
 
-        threading.Thread(target=background, name="program-host-restart", daemon=True).start()
-
-    def _adopt(self, host: Any) -> None:
-        self._restarting = False
-        if host is None:
-            for r in list(self.runs.values()):
-                if r.active:
-                    self._fault(r, "host", "the program host could not be restarted")
+        if self.fleet._thread is None:  # stepped by tests and evaluators: restart inline
+            work()
             return
-        with self._host_lock:
-            if self.host is not None:
-                self.host.close()
-            self.host = host
-        self._reload(self.fleet.wall())
+        threading.Thread(target=work, name="program-host-restart", daemon=True).start()
 
-    def _start_and_reload(self, wall: float) -> None:
-        try:
-            self._ensure_host()
-        except RelayError as exc:
-            for r in list(self.runs.values()):
-                if r.active:
-                    self._fault(r, "host", exc.message_en)
+    def _adopt(self, r: Run, host: Any, error: str | None) -> None:
+        r.restarting = False
+        if self.runs.get(r.vid) is not r or not r.active:
+            self._discard(host)
             return
-        self._reload(wall)
-
-    def _reload(self, wall: float) -> None:
-        for r in list(self.runs.values()):
-            if not r.active:
-                continue
-            try:
-                reply = self.host.load(r.key, r.source, r.params, r.seed)
-            except HostError as exc:
-                self._fault(r, "host", f"reload failed: {exc}")
-                continue
-            if not reply.get("ok"):
-                self._fault(r, "host", f"reload failed: {reply.get('error')}")
-                continue
-            r.add_log(wall, "program reloaded after a host restart; ctx.mem starts empty", "event")
+        if error is not None:
+            self._discard(host)
+            self._fault(r, "host", error)
+            return
+        r.host = host
+        r.add_log(self.fleet.wall(), "program reloaded after a host restart; ctx.mem starts empty", "event")
 
     # ====================================================================== deploy and control
 
@@ -348,7 +352,8 @@ class ProgramService:
             program,
             revision["rev"],
             revision["source"],
-            {**(revision.get("params") or {}), **(body.get("params") or {})},
+            body.get("params") or {},
+            stored=revision.get("params") or {},
             mode=body.get("mode") or "pilot",
             sensors=body.get("sensors"),
             arena=body.get("arena"),
@@ -365,6 +370,7 @@ class ProgramService:
         source: str,
         params: dict[str, Any],
         *,
+        stored: dict[str, Any] | None = None,
         mode: str = "pilot",
         sensors: Any = None,
         arena: Any = None,
@@ -372,6 +378,11 @@ class ProgramService:
         airframe: Any = None,
     ) -> dict[str, Any]:
         """Deploy source directly (scenarios and evaluators); ``program`` needs ``id`` and ``name``.
+
+        ``params`` are checked strictly; ``stored`` (a revision's saved overrides) only where they still fit
+        the source's PARAMS and PARAM_RANGES. The new deployment gets its own host, started and loaded on the
+        caller's thread; only when that succeeded does the fleet thread replace the aircraft's current
+        deployment (a revision that fails to load leaves the program that is flying untouched).
 
         ``airframe`` (simulators only, 06 §3.3 / §4): ``{preset | params, seed?}`` fitted to the simulator
         before the program starts, as ``PUT /sims/{vid}/airframe`` would. The program never sees the values:
@@ -387,7 +398,11 @@ class ProgramService:
                 reason=f"line {first.line}: {first.message_en}",
                 problems=[p.view() for p in result.errors],
             )
-        merged = self._params(params, result.params, result.param_ranges)
+        merged = self._params(
+            {**fitting_params(stored or {}, result.params, result.param_ranges), **(params or {})},
+            result.params,
+            result.param_ranges,
+        )
         try:
             spec = obsmod.Sensors.parse(sensors)
             arena_box = obsmod.parse_arena(arena)
@@ -399,9 +414,8 @@ class ProgramService:
             raise err("invalid_request", reason="seed must be a non-negative integer")
         if airframe is not None and not isinstance(airframe, dict):
             raise err("invalid_request", reason="airframe must be an object")
-        self._ensure_host()
 
-        def run() -> dict[str, Any]:
+        def checks() -> tuple[Vehicle, Any]:
             v = self.fleet._vehicle(vid)
             self._check_actor(v, actor)
             self.fleet._require_link(v)
@@ -414,25 +428,32 @@ class ProgramService:
                 if v.kind != "sim":
                     raise err("sim_only")
                 fit = self.fleet._resolve_airframe(airframe, v.driver.sim.airframe)
-            if self.host is None or not self.host.alive:
-                raise err("program_host_unavailable", reason="restarting")
+            return v, fit
+
+        self.fleet.call(lambda: checks() and None)
+        # load off the fleet thread: compiling and a module body take their time, the sticks do not wait
+        host = self._new_host()
+        key = f"{vid}#{next(self._keys)}"
+        try:
+            reply = host.load(key, source, merged, int(seed))
+        except HostError as exc:
+            self._discard(host)
+            raise err("program_host_unavailable", reason=str(exc)) from exc
+        if not reply.get("ok"):
+            self._discard(host)
+            raise err(
+                "program_load_failed",
+                reason=str(reply.get("error") or "unknown"),
+                problems=reply.get("problems") or [],
+            )
+
+        def install() -> dict[str, Any]:
+            v, fit = checks()
             now = self.fleet.clock()
             wall = self.fleet.wall()
             old = self.runs.get(vid)
             if old is not None and old.active:
                 self._stop(old, "replaced", emit=True)
-            self._seq += 1
-            key = f"{vid}#{self._seq}"
-            try:
-                reply = self.host.load(key, source, merged, int(seed))
-            except HostError as exc:
-                raise err("program_host_unavailable", reason=str(exc)) from exc
-            if not reply.get("ok"):
-                raise err(
-                    "program_load_failed",
-                    reason=str(reply.get("error") or "unknown"),
-                    problems=reply.get("problems") or [],
-                )
             if fit is not None:
                 self.fleet._apply_airframe(v, fit, actor)
             # the program is now the stick source: stop skills, plans and earlier sticks
@@ -458,6 +479,7 @@ class ProgramService:
                 now,
                 wall,
             )
+            r.host = host
             r.state = str(reply.get("state") or "")
             for line in reply.get("logs") or []:
                 r.add_log(wall, str(line))
@@ -484,6 +506,13 @@ class ProgramService:
                 labels={"vehicle": v.label, "name": r.name, "rev": str(rev)},
             )
             return {"id": vid, "program": r.view(now)}
+
+        def run() -> dict[str, Any]:
+            try:
+                return install()
+            except BaseException:
+                self._discard(host)  # refused after loading: the new host goes, the old run is as it was
+                raise
 
         return self.fleet.call(run, timeout=3.0)
 
@@ -536,7 +565,7 @@ class ProgramService:
             self.fleet._require_link(v)
             if v.kind == "real":
                 self._check_real(v)
-            if self.host is None or not self.host.alive:
+            if r.host is None or not r.host.alive:
                 raise err("program_host_unavailable", reason="restarting")
             self.fleet._stop_skill(v, "superseded by a program", "被机载程序取代")
             self.fleet._cancel_plan(v, "superseded by a program", "被机载程序取代")
@@ -572,13 +601,9 @@ class ProgramService:
                 if name not in r.defaults:
                     raise err("program_param_invalid", name=str(name), reason="not in PARAMS")
                 values[name] = coerce_param(name, value, r.defaults[name], r.ranges.get(name))
-            try:
-                ok = self.host is not None and self.host.set_params(r.key, values)
-            except HostError as exc:
-                raise err("program_host_unavailable", reason=str(exc)) from exc
-            if not ok:
-                raise err("program_host_unavailable", reason="the program is not loaded")
+            # sent with the program's next frame: the fleet thread never waits for a host here
             r.params.update(values)
+            r.pending_params.update(values)
             text = ", ".join(f"{k} = {x}" for k, x in values.items())
             r.add_log(self.fleet.wall(), f"params {text} ({actor.name or actor.kind})", "event")
             return {"id": vid, "params": dict(r.params)}
@@ -631,19 +656,34 @@ class ProgramService:
             v.sticks = None
             v.driver.stop_sticks()
 
+    def _release_trigger(self, r: Run, v: Vehicle | None, now: float | None = None) -> None:
+        """Let go of the trigger the program pressed (``Arena.fire`` would keep shooting until its 0.3 s hold
+        expires). Only the program's own press: a person's fire input on the same aircraft stays."""
+        if not r.firing:
+            return
+        r.firing = False
+        if v is None or v.kind != "sim":
+            return
+        gun = self.fleet.arena.guns.get(v.id)
+        now = self.fleet.clock() if now is None else now
+        if gun is not None and gun.fire_until > now:
+            self.fleet.arena.fire(v, False, None, now)
+
     def _vehicle_of(self, r: Run) -> Vehicle | None:
         return self.fleet.vehicles.get(r.vid)
+
+    def _label(self, r: Run) -> str:
+        v = self._vehicle_of(r)
+        return v.label if v is not None else r.vid
 
     def _end(self, r: Run, status: str, reason: str) -> Vehicle | None:
         v = self._vehicle_of(r)
         r.status = status
         r.reason = reason
         self._release_sticks(v)
-        if self.host is not None:
-            try:
-                self.host.unload(r.key)
-            except HostError:
-                pass
+        self._release_trigger(r, v)
+        host, r.host = r.host, None
+        self._discard(host)  # the sticks are released first; the host goes without a round trip
         if v is not None:
             self._request_rates(v, obsmod.DEFAULT_RATES)
         return v
@@ -691,6 +731,7 @@ class ProgramService:
         r.reason = reason
         v = self._vehicle_of(r)
         self._release_sticks(v)
+        self._release_trigger(r, v)
         en, zh = REASONS.get(reason, (reason, reason))
         r.add_log(self.fleet.wall(), f"paused: {en}", "event")
         self.fleet.events.emit(
@@ -760,10 +801,17 @@ class ProgramService:
     # ====================================================================== the 50 Hz tick
 
     def tick(self, now: float) -> None:
-        runs = [r for r in self.runs.values() if r.status == "running"]
+        for r in list(self.runs.values()):
+            host = r.host
+            if r.active and not r.restarting and (host is None or not host.alive):
+                memory = host is not None and host.killed_for == "memory"
+                # exited with a frame outstanding (or killed for its memory): the program did it
+                culprit = memory or (host is not None and host.busy)
+                self._host_lost(r, culprit, "memory" if memory else "exited")
+        runs = [r for r in self.runs.values() if r.status == "running" and r.host is not None]
         if not runs:
             return
-        items: list[tuple[str, dict[str, Any], Run, Vehicle]] = []
+        items: list[tuple[Run, Vehicle, dict[str, Any]]] = []
         for r in runs:
             v = self._vehicle_of(r)
             if v is None or v.link_state not in ("ok", "delayed"):
@@ -787,34 +835,45 @@ class ProgramService:
                 }
             self._check_rates(r, v, now)
             obs = r.builder.build(self.fleet, v, now, sticks_in, self.teams)
-            items.append((r.key, obs, r, v))
+            items.append((r, v, obs))
         if not items:
             return
-        if self.host is None or not self.host.alive:
-            if not self._restarting:
-                self._restart_host(None, "exited")
-            return
-        try:
-            reply: StepReply = self.host.step(
-                [(k, o) for k, o, _, _ in items], BATCH_DEADLINE_S, HARD_STEP_MS
-            )
-        except HostError:
-            reply = StepReply(dead=True, running=items[0][0])
+        # every aircraft's host gets its frame first, then the replies are collected against one deadline
+        sent: list[tuple[Run, Vehicle, Any, Any]] = []
+        for r, v, obs in items:
+            params, r.pending_params = r.pending_params, {}
+            host = r.host
+            try:
+                pending = host.begin_step([(r.key, obs, params)], BATCH_DEADLINE_S, HARD_STEP_MS)
+            except HostError:
+                pending = None
+            sent.append((r, v, host, pending))
         wall = self.fleet.wall()
-        for key, _obs, r, v in items:
-            res = reply.results.get(key)
+        for r, v, host, pending in sent:
+            try:
+                reply: StepReply = (
+                    host.finish_step(pending) if pending is not None else StepReply(dead=True, running=r.key)
+                )
+            except HostError:
+                reply = StepReply(dead=True, running=r.key)
+            res = reply.results.get(r.key)
             if res is None:
+                self._release_trigger(r, v, now)
                 self._safe(r, v, r.last_out_t)
             else:
                 self._apply(r, v, res, now, wall)
-        if reply.dead:
-            self._restart_host(reply.running, "exited")
-        elif reply.timed_out:
-            self._timeouts += 1
-            if self._timeouts >= HOST_TIMEOUT_LIMIT:
-                self._restart_host(reply.running, "timeouts")
-        else:
-            self._timeouts = 0
+            if not r.active or r.host is not host:
+                continue  # faulted by this frame (memory, faults), or stopped meanwhile
+            if host.killed_for == "memory":  # the watchdog killed it; its exit may not have shown yet
+                self._host_lost(r, True, "memory")
+            elif reply.dead:
+                self._host_lost(r, reply.running == r.key, "exited")
+            elif reply.timed_out:
+                r.timeouts += 1
+                if r.timeouts >= HOST_TIMEOUT_LIMIT:
+                    self._host_lost(r, True, "timeouts")
+            else:
+                r.timeouts = 0
 
     def _check_rates(self, r: Run, v: Vehicle, now: float) -> None:
         if r.rates_check_at is None or now < r.rates_check_at:
@@ -869,8 +928,11 @@ class ProgramService:
             if fire and v.kind == "sim" and v.armed:
                 try:
                     self.fleet.arena.fire(v, True, None, now)
+                    r.firing = True
                 except RelayError:
                     pass  # arena off, shot down or on the ground: the trigger is simply not live
+            elif not fire:
+                self._release_trigger(r, v, now)  # fire=False lets go now, not at the hold expiry
             return
         error = str(res.get("error") or "frame failed")
         r.faults += 1
@@ -884,6 +946,7 @@ class ProgramService:
             reason = "memory" if "memory" in error else "faults"
             self._fault(r, reason, error)
             return
+        self._release_trigger(r, v, now)
         self._safe(r, v, now)
         if r.consecutive >= FAULT_LIMIT:
             self._fault(r, "faults", error)

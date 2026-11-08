@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..errors import RelayError, err
 from ..programs import validator
+from ..programs.store import fitting_params
 from . import challenges as challengemod
 from .duels import ELO_START, MAX_PROGRAMS, MAX_ROUNDS, MIN_PROGRAMS, elo_round
 from .jobs import Job, JobManager
@@ -101,9 +102,8 @@ class JudgeService:
                 reason=f"line {first.line}: {first.message_en}",
                 problems=[p.view() for p in result.errors],
             )
-        merged = self.fleet.programs._params(
-            {**(revision.get("params") or {}), **(params or {})}, result.params, result.param_ranges
-        )
+        stored = fitting_params(revision.get("params") or {}, result.params, result.param_ranges)
+        merged = self.fleet.programs._params({**stored, **(params or {})}, result.params, result.param_ranges)
         return {
             "program": pid,
             "rev": revision["rev"],

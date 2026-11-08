@@ -19,6 +19,7 @@ import math as _math
 import random as _random
 import reprlib as _reprlib
 from collections.abc import Callable, Mapping
+from types import FunctionType as _FunctionType
 from typing import Any
 
 MAX_INT_BITS = 8192
@@ -32,7 +33,18 @@ _WIDTH_DIGITS = 4  # "%10000d" is fine, "%100000d" is refused
 
 
 class _Locked(type):
-    """Metaclass of every library class: programs share them in one host, so class attributes are fixed."""
+    """Metaclass of every library class: programs share them in one process, so class attributes are fixed.
+
+    A plain function read from the class (``PID.step``, ``StateMachine.add``, the ``Timer`` static methods)
+    comes back wrapped in ``_Fn``: the function object itself has a writable ``__dict__``, which would let
+    one program leave data for another (or for the next seed of an evaluation) on a shared object.
+    """
+
+    def __getattribute__(cls, name: str) -> Any:
+        value = type.__getattribute__(cls, name)
+        if type(value) is _FunctionType and not name.startswith("_"):
+            return _Fn(value)
+        return value
 
     def __setattr__(cls, name: str, value: Any) -> None:
         raise TypeError("library classes cannot be changed")
@@ -554,6 +566,7 @@ def relay_op(op: str, a: Any, b: Any) -> Any:
 
 
 def _wide_format(fmt: str) -> bool:
+    """A width or precision of over ``_WIDTH_DIGITS`` digits, or one taken from the arguments (``%*d``)."""
     run = 0
     for ch in fmt:
         if ch.isdigit():
@@ -562,6 +575,30 @@ def _wide_format(fmt: str) -> bool:
                 return True
         else:
             run = 0
+    return _star_width(fmt)
+
+
+_CONVERSION_CHARS = "-+ #0123456789.*hlL"
+
+
+def _star_width(fmt: str) -> bool:
+    i, n = 0, len(fmt)
+    while i < n:
+        if fmt[i] != "%":
+            i += 1
+            continue
+        i += 1
+        if i < n and fmt[i] == "%":
+            i += 1
+            continue
+        if i < n and fmt[i] == "(":  # %(name)s: the key may hold any character
+            close = fmt.find(")", i)
+            i = n if close < 0 else close + 1
+        while i < n and fmt[i] in _CONVERSION_CHARS:
+            if fmt[i] == "*":
+                return True
+            i += 1
+        i += 1
     return False
 
 
