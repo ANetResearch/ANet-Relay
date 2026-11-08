@@ -2,6 +2,8 @@
 
 ``python -m relay --program-host`` (frozen: ``anet-relay-backend --program-host``) runs the onboard-program
 host instead (06 §2.4, WP-1): it is dispatched before the server modules are imported.
+``python -m relay --judge-worker`` (frozen: ``anet-relay-backend --judge-worker``) runs one headless
+evaluation job (06 §3.4, WP-2b), dispatched the same way.
 
 Environment (set by the Electron shell): RELAY_HTTP_PORT, RELAY_OPERATOR_TOKEN, RELAY_DATA_DIR,
 RELAY_LISTEN_PORT, RELAY_ALLOW_LOOPBACK, RELAY_LIFELINE=stdin (exit when the shell's pipe closes).
@@ -76,6 +78,10 @@ def main(argv: list[str] | None = None) -> int:
         from .programs.host import main as program_host
 
         return program_host()
+    if args_in[:1] == ["--judge-worker"]:  # WP-2b: headless evaluation worker (06 §3.4)
+        from .judge.worker import main as judge_worker
+
+        return judge_worker()
 
     import uvicorn
 

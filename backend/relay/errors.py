@@ -239,6 +239,19 @@ CATALOGUE: dict[str, tuple[int, str, str]] = {
         "The program host is not available: {reason}.",
         "程序宿主不可用：{reason}。",
     ),
+    # WP-2b challenges, duels and the headless evaluator (06 §3.2-§3.4)
+    "challenge_not_found": (404, "There is no challenge {challenge}.", "没有题目 {challenge}。"),
+    "job_not_found": (404, "There is no evaluation job {job}.", "没有评测任务 {job}。"),
+    "trace_not_found": (404, "There is no trace {trace}.", "没有轨迹 {trace}。"),
+    "judge_queue_full": (
+        429,
+        "{limit} evaluation jobs are already waiting; try again when one has finished.",
+        "已有 {limit} 个评测任务在排队，请待其中一个完成后再提交。",
+    ),
+    "judge_unavailable": (503, "The evaluator is not available: {reason}.", "评测器不可用：{reason}。"),
+    "judge_failed": (500, "The evaluation failed: {reason}.", "评测失败：{reason}。"),
+    "judge_timeout": (504, "The evaluation took too long and was stopped.", "评测耗时过长，已停止。"),
+    "judge_setup_failed": (500, "The scenario could not be set up: {reason}.", "场景无法建立：{reason}。"),
 }
 
 

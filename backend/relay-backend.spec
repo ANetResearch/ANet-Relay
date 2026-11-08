@@ -18,6 +18,8 @@ ROOT = BACKEND.parent
 sys.path.insert(0, str(BACKEND))
 
 hiddenimports = [
+    # Includes relay.programs.host and relay.judge.worker, which the frozen executable runs when it
+    # re-executes itself with --program-host (WP-1) or --judge-worker (WP-2b).
     *collect_submodules("relay"),
     # uvicorn picks its loop, protocol and lifespan implementations at run time.
     *collect_submodules("uvicorn"),

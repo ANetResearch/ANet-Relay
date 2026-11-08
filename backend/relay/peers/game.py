@@ -179,6 +179,9 @@ class Arena:
     _target_hp: dict[tuple[int, int], int] = field(default_factory=dict)  # remote aircraft hit points
     late_bullets: int = 0
     _fly_turn: int = 0
+    # WP-2b headless evaluator: wall-time budget of the bullet work per tick (unbounded there, so a run
+    # does not depend on how fast the machine is); None keeps FLY_BUDGET_S, as the live fleet does
+    fly_budget_s: float | None = None
 
     def __post_init__(self) -> None:
         if not self.instance:
@@ -447,7 +450,7 @@ class Arena:
     def _fly(self, sims: dict[str, Vehicle], centres: dict[str, Any], last: float, now: float) -> None:
         span = max(1e-9, now - last)
         dead: set[int] = set()
-        deadline = time.perf_counter() + FLY_BUDGET_S
+        deadline = time.perf_counter() + (FLY_BUDGET_S if self.fly_budget_s is None else self.fly_budget_s)
         # this terminal's rounds first (they decide our own score); remote ones take turns at what is left
         own = [b for b in self.bullets if b.owner == self.instance]
         remote = [b for b in self.bullets if b.owner != self.instance]
