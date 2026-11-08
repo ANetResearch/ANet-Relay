@@ -51,6 +51,7 @@ BOOT_S = 2.5  # a new simulator's link settles before it is armed
 ARM_RETRY_S = 2.0
 ARM_TRIES = 3
 RESPAWN_S = 5.0
+OUT_REASON = "out of the arena"  # the crash reason of an aircraft that leaves the arena (fleet_world)
 OUT_MARGIN_M = 0.5
 LAND_TIMEOUT_S = 20.0
 GROUND_M = 0.15  # below this height and GROUND_V speed a simulator at the end counts as down
@@ -504,7 +505,7 @@ class Dogfights:
                 s.p[2] > box["ceiling"] + OUT_MARGIN_M
             )
             if outside:
-                fleet.call(lambda: sim.shoot_down("out of the arena"))
+                fleet.call(lambda: sim.shoot_down(OUT_REASON))
                 self._set(c, "down", now)
             return
         if (

@@ -20,6 +20,8 @@ from .sim.world import Body
 log = logging.getLogger(__name__)
 
 COLLISION_PREFIX = "collision with "  # sim.world's crash reason
+# WP-D: shoot_down reasons other than rounds (relay.scenarios.OUT_REASON) and their crash detail
+SHOT_DOWN_DETAIL = {"out of the arena": (": left the arena", "：飞出场地")}
 
 
 class WorldOps:
@@ -95,4 +97,6 @@ class WorldOps:
             other = reason[len(COLLISION_PREFIX) :]
             other_zh = f"第 {other[5:]} 个环" if other.startswith("ring ") else f" {other} "
             detail_en, detail_zh = f": collided with {other}", f"：与{other_zh}相撞"
+        elif s.crash_code == "shot_down" and reason in SHOT_DOWN_DETAIL:  # WP-D: say why a scenario downed it
+            detail_en, detail_zh = SHOT_DOWN_DETAIL[reason]
         return {"reason_code": s.crash_code, "point": point, "detail_en": detail_en, "detail_zh": detail_zh}

@@ -179,6 +179,20 @@ def test_fleet_collision_events_crash_details_and_obs(svc, stepper):
     assert s1.crashed and s2.crashed
 
 
+def test_a_scenario_crash_names_its_reason(svc, stepper):
+    from relay.scenarios import OUT_REASON
+
+    (vid,) = svc.add_sims(1)
+    stepper.run(0.5)
+    events = []
+    svc.events.add_listener(events.append)
+    svc.vehicles[vid].driver.sim.shoot_down(OUT_REASON)
+    stepper.run(1.0)
+    (crashed,) = [e for e in events if e["kind"] == "crashed"]
+    assert crashed["data"]["reason_code"] == "shot_down"
+    assert crashed["text_en"] == "SIM-1 crashed: left the arena." and "飞出场地" in crashed["text_zh"]
+
+
 def test_contacts_carry_the_closing_speed(svc, stepper):
     ids = svc.add_sims(2)
     stepper.run(0.5)

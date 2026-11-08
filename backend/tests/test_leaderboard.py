@@ -171,6 +171,12 @@ def test_a_downed_aircraft_keeps_its_program_as_the_controller(svc, stepper, mon
     board._check_controllers(sims)
     (row,) = [r for r in board.leaderboard()["rows"] if r["key"] == "sim-1"]
     assert row["controller"]["kind"] == "human"
+    # a finished match keeps the controllers that flew it (the aircraft land under the scenario's session)
+    monkeypatch.setattr(type(board), "frozen", property(lambda self: True))
+    who["now"] = ("agent", "dogfight")
+    board._check_controllers(sims)
+    (row,) = [r for r in board.leaderboard()["rows"] if r["key"] == "sim-1"]
+    assert row["controller"]["kind"] == "human"
 
 
 def test_sorting_and_empty_rows_last():

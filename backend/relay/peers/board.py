@@ -208,6 +208,8 @@ class Board:
                 self._send(wire.MATCH_START, now)
 
     def _check_controllers(self, sims: dict[str, Any]) -> None:
+        if self.frozen:
+            return  # WP-D: the final standings keep the controllers that flew the match
         for vid, v in sims.items():
             ctrl = controller(self.fleet, v)
             prev = self._controllers.get(vid)
