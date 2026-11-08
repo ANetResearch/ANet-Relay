@@ -70,6 +70,7 @@ def test_the_challenge_set_follows_the_contract_table():
         "duel_easy",
         "duel_medium",
         "duel_hard",
+        "ram_easy",  # WP-B (07 §3)
     ]
     for c in CHALLENGES.values():
         assert c.visible and len(c.hidden) >= 3 and not set(c.visible) & set(c.hidden)

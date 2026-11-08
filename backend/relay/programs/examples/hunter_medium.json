@@ -76,6 +76,73 @@
         ],
         "fire": false
       }
+    },
+    {
+      "name": "A rammer coming straight in: side-step",
+      "state": "approach",
+      "obs": {
+        "contacts": [
+          {
+            "id": "sim-2",
+            "team": "sim-2",
+            "dist": 2.5,
+            "bearing": 0.0,
+            "elevation": 0.0,
+            "rel": [
+              2.5,
+              0.0,
+              0.0
+            ],
+            "vrel": [
+              -3.0,
+              0.0,
+              0.0
+            ],
+            "hp": 100
+          }
+        ]
+      },
+      "expect": {
+        "roll": [
+          0.5,
+          1.0
+        ],
+        "fire": false,
+        "state": "dodge"
+      }
+    },
+    {
+      "name": "Team mates are not targets",
+      "state": "search",
+      "params": {
+        "team": "team-1"
+      },
+      "obs": {
+        "contacts": [
+          {
+            "id": "sim-3",
+            "team": "team-1",
+            "dist": 4.0,
+            "bearing": 0.0,
+            "elevation": 0.0,
+            "rel": [
+              4.0,
+              0.0,
+              0.0
+            ],
+            "vrel": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "hp": 100
+          }
+        ]
+      },
+      "expect": {
+        "fire": false,
+        "state": "search"
+      }
     }
   ]
 }

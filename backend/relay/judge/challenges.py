@@ -33,6 +33,11 @@ ground at its spawn). Heights are above the take-off point. ``CHALLENGES`` keeps
                arena (radius 8 m, ceiling 4 m), 60 s. Pass: a win (the opponent shot down, crashed or out of
                the arena while the player still flies). Score: win 70 + 30 * hp / 100; time up
                60 * hp / (hp + opponent hp); loss 10 * min(hits, 5) / 5.
+``ram_easy``   WP-B (07 §3): a target hovers 1.2 m up on its spawn (the other side of the spawn ring);
+               barometer and contacts, no position, no gun (the arena is off, so nothing can fire). Pass: the
+               target crashes from a collision with the player within 60 s (a ``collision`` event that lists
+               it as crashed). Score: passed 60 + 40 * (60 - time) / 50 (clamped); otherwise
+               40 * max(0, 1 - closest approach / 4 m).
 =============  ==============================================================================================
 """
 
@@ -374,6 +379,59 @@ class PursuitScorer(_Base):
         }
 
 
+@dataclass
+class RamScorer(_Base):
+    """WP-B (07 §3): the target must crash from a collision with the player."""
+
+    limit_s: float = 60.0
+    rammed_at: float | None = None
+    v_rel: float | None = None
+    closest: float | None = None
+    target_crashed: bool = False
+
+    def begin(self, run: Headless) -> None:
+        super().begin(run)
+        self.target = run.slot("target")
+
+    def on_sample(self, run: Headless, t: float, tr: Truth) -> None:
+        other = run.truth(self.target)
+        d = math.dist(tr.p, other.p)
+        self.closest = d if self.closest is None else min(self.closest, d)
+        if other.crashed:
+            self.target_crashed = True
+
+    def event(self, run: Headless, t: float, event: dict[str, Any]) -> None:
+        if event.get("kind") != "collision" or self.rammed_at is not None:
+            return
+        data = event.get("data") or {}
+        ids = {data.get("a"), data.get("b")}
+        if self.target.vid in (data.get("crashed") or ()) and self.player.vid in ids:
+            self.rammed_at = t
+            self.v_rel = data.get("v_rel")
+            run.mark("rammed", self.target.vid, by=self.player.vid)
+
+    def finished(self, run: Headless, t: float) -> bool:
+        return self.rammed_at is not None or self.crashed_at is not None or self.target_crashed
+
+    def result(self, run: Headless) -> dict[str, Any]:
+        passed = self.rammed_at is not None and self.rammed_at <= self.limit_s
+        if passed:
+            assert self.rammed_at is not None
+            score = 60.0 + 40.0 * _clamp((self.limit_s - self.rammed_at) / 50.0)
+        else:
+            score = 40.0 * max(0.0, 1.0 - (self.closest if self.closest is not None else 99.0) / 4.0)
+        return {
+            "score": round(score, 1),
+            "passed": passed,
+            "metrics": {
+                **self.common(),
+                "rammed_s": None if self.rammed_at is None else round(self.rammed_at, 2),
+                "v_rel": self.v_rel,
+                "closest_m": None if self.closest is None else round(self.closest, 3),
+            },
+        }
+
+
 class DuelScorer(RoundScorer):
     """A one-against-one round judged from the player's side."""
 
@@ -555,6 +613,26 @@ def _duel(level: str) -> Callable[[int, Slot, Slot | None], tuple[Scenario, list
     return build
 
 
+def _ram(seed: int, player: Slot, _o: Slot | None) -> tuple[Scenario, list[Slot]]:
+    """WP-B (07 §3): the player against a hovering target, no guns."""
+    a, b = ring_spawns(2, seed)
+    _player(player, seed, {"preset": "typical", "seed": entrant_seed(seed, 0) % 1_000_000}, a)
+    tgt = Slot(
+        program=targetmod.HOVER_PROGRAM_ID,
+        rev=1,
+        name=targetmod.HOVER_NAME,
+        source=targetmod.HOVER_SOURCE,
+        role="target",
+        team="target",
+        airframe={"preset": "ideal", "seed": 0},
+        spawn=b,
+        seed=entrant_seed(seed, 1),
+        sensors=dict(UWB),
+    )
+    sc = Scenario("ram_easy", seed, 60.0, sensors=dict(ARENA_SENSORS), arena=dict(DUEL_ARENA), guns=False)
+    return sc, [player, tgt]
+
+
 def _cage_rings() -> list[dict[str, Any]]:
     return scaled(COURSES["cage-loop"], (3.0, 3.0, 2.0))["rings"]
 
@@ -726,6 +804,33 @@ CHALLENGES: dict[str, Challenge] = {
                 ("medium", "medium", "中等", (8231, 27449, 50311)),
                 ("hard", "hard", "困难", (9467, 31627, 64171)),
             )
+        ),
+        # WP-B (07 §3)
+        Challenge(
+            id="ram_easy",
+            name_en="Ram (easy)",
+            name_zh="撞击（简单）",
+            scene_en=(
+                "A target hovers 1.2 m up on the far side of the arena (radius 8 m, ceiling 4 m). Barometer "
+                "and contacts, no position source. No gun: nothing can fire."
+            ),
+            scene_zh=(
+                "靶机在场地另一侧 1.2 m 高处悬停（半径 8 m，天花板 4 m）。"
+                "有气压计与接触传感器，无定位源；无武器，不能开火。"
+            ),
+            goal_en="Bring the target down by flying into it within 60 s.",
+            goal_zh="60 s 内撞毁靶机。",
+            scoring_en=(
+                "Passed: 60 + 40 x (60 - time) / 50. Otherwise 40 x max(0, 1 - closest approach / 4 m)."
+            ),
+            scoring_zh="通过：60 + 40 × (60 − 用时) / 50；未通过：40 × max(0, 1 − 最近距离 / 4 m)。",
+            duration_s=60.0,
+            visible=(1, 2),
+            hidden=(7307, 18329, 44101),
+            build=_ram,
+            scorer=RamScorer,
+            sensors=ARENA_SENSORS,
+            info={"arena": dict(DUEL_ARENA), "target": {"alt_m": 1.2}, "fire": False},
         ),
     )
 }

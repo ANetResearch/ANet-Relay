@@ -1,5 +1,5 @@
-"""The scripted target of the ``pursuit`` challenge (06 §3.2): a judge-owned program, flown through the same
-program engine and stick path as any other.
+"""The scripted targets of the ``pursuit`` and ``ram_easy`` challenges (06 §3.2, 07 §3): judge-owned programs,
+flown through the same program engine and stick path as any other.
 
 It climbs to ``alt`` on the barometer, then follows a circle of ``radius`` around the arena centre at
 ``speed`` (counter-clockwise from its spawn on the east side), using the UWB position source and holding a
@@ -60,4 +60,63 @@ def step(obs, ctx):
     return Sticks(roll=roll, pitch=pitch, yaw=yaw, throttle=thr)
 """
 
-__all__ = ["NAME", "NAME_ZH", "PROGRAM_ID", "SOURCE"]
+# WP-B (07 §3): the hovering target of ``ram_easy``: climb, then hold its spawn point on the position source.
+HOVER_PROGRAM_ID = "judge_hover_target"
+HOVER_NAME = "Hover target"
+HOVER_NAME_ZH = "悬停靶机"
+
+HOVER_SOURCE = """# Hover target (judge): climb, then hold the point above the spawn on the position source.
+import math
+
+PARAMS = {"alt": 1.2, "kp": 0.25, "kd": 0.18, "ki": 0.12, "hold": 0.8, "damp": 1.5}
+
+
+def init(ctx):
+    ctx.mem["trim"] = 0.5
+    ctx.mem["home"] = None
+    ctx.state = "climb"
+
+
+def altitude(obs, ctx):
+    p = ctx.params
+    error = clamp(p["alt"] - obs.alt, -0.5, 0.5)
+    if obs.airborne:
+        ctx.mem["trim"] = clamp(ctx.mem["trim"] + p["ki"] * error * obs.dt, 0.25, 0.8)
+    return clamp(ctx.mem["trim"] + p["kp"] * error - p["kd"] * obs.vz, 0.0, 1.0)
+
+
+def step(obs, ctx):
+    p = ctx.params
+    if obs.alt is None or obs.vz is None or not obs.armed:
+        ctx.state = "idle"
+        return Sticks(throttle=0.0)
+    thr = altitude(obs, ctx)
+    yaw = clamp(-wrap180(obs.yaw or 0.0) * 0.02, -0.4, 0.4)
+    if obs.pos is None or obs.vel is None:
+        return Sticks(yaw=yaw, throttle=thr)
+    if ctx.mem["home"] is None:
+        ctx.mem["home"] = (obs.pos[0], obs.pos[1])
+    ctx.state = "hold"
+    home = ctx.mem["home"]
+    ve = p["hold"] * (home[0] - obs.pos[0])
+    vn = p["hold"] * (home[1] - obs.pos[1])
+    ae = clamp(p["damp"] * (ve - obs.vel[0]), -2.0, 2.0)
+    an = clamp(p["damp"] * (vn - obs.vel[1]), -2.0, 2.0)
+    h = math.radians(obs.yaw or 0.0)
+    fwd = an * math.cos(h) + ae * math.sin(h)
+    right = ae * math.cos(h) - an * math.sin(h)
+    pitch = clamp(fwd / 9.81 / 0.5236, -0.3, 0.3)
+    roll = clamp(right / 9.81 / 0.5236, -0.3, 0.3)
+    return Sticks(roll=roll, pitch=pitch, yaw=yaw, throttle=thr)
+"""
+
+__all__ = [
+    "HOVER_NAME",
+    "HOVER_NAME_ZH",
+    "HOVER_PROGRAM_ID",
+    "HOVER_SOURCE",
+    "NAME",
+    "NAME_ZH",
+    "PROGRAM_ID",
+    "SOURCE",
+]
