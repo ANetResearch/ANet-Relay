@@ -5,6 +5,137 @@ All notable changes to ANet Relay are documented in this file. The format follow
 [Semantic Versioning](https://semver.org/). Each release section is published as the
 GitHub Release notes for its tag.
 
+## [0.4.0] - 2026-11-08
+
+Onboard programs that fly at 50 Hz on the stick path, judged challenges and duels
+between programs, agents limited to sticks by default, simulators with real
+airframe defects, a Lab workspace for writing programs, Copilot that writes and
+judges them, an opening that starts with the film, and Copilot keys stored without
+the system keychain.
+
+### Added
+
+- Onboard programs: restricted Python with `PARAMS`, `init(ctx)` and
+  `step(obs, ctx) -> Sticks`, checked against an AST whitelist and run at 50 Hz
+  in an isolated program host process (`--program-host`; on POSIX with memory
+  and CPU limits, no network or file access). The observation holds only what
+  the aircraft measures: attitude, rates, accelerations, barometric height, a
+  position only where a source exists, battery, motor output, arena state and
+  contacts. The `relay` library provides `clamp`, `wrap180`, `lerp`,
+  `deadband`, `lowpass`, `PID`, `StateMachine` and `Timer`. Programs are stored
+  in `<data_dir>/programs/` with the last 50 revisions, their author and a note,
+  parameters and unit tests. Six read-only examples: `hover_trim`, `liftoff`,
+  `patrol` and `hunter_easy`, `hunter_medium`, `hunter_hard`.
+- Deployment: `POST /vehicles/{id}/program` in `pilot` or `copilot` mode, stop,
+  resume, live parameters (`PATCH .../program/params`), the log ring and
+  `vehicle.program` in the snapshot. The program holds the sticks as the
+  controller `PROGRAM · <name>` on the stage and the relay timeline. Possession
+  pauses it at once and release never resumes it; emergency stop, link loss and
+  a crash stop it; the 0.8 s stick timeout is unchanged. Real aircraft accept a
+  program only after the operator turns on **Allow programs on this aircraft**
+  (confirm word `PROGRAM`, reset on every connection) and preflight passes, and
+  their `fire` output is ignored. Seven `program_*` events.
+- Challenges and duels: nine challenges (`liftoff`, `hover`, `heading`,
+  `square`, `rings`, `pursuit`, `duel_easy`, `duel_medium`, `duel_hard`) with
+  visible and hidden seeds whose airframes differ, scored 0 to 100 on the
+  simulator's true state, with best results and history. Duels of 2 to 8
+  programs in free-for-all rounds with a pairwise Elo ladder. Both run in a
+  headless evaluator in its own worker process (`--judge-worker`), at most two
+  jobs at once, deterministic for the same scenario, seeds and revisions. Every
+  judged seed and round keeps a 10 Hz trace of every aircraft and its rounds.
+  `GET /challenges`, `POST /challenges/{id}/submit`, `POST /duels`,
+  `GET /jobs/{id}`, `DELETE /jobs/{id}`, `GET /ladder`, `GET /traces/{id}` and
+  the event `judge_finished`.
+- Agent flight level: the setting `agent_flight_level`, `sticks` by default
+  and changed only by the operator (Settings → Safety). At `sticks` sessions fly
+  with sticks, arming, the manual modes, fire, programs and the safety actions;
+  take-off, hold, move, turn, go-to, return, velocity and attitude skills, plans
+  that contain them, re-fly and the hold and automatic modes return 403
+  `sticks_only` over REST, WebSocket and MCP. `land` stays available as a safety
+  action. The flight MCP server lists 13 of its 20 tools at this level. `full`
+  restores every v0.3 tool; the operator's own controls are never limited.
+- Airframe defects for simulators with hover assist off: payload, centre of
+  gravity offset (an integrator corrects 70 % of the lean within 2 s), level
+  calibration error, unequal motors, a damaged propeller and IMU noise. Presets
+  `ideal`, `typical` (the default, setting `sim_airframe_default`) and `rough`,
+  or custom values, deterministic by seed. `PUT` and `GET /sims/{id}/airframe`,
+  `airframe` on `POST /sims` and on a program deployment, the event
+  `sim_airframe_changed` and an **Airframe** group in the inspector. The
+  snapshot and the observation carry only the preset and the seed. Simulators
+  answer `SCALED_IMU` on request.
+- Lab workspace (key `4`, `⌘4` / `Ctrl+4`): programs, examples and challenges on
+  the left; a CodeMirror editor with Python highlighting and problems from the
+  validator in the middle; Params, Tests, Run, Judge, Duel and History tabs on
+  the right. A **Program** group in the Control tab of the inspector deploys,
+  stops and resumes. Judged runs and duels replay with every aircraft and its
+  rounds on the Fly stage with the Records replay controls.
+- Copilot and MCP: 18 program, judge, duel and airframe tools in Copilot
+  (`program_list`, `program_get`, `program_create`, `program_update`,
+  `program_validate`, `program_test`, `program_deploy`, `program_stop`,
+  `program_resume`, `program_params`, `program_status`, `program_log`,
+  `challenge_list`, `challenge_submit`, `job_status`, `duel_run`, `ladder`,
+  `airframe_set`) plus `relay_arm`, `relay_disarm` and `relay_mode`, in every
+  tool scope (109 tools in all, 101 at `sticks`). Writing programs needs no
+  approval; deploying or resuming one on a real aircraft waits for the
+  operator. At `sticks` Copilot drops the high-level flight tools and its
+  instructions say that stable flight needs a program. The same tools and
+  `program_guide` in the application MCP server (now 61 tools), and the same
+  calls in the Python SDK.
+- Documentation: the onboard programs guide (`docs/programs.md`,
+  `docs/programs.zh-CN.md`), the compact programs guide shared with Copilot and
+  MCP (`docs/programs-guide.md`), and the program, judge, airframe and flight
+  level sections of the agent API guide.
+- Opening films: eight cooperation films (formation, hand-over, ground and air,
+  a quadruped launching a drone, a VTOL leading a swarm, assembly into a
+  formation, a gate race and a night search).
+
+### Changed
+
+- Opening: the film now comes first, then the diagonal voxel cut and the voxel
+  logo, a short hold and the reveal (about 7.8 s for the director's cut, 4.4 s
+  for the short cut). The director's cut plays a cooperation film and the
+  chase; the short cut rotates through all ten films by launch count. Skipping
+  goes straight to the complete logo, held at least 300 ms. While the backend
+  starts, the logo waits with the progress line under it.
+- Copilot API keys: stored in `copilot-secrets.json` in the app data folder,
+  encrypted with AES-256-GCM under a random per-installation key
+  (`copilot-secrets.key`); both files and `copilot.json` are readable only by
+  the user's account. The system keychain is an opt-in setting
+  (Settings → Copilot → Store keys in the system keychain); Relay calls it
+  only then, never at start-up, when Copilot opens or when its status is read.
+  A key saved in the keychain by an earlier version is not decrypted on its
+  own: Copilot offers **Enter key again** or **Keep using keychain**. Relay
+  never reads or needs the login password.
+- Simulators created without an airframe get the `typical` airframe with a
+  random seed, so with hover assist off they no longer hover hands-off.
+- Agents and scripts that flew with skills or plans need the agent flight level
+  `full`; at the default `sticks` they receive 403 `sticks_only`.
+
+### Removed
+
+- The `cut-breakthrough` opening film.
+
+### Downloads
+
+| Platform | File |
+|---|---|
+| macOS (Apple silicon) | `ANet-Relay-0.4.0-mac-arm64.dmg`, `ANet-Relay-0.4.0-mac-arm64.zip` |
+| macOS (Intel) | `ANet-Relay-0.4.0-mac-x64.dmg`, `ANet-Relay-0.4.0-mac-x64.zip` |
+| Linux x64 | `ANet-Relay-0.4.0-linux-x64.AppImage`, `ANet-Relay-0.4.0-linux-x64.tar.gz` |
+| Windows x64 | `ANet-Relay-0.4.0-win-x64.exe` |
+
+Verify downloads against `SHA256SUMS.txt`. The macOS build is signed and
+notarized: drag it to Applications and open it. The Windows installer is not
+code-signed; when SmartScreen warns, choose More info → Run anyway.
+
+### Known limitations
+
+- The headless evaluator reaches more than 10 times real time with one
+  aircraft, 6 to 8 times with two and about 4 times with four.
+- The built-in programs pass `liftoff`, `hover` and `duel_easy`; `heading`,
+  `square`, `rings` and `pursuit` have no built-in program that passes them yet.
+- On Windows the program host runs without memory and CPU limits.
+
 ## [0.3.1] - 2026-11-07
 
 ### Fixed
@@ -319,6 +450,7 @@ xattr -dr com.apple.quarantine "/Applications/ANet Relay.app"
 - Stick timing has been verified on simulators and fake aircraft; check stick
   directions with the propellers removed before the first flight of each aircraft.
 
+[0.4.0]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.4.0
 [0.3.1]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.3.1
 [0.3.0]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.3.0
 [0.2.1]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.2.1

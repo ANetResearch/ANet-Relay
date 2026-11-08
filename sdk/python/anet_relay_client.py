@@ -29,7 +29,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 __all__ = ["DEFAULT_BASE", "RelayClient", "RelayError"]
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 DEFAULT_BASE = os.environ.get("RELAY_API", "http://127.0.0.1:8765")
 API = "/api/v1"

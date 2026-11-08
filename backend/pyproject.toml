@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "anet-relay-backend"
-version = "0.3.1"
+version = "0.4.0"
 description = "ANet Relay backend: MAVLink fleet link, human/agent control authority, simulator, ring courses and the local agent API."
 requires-python = ">=3.12,<3.13"
 license = { text = "ANet Open Source License (see LICENSE)" }

@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
-VERSION = "0.3.1"
+VERSION = "0.4.0"
 APP_NAME = "ANet Relay"
 API_PREFIX = "/api/v1"
 
