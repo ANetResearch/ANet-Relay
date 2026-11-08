@@ -121,4 +121,29 @@ describe('relay timeline model (02 §4.5)', () => {
     m.applySnapshot({ t: 3, vehicles: [vehicle('a', {})] })
     expect(m.lanes.has('b')).toBe(false)
   })
+  // WP-1 (06 §2.6): an onboard program is its own segment, labelled with the program's name
+  it('shows program segments from events and snapshots', () => {
+    const m = new TimelineModel()
+    m.applyEvents([
+      ev(10, 'claim_started', 'q1', { name: 'harness-a' }),
+      ev(12, 'program_started', 'q1', { program: 'hover_trim', name: 'Hover trim', rev: 1 }),
+      ev(20, 'possession_started', 'q1', { input: 'keyboard' }),
+      ev(25, 'possession_released', 'q1'),
+      ev(26, 'program_resumed', 'q1', { name: 'Hover trim' }),
+      ev(30, 'program_stopped', 'q1', { name: 'Hover trim', reason: 'stopped' }),
+    ])
+    const l = m.lanes.get('q1')!
+    expect(l.segs.map((s) => [s.kind, s.label, s.start])).toEqual([
+      ['agent', 'harness-a', 10],
+      ['program', 'Hover trim', 12],
+      ['human', 'keyboard', 20],
+      ['none', null, 25],
+      ['program', 'Hover trim', 26],
+      ['agent', 'harness-a', 30],
+    ])
+    const snap = new TimelineModel()
+    const program = { name: 'Patrol' } as Vehicle['program']
+    snap.applySnapshot({ t: 1, vehicles: [vehicle('q2', { controller: 'program', program })] })
+    expect(snap.segmentAt('q2', 1)).toMatchObject({ kind: 'program', label: 'Patrol' })
+  })
 })

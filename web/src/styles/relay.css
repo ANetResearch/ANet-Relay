@@ -77,6 +77,7 @@
   @keyframes relay-fade-in { from { opacity: 0; } }
   .pill[data-variant="human"] { background: var(--g50); color: var(--g950); border-color: var(--g50); }
   .pill[data-variant="agent"] { background: var(--g800); color: var(--g200); border: 1px dashed var(--g500); }
+  .pill[data-variant="program"] { background: var(--g800); color: var(--g100); border-color: var(--g300); } /* WP-1 */
   .pill[data-variant="waiting"] { background: var(--g800); color: var(--g500); border: 1px dashed var(--g500); }
   .pill[data-variant="disconnected"] { background: var(--g850); color: var(--g300); border-color: var(--g500); }
   .pill [data-icon] { width: 10px; height: 10px; }

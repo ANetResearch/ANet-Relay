@@ -200,6 +200,7 @@ export const en8 = {
   'records.onStage': 'Replay on stage',
   'records.speed': '{n}×',
   'records.ctl.agent': 'Agent',
+  'records.ctl.program': 'Program', // WP-1
   'records.ctl.human': 'Operator',
   'records.ctl.none': 'No controller',
   'records.exported': '{file} saved',
@@ -451,6 +452,7 @@ export const zh8: Record<Key8, string> = {
   'records.onStage': '在舞台上回放',
   'records.speed': '{n}×',
   'records.ctl.agent': '智能体',
+  'records.ctl.program': '程序', // WP-1
   'records.ctl.human': '操作员',
   'records.ctl.none': '无控制者',
   'records.exported': '已保存 {file}',

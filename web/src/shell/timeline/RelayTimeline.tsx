@@ -41,6 +41,7 @@ function inputText(lang: Lang, token: string | null): string {
 function describe(lang: Lang, s: Segment | null): string {
   if (!s || s.kind === 'none') return translate(lang, 'tl.seg.idle')
   if (s.kind === 'agent') return translate(lang, 'tl.seg.agent', { name: s.label ?? '' })
+  if (s.kind === 'program') return translate(lang, 'tl.seg.program', { name: s.label ?? '' }) // WP-1
   const base = translate(lang, 'tl.seg.human', { input: inputText(lang, s.label) })
   return s.waiting ? `${base} · ${translate(lang, 'tl.seg.waiting', { name: s.waiting })}` : base
 }
@@ -63,17 +64,17 @@ function draw(ctx: CanvasRenderingContext2D, w: number, lanes: Lane[], now: numb
       const x0 = Math.max(0, x(s.start))
       const x1 = Math.min(w, x(s.end ?? now))
       if (x1 <= 0 || x0 >= w || x1 - x0 < 0.5) continue
-      ctx.fillStyle = s.kind === 'human' ? pal['--g50'] : pal['--g500']
+      ctx.fillStyle = s.kind === 'human' ? pal['--g50'] : s.kind === 'program' ? pal['--g300'] : pal['--g500']
       ctx.fillRect(x0, y, x1 - x0, BAR_H)
-      if (s.kind === 'agent' && s.label && x1 - x0 > 56) {
+      if ((s.kind === 'agent' || s.kind === 'program') && s.label && x1 - x0 > 56) {
         ctx.save()
         ctx.beginPath()
         ctx.rect(x0, y, x1 - x0, BAR_H)
         ctx.clip()
-        ctx.fillStyle = pal['--g50']
+        ctx.fillStyle = s.kind === 'program' ? pal['--g950'] : pal['--g50']
         ctx.font = '500 9px "JetBrains Mono Variable", ui-monospace, monospace'
         ctx.textBaseline = 'middle'
-        ctx.fillText(s.label, x0 + 4, y + BAR_H / 2 + 0.5)
+        ctx.fillText(s.kind === 'program' ? `PROGRAM · ${s.label}` : s.label, x0 + 4, y + BAR_H / 2 + 0.5)
         ctx.restore()
       }
       if (s.kind === 'human' && s.waiting) {

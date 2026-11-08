@@ -14,8 +14,10 @@
   .rec-cursor { stroke: var(--g50); stroke-width: 1; }
   .rec-seg-agent { fill: var(--g500); }
   .rec-seg-human { fill: var(--g50); }
+  .rec-seg-program { fill: var(--g300); } /* WP-1 */
   .rec-seg-label-agent { fill: var(--g950); font-family: var(--font-mono); }
   .rec-seg-label-human { fill: var(--g950); font-family: var(--font-mono); }
+  .rec-seg-label-program { fill: var(--g950); font-family: var(--font-mono); }
   .rec-tick { stroke: var(--g600); stroke-width: 1; }
   .rec-mark { fill: var(--g50); }
   .rec-mark-stroke { fill: none; stroke: var(--g50); stroke-width: 1.25; }

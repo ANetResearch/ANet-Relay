@@ -66,6 +66,8 @@ function base(over: Partial<V> & Pick<V, 'id' | 'label' | 'kind'>): V {
     procedure: null, // bench procedure (WP-B)
     record_session: null,
     sim: sim ? { hover_assist: true, turbulence: 0.3 } : null,
+    program: null, // WP-1 onboard program
+    programs_allowed: sim,
     ...over,
   }
 }

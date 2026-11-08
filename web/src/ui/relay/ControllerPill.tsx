@@ -8,14 +8,14 @@ import { cn } from '@/lib/utils'
 import { Icon } from '@/ui/icons'
 import { motionReduced } from '@/ui/motion/tier'
 
-export type PillVariant = 'human' | 'agent' | 'waiting' | 'disconnected' | 'idle'
+export type PillVariant = 'human' | 'agent' | 'program' | 'waiting' | 'disconnected' | 'idle'
 
 export interface PillSpec {
   variant: PillVariant
   label: string
 }
 
-type Ctl = Pick<Vehicle, 'controller' | 'claim' | 'possession'>
+type Ctl = Pick<Vehicle, 'controller' | 'claim' | 'possession'> & { program?: { name: string } | null }
 
 /** Input source label: KEYBOARD, SCREEN, PAD 1. */
 export function useInputLabel(): (p: NonNullable<Vehicle['possession']>) => string {
@@ -37,6 +37,7 @@ export function usePillSpec(v: Ctl, padDisconnected = false): PillSpec {
     return { variant: 'human', label: `${t('ctrl.you')} · ${inputLabel(v.possession)}` }
   }
   if (v.controller === 'agent' && v.claim) return { variant: 'agent', label: `${t('ctrl.agent')} · ${v.claim.name}` }
+  if (v.controller === 'program') return { variant: 'program', label: `${t('ctrl.program')} · ${v.program?.name ?? ''}` } // WP-1
   return { variant: 'idle', label: t('status.idle') }
 }
 

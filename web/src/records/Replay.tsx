@@ -43,7 +43,7 @@ function frameAt(d: RecordDetail, t: number): ReplayFrame | null {
     z: s.z[i],
     alt: s.alt[i],
     throttle: s.throttle[i],
-    controller: ctl === 'human' || ctl === 'agent' || ctl === 'none' ? ctl : null,
+    controller: ctl === 'human' || ctl === 'agent' || ctl === 'program' || ctl === 'none' ? ctl : null,
   }
 }
 
@@ -134,7 +134,7 @@ function CourseRuns({ d }: { d: RecordDetail }) {
                   </TableCell>
                   <TableCell className="num py-1 text-[var(--g400)]">{r.splits.map((s) => split(s)).join('  ') || '—'}</TableCell>
                   <TableCell className="py-1 text-[var(--g300)]">
-                    {r.controller === 'agent' ? t('records.ctl.agent') : r.controller === 'human' ? t('records.ctl.human') : '—'}
+                    {r.controller === 'agent' ? t('records.ctl.agent') : r.controller === 'human' ? t('records.ctl.human') : r.controller === 'program' ? t('records.ctl.program') : '—'}
                   </TableCell>
                 </TableRow>
               )
@@ -308,7 +308,7 @@ export function Replay({ record, focusT }: { record: RecordSummary; focusT: numb
                   {clock(cur)} · {duration(elapsed)} / {duration(total)}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-hud-sub text-[var(--g400)]">
-                  {[s.mode[i], ctlAt ? t(ctlAt === 'agent' ? 'records.ctl.agent' : ctlAt === 'human' ? 'records.ctl.human' : 'records.ctl.none') : null, nearest].filter(Boolean).join(' · ')}
+                  {[s.mode[i], ctlAt ? t(ctlAt === 'agent' ? 'records.ctl.agent' : ctlAt === 'human' ? 'records.ctl.human' : ctlAt === 'program' ? 'records.ctl.program' : 'records.ctl.none') : null, nearest].filter(Boolean).join(' · ')}
                 </span>
                 {!onStage ? (
                   <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setOnStage(true)}>

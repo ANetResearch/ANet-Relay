@@ -12,7 +12,7 @@ const byName = (a: V, b: V) => (collator ? collator.compare(a.label, b.label) : 
 /** Worst link first: the aircraft that needs attention leads the list. */
 const LINK_RANK: Record<Vehicle['link']['state'], number> = { lost: 0, delayed: 1, waiting: 2, ok: 3, offline: 4 }
 /** Human first, then agent, then idle: who is flying what. */
-const CTL_RANK: Record<Vehicle['controller'], number> = { human: 0, agent: 1, none: 2 }
+const CTL_RANK: Record<Vehicle['controller'], number> = { human: 0, agent: 1, program: 1, none: 2 }
 
 /** Lowest battery first; unknown battery last. */
 function batteryValue(v: V): number {

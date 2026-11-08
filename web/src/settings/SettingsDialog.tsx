@@ -39,6 +39,7 @@ interface BackendSettings {
   airborne_alert: boolean
   auto_params: boolean
   agents_app_control: boolean
+  agent_flight_level?: 'sticks' | 'full' // WP-1 (06 §5), operator only
   retention_days: number
   listen_port: number
   bridge_port: number
@@ -270,6 +271,18 @@ function Safety({ s, save }: { s: BackendSettings; save(p: Partial<BackendSettin
       </Row>
       <Row label={t('set.agentsAppControl')} hint={t('set.agentsAppControlHint')}>
         <Switch checked={s.agents_app_control} onCheckedChange={(v) => void save({ agents_app_control: v })} aria-label={t('set.agentsAppControl')} data-agents-app-control="" />
+      </Row>
+      <Row label={t('set.agentFlightLevel')} hint={t('set.agentFlightLevelHint')}>
+        <NativeSelect
+          value={s.agent_flight_level ?? 'sticks'}
+          onChange={(e) => void save({ agent_flight_level: e.target.value === 'full' ? 'full' : 'sticks' })}
+          aria-label={t('set.agentFlightLevel')}
+          className="w-44 [&_select]:h-7 [&_select]:text-[12px]"
+          data-agent-flight-level=""
+        >
+          <NativeSelectOption value="sticks">{t('set.agentFlightLevel.sticks')}</NativeSelectOption>
+          <NativeSelectOption value="full">{t('set.agentFlightLevel.full')}</NativeSelectOption>
+        </NativeSelect>
       </Row>
       <Row label={t('set.stickTimeout')} hint={t('set.stickTimeoutHint')}>
         <ReadOnly value={`${s.stick_timeout_s.toFixed(1)} s`} />

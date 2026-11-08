@@ -3,7 +3,8 @@
 // is the truth when an event was missed). Pure and framework-free; RelayTimeline.tsx renders it on a canvas.
 import type { Fleet, RelayEvent, Vehicle } from '@/api'
 
-export type SegKind = 'agent' | 'human' | 'none'
+// WP-1: 'program' = an onboard program flies (label: program name)
+export type SegKind = 'agent' | 'human' | 'program' | 'none'
 
 /** Human input as a language-neutral token: "keyboard", "screen", "pad:1". */
 export type InputToken = string
@@ -12,7 +13,7 @@ export interface Segment {
   start: number
   end: number | null
   kind: SegKind
-  /** agent: session name; human: input token; none: null */
+  /** agent: session name; human: input token; program: program name; none: null */
   label: string | null
   /** agent name whose claim is suspended while a human flies */
   waiting: string | null
@@ -53,9 +54,10 @@ export function inputToken(p: { input: string; pad?: number | null } | null | un
   return p.input === 'gamepad' ? `pad:${p.pad ?? 1}` : p.input
 }
 
-export function targetOf(v: Pick<Vehicle, 'controller' | 'claim' | 'possession'>): Target {
+export function targetOf(v: Pick<Vehicle, 'controller' | 'claim' | 'possession'> & { program?: Vehicle['program'] }): Target {
   if (v.controller === 'human' && v.possession) return { kind: 'human', label: inputToken(v.possession), waiting: v.claim?.name ?? null }
   if (v.controller === 'agent' && v.claim) return { kind: 'agent', label: v.claim.name, waiting: null }
+  if (v.controller === 'program') return { kind: 'program', label: v.program?.name ?? null, waiting: null } // WP-1
   return { kind: 'none', label: null, waiting: null }
 }
 
@@ -170,6 +172,18 @@ export class TimelineModel {
         this.tick(l, e.t, 'handback', name)
         break
       }
+      // WP-1: onboard programs (the snapshot reconciles; events give the exact boundary)
+      case 'program_started':
+      case 'program_resumed': {
+        const name = typeof d.name === 'string' ? d.name : null
+        if (cur?.kind !== 'human') this.transition(l, e.t, { kind: 'program', label: name, waiting: null })
+        break
+      }
+      case 'program_stopped':
+      case 'program_paused':
+      case 'program_faulted':
+        if (cur?.kind === 'program') this.transition(l, e.t, l.claim ? { kind: 'agent', label: l.claim, waiting: null } : { kind: 'none', label: null, waiting: null })
+        break
       case 'armed':
         this.setInterval(l.armed, e.t, true)
         break

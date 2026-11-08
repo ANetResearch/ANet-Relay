@@ -6,6 +6,7 @@ import * as React from 'react'
 import * as THREE from 'three'
 import { Html } from '@react-three/drei'
 import type { ThreeEvent } from '@react-three/fiber'
+import type { Vehicle } from '@/api'
 import { useT } from '@/i18n'
 import { useRelay } from '@/store/relay'
 import { armedTone, criticalTone } from '@/store/red'
@@ -184,9 +185,10 @@ interface Facts {
   human: boolean
   lostS: number | null
   critical: boolean
-  controller: 'none' | 'human' | 'agent'
+  controller: Vehicle['controller']
   claim: { name: string; suspended: boolean } | null
   possession: { input: 'keyboard' | 'screen' | 'gamepad'; pad: number | null } | null
+  program: string | null // WP-1: name of the onboard program
 }
 
 /** Narrow, discrete facts for the label and colours; changes at most once a second while the link is lost. */
@@ -201,6 +203,7 @@ function useFacts(id: string): Facts | null {
       controller: v.controller,
       claim: v.claim ? { name: v.claim.name, suspended: v.claim.suspended } : null,
       possession: v.possession ? { input: v.possession.input, pad: v.possession.pad } : null,
+      program: v.program?.name ?? null,
     }
     return JSON.stringify(f)
   })
@@ -213,7 +216,12 @@ function Label({ id, facts, fallback, bind }: { id: string; facts: Facts | null;
   const owner = useRedOwner()
   const spec = usePillSpec(
     facts
-      ? { controller: facts.controller, claim: facts.claim ? { session_id: '', since: 0, ...facts.claim } : null, possession: facts.possession ? { ...facts.possession, since: 0 } : null }
+      ? {
+          controller: facts.controller,
+          claim: facts.claim ? { session_id: '', since: 0, ...facts.claim } : null,
+          possession: facts.possession ? { ...facts.possession, since: 0 } : null,
+          program: facts.program ? { name: facts.program } : null,
+        }
       : { controller: 'none', claim: null, possession: null },
   )
   const hold = useHold(id)

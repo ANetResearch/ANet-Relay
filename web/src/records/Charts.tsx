@@ -169,21 +169,25 @@ export function ControlTrack({ segments, scale, end, cursor, onScrub }: { segmen
           <i className="inline-block h-2 w-3 rounded-[1px] bg-[var(--g50)]" aria-hidden="true" />
           {t('records.ctl.human')}
         </span>
+        <span className="flex items-center gap-1.5 text-[10px] text-[var(--g400)]">
+          <i className="inline-block h-2 w-3 rounded-[1px] bg-[var(--g300)]" aria-hidden="true" />
+          {t('records.ctl.program')}
+        </span>
       </div>
       {w > 0 ? (
         <svg className="lf-svg rec-svg" width={w} height={LANE} viewBox={`0 0 ${w} ${LANE}`} {...scrub} role="img" aria-label={t('records.track.control')}>
           <rect x={GUTTER} y={0} width={Math.max(0, w - GUTTER - RIGHT)} height={LANE} className="lf-track" />
           {segments.map((s, i) => {
-            if (s.controller !== 'agent' && s.controller !== 'human') return null
+            if (s.controller !== 'agent' && s.controller !== 'human' && s.controller !== 'program') return null
             const x0 = scale.x(Math.max(s.start, scale.t0))
             const x1 = scale.x(Math.min(s.end ?? end, scale.t1))
             const width = Math.max(1, x1 - x0)
-            const agent = s.controller === 'agent'
+            const kind = s.controller === 'agent' ? 'agent' : s.controller === 'program' ? 'program' : 'human'
             return (
               <g key={i}>
-                <rect x={x0} y={2} width={width} height={LANE - 4} rx={1} className={agent ? 'rec-seg-agent' : 'rec-seg-human'} />
+                <rect x={x0} y={2} width={width} height={LANE - 4} rx={1} className={`rec-seg-${kind}`} />
                 {s.who && width > 48 ? (
-                  <text x={x0 + 4} y={LANE / 2 + 3} fontSize="9" className={agent ? 'rec-seg-label-agent' : 'rec-seg-label-human'}>
+                  <text x={x0 + 4} y={LANE / 2 + 3} fontSize="9" className={`rec-seg-label-${kind}`}>
                     {s.who}
                   </text>
                 ) : null}

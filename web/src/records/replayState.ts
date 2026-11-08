@@ -17,7 +17,7 @@ export interface ReplayFrame {
   alt: number | null
   /** 0..100 */
   throttle: number | null
-  controller: 'none' | 'human' | 'agent' | null
+  controller: 'none' | 'human' | 'agent' | 'program' | null
 }
 
 export interface ReplayState {

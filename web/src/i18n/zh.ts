@@ -19,6 +19,7 @@ export const zh: Record<MessageKey, string> = {
   'status.crashed': '已坠毁',
   'ctrl.you': '我',
   'ctrl.agent': '智能体',
+  'ctrl.program': '程序', // WP-1
   'ctrl.waiting': '等待中',
   'ctrl.disconnected': '已断开',
   'input.keyboard': '键盘',
@@ -429,6 +430,7 @@ export const zh: Record<MessageKey, string> = {
   'tl.now': '现在',
   'tl.empty': '飞机接入后，每架会在这里占一条泳道。',
   'tl.seg.agent': '{name} 控制中',
+  'tl.seg.program': '程序 · {name}', // WP-1
   'tl.seg.human': '人工控制 · {input}',
   'tl.seg.waiting': '{name} 等待中',
   'tl.seg.idle': '无控制者',
@@ -491,6 +493,11 @@ export const zh: Record<MessageKey, string> = {
   'set.airborneAlert': '飞机在空中且无人控制时告警',
   'set.agentsAppControl': '允许智能体操作 Relay',
   'set.agentsAppControlHint': '智能体会话可以操作界面、扫描网络、管理飞机与模拟机、修改设置和全部急停。附身与起飞前确认始终由操作员完成。',
+  // WP-1 agent flight level (06 §5)
+  'set.agentFlightLevel': '智能体飞行等级',
+  'set.agentFlightLevelHint': '仅摇杆：智能体会话只能通过摇杆、手动类模式和机载程序飞行，降落与急停始终可用。完全：可使用全部技能、计划和模式。',
+  'set.agentFlightLevel.sticks': '仅摇杆',
+  'set.agentFlightLevel.full': '完全',
   'set.stickTimeout': '杆量超时',
   'set.chaseOnCourse': '开始航线时切到追尾视角',
   'set.listenPort': '监听端口',

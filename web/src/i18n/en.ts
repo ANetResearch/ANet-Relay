@@ -20,6 +20,7 @@ export const en = {
   'status.crashed': 'Crashed',
   'ctrl.you': 'YOU',
   'ctrl.agent': 'AGENT',
+  'ctrl.program': 'PROGRAM', // WP-1
   'ctrl.waiting': 'waiting',
   'ctrl.disconnected': 'disconnected',
   'input.keyboard': 'KEYBOARD',
@@ -449,6 +450,7 @@ export const en = {
   'tl.now': 'now',
   'tl.empty': 'Aircraft appear here with a lane each once they connect.',
   'tl.seg.agent': '{name} in control',
+  'tl.seg.program': 'PROGRAM · {name}', // WP-1
   'tl.seg.human': 'Operator in control · {input}',
   'tl.seg.waiting': '{name} waiting',
   'tl.seg.idle': 'No controller',
@@ -513,6 +515,11 @@ export const en = {
   'set.airborneAlert': 'Alert when an aircraft is airborne with no controller',
   'set.agentsAppControl': 'Allow agents to operate Relay',
   'set.agentsAppControlHint': 'Agent sessions may change the interface, scan the network, manage aircraft and simulators, change settings and stop all. Possession and preflight confirmations stay with the operator.',
+  // WP-1 agent flight level (06 §5)
+  'set.agentFlightLevel': 'Agent flight level',
+  'set.agentFlightLevelHint': 'Sticks only: agent sessions fly with sticks, manual modes and onboard programs; land and emergency stop stay available. Full: every skill, plan and mode.',
+  'set.agentFlightLevel.sticks': 'Sticks only',
+  'set.agentFlightLevel.full': 'Full',
   'set.stickTimeout': 'Stick timeout',
   'set.chaseOnCourse': 'Switch to chase view when a course starts',
   'set.listenPort': 'Listen port',
