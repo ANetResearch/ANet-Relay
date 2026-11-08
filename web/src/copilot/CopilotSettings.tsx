@@ -1,5 +1,6 @@
 // Settings → Copilot (03 §16): endpoint, model and API key of the built-in agent. The key is written once and
 // never read back into the renderer: the shell only reports whether one is stored and its last four characters.
+// Storage (06 §9): the app data folder by default, the system keychain only when the operator turns it on.
 import * as React from 'react'
 import type { CopilotApi, CopilotConfig, CopilotToolScope } from '@/api'
 import { notify } from '@/shell/notify'
@@ -7,6 +8,8 @@ import { Button } from '@/ui/components/ui/button'
 import { Input } from '@/ui/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/ui/components/ui/native-select'
 import { Slider } from '@/ui/components/ui/slider'
+import { Switch } from '@/ui/components/ui/switch'
+import { KeyMigrationNotice } from './KeyMigration'
 import { useCopilot } from './store'
 import { useCPT, type CopilotKey } from './strings'
 
@@ -138,7 +141,21 @@ export function CopilotSettings({ Row }: { Row: RowComponent }) {
           </Button>
         ) : null}
       </Row>
-      {cfg && !cfg.secureStorage ? <p className="py-1 text-hud-sub text-[var(--g400)]">{t('cps.keyInsecure')}</p> : null}
+      {cfg?.keyMigration ? (
+        <KeyMigrationNotice onEnter={() => document.querySelector<HTMLInputElement>('[data-copilot-key]')?.focus()} onKeep={() => void save({ keyStorage: 'keychain' })} busy={busy !== null} />
+      ) : null}
+      <Row label={t('cps.keyStorage')} hint={t('cps.keyStorageHint')} wide>
+        <Switch
+          checked={cfg?.keyStorage === 'keychain'}
+          disabled={busy !== null || !cfg}
+          onCheckedChange={(v) => void save({ keyStorage: v ? 'keychain' : 'file' })}
+          aria-label={t('cps.keyStorage')}
+          data-copilot-keychain=""
+        />
+      </Row>
+      <p className="py-1 text-hud-sub text-[var(--g400)]" data-copilot-key-storage={cfg?.keyStorage ?? 'file'}>
+        {t(cfg?.keyStorage === 'keychain' ? 'cps.keyStorage.keychain' : 'cps.keyStorage.file')} {t('cps.keyPassword')}
+      </p>
       <div className="flex flex-wrap items-center gap-2 py-3">
         <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => void save({ api, baseUrl, model, ...(key ? { apiKey: key } : {}) })} data-copilot-save="">
           {t('cps.save')}

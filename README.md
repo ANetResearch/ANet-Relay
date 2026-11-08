@@ -125,7 +125,7 @@ with RelayClient() as relay:                         # http://127.0.0.1:8765
     relay.land("sim-1")
 ```
 
-**Copilot.** The desktop app has a built-in agent: open it with the **Copilot** button or `⌘J` / `Ctrl+J`, set the endpoint, model and API key in **Settings → Copilot**, and ask, for example, "take off to 1 m, hover, go forward 1 m and back, turn 45° and land". Copilot is a separate floating window: it stays above other applications, can be dragged anywhere on screen, and the main window and other applications stay usable while it is shown. It works through the same session, claim and API as any agent, with flight, device-level and application tool sets chosen in Settings, and on a real aircraft shows an approval card before every motion command and device write. The key is stored encrypted with the system keychain.
+**Copilot.** The desktop app has a built-in agent: open it with the **Copilot** button or `⌘J` / `Ctrl+J`, set the endpoint, model and API key in **Settings → Copilot**, and ask, for example, "take off to 1 m, hover, go forward 1 m and back, turn 45° and land". Copilot is a separate floating window: it stays above other applications, can be dragged anywhere on screen, and the main window and other applications stay usable while it is shown. It works through the same session, claim and API as any agent, with flight, device-level and application tool sets chosen in Settings, and on a real aircraft shows an approval card before every motion command and device write. The key is stored encrypted in the app data folder, readable only by your user account; the system keychain is an opt-in setting, and Relay never asks for your login password.
 
 Language models connect through MCP:
 

@@ -13,6 +13,7 @@ import { useCT, type ControlKey } from '@/control/strings'
 import { useCopilot, type CopilotItem } from './store'
 import { cpt, useCPT, type CopilotKey } from './strings'
 import { toolLabel } from './toolLabels'
+import { KeyMigrationNotice } from './KeyMigration'
 import { VoxelLoader } from '@/ui/voxel/VoxelLoader'
 import './copilot.css'
 
@@ -394,6 +395,29 @@ function Setup() {
   )
 }
 
+/** 06 §9: a key from an earlier version waits in the keychain; nothing is decrypted until the operator chooses. */
+function KeyMigration() {
+  const [busy, setBusy] = React.useState(false)
+  const keep = async () => {
+    const b = bridge()
+    if (!b) return
+    setBusy(true)
+    try {
+      useCopilot.getState().setConfig(await b.saveConfig({ keyStorage: 'keychain' }))
+    } catch {
+      // the settings page shows the reason (for example no keychain on this system)
+      void b.openSettings()
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="px-3 py-2">
+      <KeyMigrationNotice onEnter={() => void bridge()?.openSettings()} onKeep={() => void keep()} busy={busy} />
+    </div>
+  )
+}
+
 /** Header actions and content of the Copilot conversation; CopilotWindow supplies the frame and the drag header. */
 export function CopilotBody() {
   const t = useCPT()
@@ -409,6 +433,8 @@ export function CopilotBody() {
           <div className="px-3 py-4" data-copilot-loading="">
             <VoxelLoader size={24} />
           </div>
+        ) : config.keyMigration && !config.hasKey ? (
+          <KeyMigration />
         ) : !config.configured || !config.hasKey ? (
           <Setup />
         ) : items.length === 0 ? (

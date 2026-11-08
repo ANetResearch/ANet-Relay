@@ -524,6 +524,6 @@ interface Alert { id: string; vehicle: string | null; level: "info" | "warn" | "
 - **位置**：Electron 主进程（`electron/copilot/`），基于 `@earendil-works/pi-agent-core` 与 `pi-ai` 1.4.0，打包时用 esbuild 合并为单文件 `agent.bundle.mjs`（附依赖许可清单）。渲染进程只负责对话界面，经 preload 暴露的 `window.relay.copilot` 收发消息与事件。
 - **接入方式**：与外部智能体完全相同：打开名为 `copilot` 的会话（5 s 心跳续约），调用前自动认领目标飞机；附身时与其他智能体一样被挂起。工具为 `relay_fleet`、`relay_vehicle`、`relay_takeoff`、`relay_hover`、`relay_move`、`relay_yaw`、`relay_land`、`relay_plan`（轮询进度并回传）、`relay_cancel`、`relay_release`、`relay_stop`；不提供原始杆量。
 - **审批**：目标为真机时，运动类工具（起飞、悬停、平移、转向、降落、序列）在执行前向界面发出审批请求，操作员批准后才发送；120 s 未处理视为拒绝，被拒绝的调用以错误返回给模型。
-- **配置**：接口类型（`openai-completions` / `anthropic-messages` / `openai-responses`）、Base URL、模型 ID、API Key。Key 用 Electron `safeStorage`（系统钥匙串）加密存于用户数据目录 `copilot.json`；系统不提供加密时以 0600 权限明文保存并在设置中提示。Key 不回传渲染进程，界面只显示是否已保存及末 4 位。
+- **配置**：接口类型（`openai-completions` / `anthropic-messages` / `openai-responses`）、Base URL、模型 ID、API Key。Key 存储方式见 06 §9（v0.4.0 起）：缺省为用户数据目录中 AES-256-GCM 加密的 `copilot-secrets.json`（密钥 `copilot-secrets.key`，均 0600 / 仅当前用户 ACL）；Electron `safeStorage`（系统钥匙串）仅在用户开启"使用系统钥匙串保存密钥"后使用。Key 不回传渲染进程，界面只显示是否已保存及末 4 位。
 - **测试**：`electron/copilot/test` 用 pi 的 faux provider 跑通工具调用；e2e `copilot.e2e.ts` 用本地伪造的 OpenAI 兼容 SSE 端点走完设置、模拟机序列与真机审批拒绝。
 

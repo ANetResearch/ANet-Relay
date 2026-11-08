@@ -95,7 +95,7 @@ test('copilot: settings, a sequence on a simulator, approval for a real aircraft
   await page.locator('[data-copilot-test]').click()
   await expect(page.locator('[data-copilot-result]')).toContainText('Connected', { timeout: 15000 })
   const cfg = await page.evaluate(() => (window as unknown as { relay: { copilot: { getConfig(): Promise<Record<string, unknown>> } } }).relay.copilot.getConfig())
-  expect(cfg).toMatchObject({ baseUrl: llm.url, model: 'fake-model', hasKey: true, keyHint: 'abcd' })
+  expect(cfg).toMatchObject({ baseUrl: llm.url, model: 'fake-model', hasKey: true, keyHint: 'abcd', keyStorage: 'file', keyMigration: null })
   expect(JSON.stringify(cfg)).not.toContain('sk-test')
   await page.screenshot({ path: path.join(shots, '01-settings.png') })
   await page.keyboard.press('Escape')
