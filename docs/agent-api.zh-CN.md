@@ -124,6 +124,8 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | `POST /vehicles/{id}/course/stop` | 控制者 | 中止航线 |
 | `POST /vehicles/{id}/stop` | 控制者 | 急停 |
 | `POST /sims/{id}/assist` | 控制者或操作员 | `{on}`：模拟机悬停辅助（见下）；真机返回 `sim_only` |
+| `PUT /sims/{id}/airframe` | 控制者或操作员 | `{preset \| params, seed?}`：模拟机机体缺陷（见下） |
+| `GET /sims/{id}/airframe` | 控制者或操作员 | 机体缺陷的全部数值、取值范围与悬停油门 |
 
 ### 技能
 
@@ -268,6 +270,25 @@ POST /api/v1/vehicles/sim-1/plan
 
 创建时用 `POST /sims {count, autopilot, position, hover_assist}` 设定；`POST /sims/{id}/assist {on}` 切换（操作员、控制该机的会话，或在无人控制该机且操作员允许应用控制时的任意会话）。快照携带 `vehicle.sim = {hover_assist, turbulence}`（真机为 null）；事件 `sim_assist_changed` 报告变化。MCP：`app_sim_assist`；SDK：`sim_assist(id, on)` 与 `add_sims(count, autopilot, hover_assist)`。
 
+### 模拟机机体缺陷
+
+悬停辅助关闭时，模拟机还带有真实飞机的装配缺陷（设计 06 §4）；悬停辅助开启时这些缺陷不生效，辅助模型保持不变。
+
+| 参数 | 范围 | 效果 |
+|---|---|---|
+| `mass_kg`、`payload_kg` | 0.08–0.30、0–0.20 kg | 起飞重量：悬停油门上升（0.12 kg 为 0.50，0.16 kg 约 0.63）；超过推力上限（0.288 kg）则无法起飞 |
+| `cg_offset_cm` | [前, 右]，±3 cm | 姿态环向重心一侧倾斜（每厘米 2.5°）；离地后积分项按 2 s 时间常数修正其 70 %，剩余 30 % 为稳态倾角，飞机持续向重心偏移方向漂移；落地后积分清零。偏移过大时电机饱和，未修正部分增大 |
+| `level_trim_deg` | [横滚, 俯仰]，±5° | 水平校准误差：杆量回中时实际倾斜该角度而 ATTITUDE 读数为水平，因此漂移；加速度计（SCALED_IMU）在阻力建立前仍能感到推力分量 |
+| `motor_gain` | 4 × ±0.08 | 电机 1–4（ArduPilot X 型顺序）的效率偏差：偏航漂移（同样按 70 % / 2 s 修正）与轻微倾斜扰动；SERVO_OUTPUT_RAW 中各电机输出不同 |
+| `prop_damage`、`damaged_prop` | 0–1、电机 1–4 | 该桨推力最多下降 30 %；满油门时 VIBRATION 最多增加 50 m/s²，加速度计与陀螺噪声增加，姿态抖动 |
+| `imu_noise` | 0–5 | ATTITUDE（倍数为 1 时横滚俯仰 0.08°、航向 0.15°、角速度 0.6°/s）与 SCALED_IMU（0.06 m/s²）的噪声倍数 |
+
+预设按种子（0 – 2^31−1）确定性生成：`ideal`（全零，即悬停辅助关闭时的原模型）、`typical`（缺省：重心偏移 0.25 cm 以内、水平误差 0.4° 以内、电机 2 % 以内、噪声 ×1）、`rough`（重心偏移 0.7–1.4 cm、水平误差 1–2°、电机 8 % 以内、一支桨受损 20–50 %、载重 5–20 g、噪声 ×2：朴素悬停 20 s 漂移数米）与 `custom`（显式数值）。
+
+`PUT /sims/{id}/airframe` 接受 `{preset}`（新种子）、`{preset, seed}`、`{seed}`（按当前预设重新生成；自定义机体保留数值）或 `{params: {...}}`（任意子集，叠加在所给预设或当前数值上，结果为 `custom`）。允许已解锁、飞行中修改，积分项从零开始。返回值与 `GET` 相同：`{id, preset, seed, params, active, hover_throttle, limits}`；`hover_throttle` 为满电、离开地效时的水平悬停油门，无法起飞时为 null。权限：操作员、控制该机的会话，或在无人控制该机且操作员允许应用控制时的任意会话；真机返回 `sim_only`，`invalid_request` 指出出错的字段。`POST /sims` 以 `airframe` 接受同样的结构（本次新增的每架模拟机都使用它）；未给出时每架新模拟机采用设置 `sim_airframe_default`（`ideal` | `typical` | `rough`，缺省 `typical`）并使用新的随机种子。
+
+快照只携带 `vehicle.sim.airframe = {preset, seed}`：具体数值不出现在快照与程序观测中，只能在飞行中体现。事件 `sim_airframe_changed`（`data.preset`、`data.seed`、`data.by`）。模拟机在收到 `SET_MESSAGE_INTERVAL` 或 `REQUEST_MESSAGE` 时发送 `SCALED_IMU`（机载板 FRD 坐标的比力，单位 mG；角速度 mrad/s），它不属于任何数据流分组。
+
 ### 局域网联机
 
 联机场地（05 §7）让同一广播域内的 Relay 终端互见彼此的模拟机、发射虚拟子弹并计分。在窗口中加入（顶栏 **联机**，设置 `peer_enabled`），只使用一个独立的 UDP 套接字（设置 `peer_port`，缺省 47114，组播 `239.255.71.14`、TTL 1，另加子网定向广播）。来自网络的任何数据都不会进入控制路径：杆量、解锁、认领、参数、技能、动作序列与设备级接口均不受对端数据包驱动。**真机永不加入联机场地，也永不受虚拟子弹影响**：只有模拟机会被共享、可以射击、可以被命中。
@@ -311,6 +332,7 @@ POST /api/v1/vehicles/sim-1/plan
 | `stop` / `stop_all` | 急停 |
 | `refly_started` / `refly_finished` / `refly_failed` | 再飞 |
 | `sim_assist_changed` | 模拟机悬停辅助已切换（`data.hover_assist`） |
+| `sim_airframe_changed` | 模拟机机体缺陷已设置（`data.preset`、`data.seed`、`data.by`） |
 | `peer_joined` / `peer_left` / `arena_hit` / `arena_down` | 局域网联机：终端加入或离开、我方命中或被命中、模拟机被击落 |
 | `device_command` / `motor_test` / `motor_test_stopped` / `actuator_set` / `rc_override` / `message_interval` / `home_set` / `rebooting` / `calibration_started` / `terminated` | 设备级操作 |
 | `app_command` | 会话或操作员执行的界面动作（`data.action`、`data.by`） |

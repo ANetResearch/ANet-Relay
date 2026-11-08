@@ -32,7 +32,11 @@ class SimOps:
         if v.kind != "sim":
             return None
         sim = v.driver.sim
-        return {"hover_assist": sim.hover_assist, "turbulence": round(sim.turbulence, 2)}
+        return {
+            "hover_assist": sim.hover_assist,
+            "turbulence": round(sim.turbulence, 2),
+            "airframe": sim.airframe.ref(),  # WP-2a (06 §4): preset and seed only
+        }
 
     def _apply_sim_settings(self) -> None:
         """Push a changed turbulence strength to every simulator (hover assist stays per aircraft)."""

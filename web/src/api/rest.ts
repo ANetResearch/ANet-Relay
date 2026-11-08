@@ -2,7 +2,7 @@
 // {"error": {code, message_en, message_zh, detail}} become RelayApiError. The transport is swappable so the dev
 // fixture (src/dev/fixtures.ts) can serve the same calls without a backend.
 import { env } from './env'
-import type { Alert, ErrorBody, Fleet, Health, ProcedureCatalogue, ProcedureRun, TestRuns, Vehicle } from './types'
+import type { Alert, ErrorBody, Fleet, Health, ProcedureCatalogue, ProcedureRun, SimAirframe, TestRuns, Vehicle } from './types'
 import type { RelayEvent } from './events'
 
 export class RelayApiError extends Error {
@@ -144,6 +144,9 @@ export const api = {
   resetSim: (id: string) => op<Ok>('POST', `/sims/${enc(id)}/reset`),
   // WP-C: hover assist on one simulator (05 §5.2); allowed armed and in flight.
   simAssist: (id: string, on: boolean) => op<Ok>('POST', `/sims/${enc(id)}/assist`, { on }),
+  // WP-2a: airframe defects of one simulator (06 §4); the values are for the operator and the controller only.
+  simAirframe: (id: string) => op<SimAirframe>('GET', `/sims/${enc(id)}/airframe`),
+  setSimAirframe: (id: string, body: AirframeBody) => op<SimAirframe>('PUT', `/sims/${enc(id)}/airframe`, body),
   sessions: () => request<unknown>('GET', '/sessions'),
   bridge: (ip: string) => op<unknown>('GET', `/bridges/${enc(ip)}`),
   configureBridge: (ip: string, body: Record<string, unknown>) => op<Ok>('POST', `/bridges/${enc(ip)}/configure`, body),
@@ -167,6 +170,9 @@ export const api = {
   testRun: (runId: number) => request<ProcedureRun>('GET', `/test-runs/${enc(String(runId))}`),
   testRunExportUrl: (runId: number, fmt: 'md' | 'json') => `${env().apiBase}/test-runs/${enc(String(runId))}/export?fmt=${fmt}`,
 } as const
+
+/** PUT /sims/{vid}/airframe (WP-2a, 06 §4): a generated preset from a seed, or values that make it custom. */
+export type AirframeBody = { preset?: SimAirframe['preset']; params?: Partial<SimAirframe['params']>; seed?: number }
 
 /** Start options of a bench procedure (05 §4.4). */
 export type ProcedureOptions = { hover_s?: number; skip?: string[]; auto_answer?: boolean }

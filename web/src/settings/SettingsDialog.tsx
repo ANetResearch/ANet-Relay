@@ -23,6 +23,7 @@ import type { BootMode } from '@/app/bootFilm'
 import { CopilotSettings } from '@/copilot/CopilotSettings'
 import { ControllerSettings, SimSettings } from '@/control/ControllerSettings'
 import { ArenaSettings } from '@/arena/ArenaSettings'
+import { AirframeDefaultSetting } from '@/inspector/AirframeSetting' // WP-2a
 import './settings.css'
 
 export interface SettingsDialogProps {
@@ -54,6 +55,7 @@ interface BackendSettings {
   // WP-C simulator flight model (05 §5.2)
   sim_hover_assist?: boolean
   sim_turbulence?: number
+  sim_airframe_default?: string // WP-2a (06 §4)
 }
 
 const SECTIONS: { id: SettingsSection; key: AnyKey; icon: Parameters<typeof Icon>[0]['icon'] }[] = [
@@ -288,6 +290,7 @@ function Safety({ s, save }: { s: BackendSettings; save(p: Partial<BackendSettin
         <ReadOnly value={`${s.stick_timeout_s.toFixed(1)} s`} />
       </Row>
       <SimSettings s={s} save={save} Row={Row} />
+      <AirframeDefaultSetting value={s.sim_airframe_default} save={save} Row={Row} />
     </>
   )
 }

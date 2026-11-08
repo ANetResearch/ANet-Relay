@@ -105,6 +105,8 @@ class Settings:
     # WP-1 (06 §5): what agent sessions may fly. "sticks": sticks, manual modes, programs and safety
     # actions only; "full": the v0.3 high-level skills as well. Only the operator changes it.
     agent_flight_level: str = "sticks"
+    # WP-2a airframe defects (06 §4): the preset new simulators take (ideal | typical | rough), new seed each.
+    sim_airframe_default: str = "typical"
 
     RESTART_FIELDS: ClassVar[tuple[str, ...]] = ("listen_port",)
     READ_ONLY: ClassVar[dict[str, float]] = {"stick_timeout_s": STICK_TIMEOUT_S}
@@ -169,6 +171,8 @@ class Settings:
             return "sim_turbulence"
         if self.agent_flight_level not in ("sticks", "full"):  # WP-1
             return "agent_flight_level"
+        if self.sim_airframe_default not in ("ideal", "typical", "rough"):  # WP-2a
+            return "sim_airframe_default"
         if not 1 <= self.retention_days <= 3650:
             return "retention_days"
         for name in ("listen_port", "bridge_port"):

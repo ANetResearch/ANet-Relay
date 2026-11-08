@@ -124,6 +124,11 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     "listen_error": ("UDP listen failed: {error}", "UDP 监听失败：{error}"),
     # WP-C simulator flight model (05 §5.2).
     "sim_assist_changed": ("{vehicle} hover assist {detail}.", "{vehicle} 悬停辅助{detail}。"),
+    # WP-2a airframe defects (06 §4).
+    "sim_airframe_changed": (
+        "{vehicle} airframe set to {preset_en} (seed {seed}).",
+        "{vehicle} 机体已设为{preset_zh}（种子 {seed}）。",
+    ),
     # bench procedures (WP-B, 05 §4.4)
     "procedure_started": ("{vehicle} started {title_en}.", "{vehicle} 开始{title_zh}。"),
     "procedure_step": (

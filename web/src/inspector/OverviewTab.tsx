@@ -12,6 +12,7 @@ import { VideoSourceGroup } from '@/video/VideoPip'
 import { useT8, type AnyKey } from '@/fleet/copy'
 import { useLength } from '@/settings/prefs'
 import { HealthBlock } from './HealthBlock'
+import { AirframeGroup } from './AirframeGroup' // WP-2a
 import { Block } from './parts'
 import { useInspectorTab } from './tabs'
 
@@ -133,6 +134,7 @@ export function OverviewTab({ vehicleId }: { vehicleId: string }) {
         </Readout>
       </div>
       <HealthBlock health={v.health} />
+      <AirframeGroup vehicleId={vehicleId} />
       <Block title={t('video.group')}>
         <VideoSourceGroup vehicleId={vehicleId} />
       </Block>

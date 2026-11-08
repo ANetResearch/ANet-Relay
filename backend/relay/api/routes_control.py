@@ -55,7 +55,12 @@ def confirm(request: Request, vid: str, body: schemas.ConfirmBody) -> dict[str, 
 @router.post("/sims", tags=["sims"], dependencies=APP, responses=ERRORS)
 def add_sims(request: Request, body: schemas.SimsBody | None = None) -> dict[str, Any]:
     body = body or schemas.SimsBody()
-    return {"added": service(request).add_sims(body.count, body.autopilot, body.position, body.hover_assist)}
+    airframe = body.airframe.model_dump(exclude_none=True) if body.airframe else None  # WP-2a
+    return {
+        "added": service(request).add_sims(
+            body.count, body.autopilot, body.position, body.hover_assist, airframe
+        )
+    }
 
 
 @router.delete("/sims", tags=["sims"], dependencies=APP, responses=ERRORS)
@@ -72,6 +77,23 @@ def reset_sim(request: Request, vid: str) -> dict[str, Any]:
 def sim_assist(request: Request, vid: str, body: schemas.SimAssistBody) -> dict[str, Any]:
     """Hover assist on or off (05 §5.2): the operator or the controller; allowed armed and in flight."""
     return service(request).set_sim_assist(vid, body.on, actor(request, "control"), app_control=True)
+
+
+# WP-2a airframe defects (06 §4): the operator or the controller (an agent also on an uncontrolled simulator
+# while app control is on), the same rule as the hover-assist switch.
+@router.put("/sims/{vid}/airframe", tags=["sims"], response_model=schemas.SimAirframe, responses=ERRORS)
+def set_sim_airframe(request: Request, vid: str, body: schemas.AirframeBody) -> dict[str, Any]:
+    """Set the airframe defects: ``{preset | params, seed?}``; allowed armed and in flight."""
+    spec = body.model_dump(exclude_none=True)
+    if not spec.get("preset") and "params" not in spec and "seed" not in spec:
+        raise err("invalid_request", reason="airframe needs preset or params")
+    return service(request).set_sim_airframe(vid, spec, actor(request, "control"), app_control=True)
+
+
+@router.get("/sims/{vid}/airframe", tags=["sims"], response_model=schemas.SimAirframe, responses=ERRORS)
+def get_sim_airframe(request: Request, vid: str) -> dict[str, Any]:
+    """The full airframe values; programs never see them (06 §4)."""
+    return service(request).get_sim_airframe(vid, actor(request, "other"), app_control=True)
 
 
 # ---------------------------------------------------------------------------- authority

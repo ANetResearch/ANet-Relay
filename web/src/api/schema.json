@@ -47,6 +47,9 @@
     "ArenaMessage": {
       "$ref": "#/$defs/ArenaMessage"
     },
+    "SimAirframe": {
+      "$ref": "#/$defs/SimAirframe"
+    },
     "UiState": {
       "$ref": "#/$defs/UiState"
     },
@@ -102,6 +105,7 @@
     "SessionOpened",
     "ArenaView",
     "ArenaMessage",
+    "SimAirframe",
     "UiState",
     "UiCommandMessage",
     "UiStateMessage",
@@ -118,6 +122,86 @@
   ],
   "additionalProperties": false,
   "$defs": {
+    "AirframeParams": {
+      "properties": {
+        "mass_kg": {
+          "description": "airframe mass without payload, kg",
+          "type": "number"
+        },
+        "payload_kg": {
+          "description": "payload, kg; take-off weight is mass_kg + payload_kg",
+          "type": "number"
+        },
+        "cg_offset_cm": {
+          "description": "[forward, right] centre-of-gravity offset, cm",
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "level_trim_deg": {
+          "description": "[roll, pitch] level calibration error, deg",
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "motor_gain": {
+          "description": "efficiency deviation of motors 1-4 (0.05 = +5 %)",
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "prop_damage": {
+          "description": "damage of one propeller 0..1 (thrust loss, vibration)",
+          "type": "number"
+        },
+        "damaged_prop": {
+          "description": "the damaged propeller's motor number 1-4",
+          "type": "integer"
+        },
+        "imu_noise": {
+          "description": "attitude, rate and acceleration noise multiplier",
+          "type": "number"
+        }
+      },
+      "required": [
+        "mass_kg",
+        "payload_kg",
+        "cg_offset_cm",
+        "level_trim_deg",
+        "motor_gain",
+        "prop_damage",
+        "damaged_prop",
+        "imu_noise"
+      ],
+      "title": "AirframeParams",
+      "type": "object"
+    },
+    "AirframeRef": {
+      "description": "The snapshot's view of a simulator airframe: preset and seed only, never the values (06 §4).",
+      "properties": {
+        "preset": {
+          "enum": [
+            "ideal",
+            "typical",
+            "rough",
+            "custom"
+          ],
+          "type": "string"
+        },
+        "seed": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "preset",
+        "seed"
+      ],
+      "title": "AirframeRef",
+      "type": "object"
+    },
     "Alert": {
       "properties": {
         "id": {
@@ -956,6 +1040,7 @@
             "refly_finished",
             "refly_failed",
             "sim_assist_changed",
+            "sim_airframe_changed",
             "procedure_started",
             "procedure_step",
             "procedure_waiting",
@@ -3097,6 +3182,65 @@
       "title": "Signs",
       "type": "object"
     },
+    "SimAirframe": {
+      "description": "GET / PUT /sims/{vid}/airframe: the full values (operator or controller).",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "preset": {
+          "enum": [
+            "ideal",
+            "typical",
+            "rough",
+            "custom"
+          ],
+          "type": "string"
+        },
+        "seed": {
+          "type": "integer"
+        },
+        "params": {
+          "$ref": "#/$defs/AirframeParams"
+        },
+        "active": {
+          "description": "the defects act now (hover assist off)",
+          "type": "boolean"
+        },
+        "hover_throttle": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "level hover throttle 0..1 out of ground effect at full battery; null: cannot lift"
+        },
+        "limits": {
+          "additionalProperties": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "description": "[min, max] of every parameter",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "preset",
+        "seed",
+        "params",
+        "active",
+        "hover_throttle",
+        "limits"
+      ],
+      "title": "SimAirframe",
+      "type": "object"
+    },
     "SimView": {
       "description": "Simulator flight model (05 §5.2, WP-C); null on real aircraft.",
       "properties": {
@@ -3107,11 +3251,15 @@
         "turbulence": {
           "description": "turbulence strength 0..1 (acts only with hover assist off)",
           "type": "number"
+        },
+        "airframe": {
+          "$ref": "#/$defs/AirframeRef"
         }
       },
       "required": [
         "hover_assist",
-        "turbulence"
+        "turbulence",
+        "airframe"
       ],
       "title": "SimView",
       "type": "object"
