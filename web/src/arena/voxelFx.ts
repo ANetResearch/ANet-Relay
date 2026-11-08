@@ -368,7 +368,10 @@ export class VoxelFx {
     for (const c of burstVoxels(b, age, coreS, lifeS, scratch)) {
       if (c.size <= 0) continue
       tmpP.set(c.x, c.y, c.z)
-      if (c.tone === 'core') {
+      if (c.tone === 'core' && (b.still || b.kind === 'still')) {
+        // reduced motion: a plain still white cube, no glow
+        this.cube(tmpP, c.size, corePx, this.head)
+      } else if (c.tone === 'core') {
         this.halo(tmpP, c.size * 1.8, corePx * 1.8, this.mine, c.glow * (big ? 0.6 : 1))
         this.cube(tmpP, c.size, corePx, this.head)
       } else if (c.tone === 'heat') {

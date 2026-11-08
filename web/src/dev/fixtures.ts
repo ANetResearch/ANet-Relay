@@ -17,6 +17,17 @@ import { busyBoard, startDogfightFixture } from './dogfightFixture'
 
 type V = Vehicle
 
+/** WP-C v0.5: the cage loop's rings (ENU m, yaw degrees, radius m) for the course layer. */
+const CAGE_LOOP = {
+  id: 'cage-loop', name_en: 'Cage loop', name_zh: '笼内环线', preset: true,
+  rings: [
+    { c: [0, 1, 1], yaw_deg: 90, r: 0.45 },
+    { c: [1.2, 0, 1.2], yaw_deg: 0, r: 0.45 },
+    { c: [0, -1, 1], yaw_deg: 90, r: 0.45 },
+    { c: [-1.2, 0, 1.2], yaw_deg: 0, r: 0.45 },
+  ],
+}
+
 const sensors = (baro = true): V['sensors'] => [
   { name: 'gyro', present: true, enabled: true, healthy: true },
   { name: 'accel', present: true, enabled: true, healthy: true },
@@ -238,6 +249,8 @@ export function startFixture(name: FixtureName): () => void {
       if (fought !== undefined) return fought
       if (path.startsWith('/arena/leaderboard')) return busyBoard((new URLSearchParams(path.split('?')[1] ?? '').get('by') ?? 'downs') as Parameters<typeof busyBoard>[0])
       if (path === '/scenarios/dogfight') return { running: false, started_at: null, ends_at: null, config: null, aircraft: [] }
+      // WP-C v0.5: ring geometry of SIM-2's course, so the voxel rings show in the fixture
+      if (path === '/courses') return { courses: [CAGE_LOOP] }
       // WP-D: the arena toggle and settings
       if (path === '/settings' && method === 'PUT') {
         arena.settings(body)
@@ -310,6 +323,8 @@ export function startFixture(name: FixtureName): () => void {
   const tick = setInterval(() => {
     now = Date.now() / 1000
     k++
+    // WP-C v0.5: SIM-2 grazes the tube of its next ring every 4 s (the ring flashes white)
+    if (name !== 'dogfight' && name !== 'empty' && k % 40 === 0) emit('ring_touch' as RelayEvent['kind'], 'sim-2', { vehicle: 'sim-2', ring: 2, point: [0.4, 1.2, 1.1] })
     const w = Math.sin(k / 9)
     fleet = {
       ...fleet,

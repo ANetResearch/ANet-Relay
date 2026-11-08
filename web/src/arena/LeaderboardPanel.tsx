@@ -149,9 +149,9 @@ export function LeaderboardPanel({ top, fallback }: { top: number; fallback: Rea
                 <colgroup>
                   <col style={{ width: 22 }} />
                   <col />
-                  <col style={{ width: '32%' }} />
+                  <col style={{ width: '29%' }} />
                   <col style={{ width: 54 }} />
-                  <col style={{ width: 50 }} />
+                  <col style={{ width: 48 }} />
                 </colgroup>
                 <TableHeader>
                   <TableRow>

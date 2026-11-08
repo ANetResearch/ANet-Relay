@@ -7,7 +7,7 @@
   .arena-board [data-slot="table-row"][data-selected] { background: transparent; box-shadow: inset 2px 0 0 var(--g50); }
   .arena-board-empty { padding-top: 4px; font-size: 11px; line-height: 16px; color: var(--g500); }
   /* WP-C v0.5 (07 §5): the leaderboard card replaces the terminal scoreboard while the backend has a leaderboard */
-  .arena-leaderboard { position: absolute; right: 16px; width: 348px; max-width: calc(100% - 32px); pointer-events: auto;
+  .arena-leaderboard { position: absolute; right: 16px; width: 344px; max-width: calc(100% - 32px); pointer-events: auto;
     transition: top var(--duration-fast) var(--ease-smooth-out); }
   .arena-leaderboard [data-slot="table-row"][data-selected] { background: transparent; box-shadow: inset 2px 0 0 var(--g50); }
   .arena-leaderboard [data-slot="table-row"][data-selected] [data-slot="table-cell"] { font-weight: 600; }

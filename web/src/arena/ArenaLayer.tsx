@@ -20,6 +20,7 @@ import { damageTone, type RedOwner } from '@/store/red'
 import { useRedOwner } from '@/store/selectors'
 import { live } from '@/stage/live'
 import { enuToScene, expAlpha, sceneToEnu, smoothAngle } from '@/stage/math'
+import { framingExtras } from '@/stage/scene/CameraRig'
 import { stageQuality } from '@/stage/scene/gpu'
 import { fallbackTemplate, instantiate, MODEL_URL, prepareTemplate, PROP_KEY, type AirframeTemplate } from '@/stage/scene/model'
 import { imageTextures } from '@/stage/scene/StageCanvas'
@@ -179,6 +180,7 @@ class RemotePool {
   private readonly body = new THREE.MeshStandardMaterial({ color: token('g400').color, metalness: 0.2, roughness: 0.7 })
   private readonly lamp = new THREE.MeshBasicMaterial({ color: token('g200').color, toneMapped: false })
   private readonly lampGeo = new THREE.SphereGeometry(0.0045, 10, 8)
+  private framed = ''
 
   constructor(private readonly template: AirframeTemplate) {}
 
@@ -206,10 +208,38 @@ class RemotePool {
       c.update(targets.get(key)?.v, lead, a, dt)
       if (c.root.visible) remoteBodies.set(key, c.root.position)
     }
+    this.frame()
+  }
+
+  /** WP-C v0.5: the overview keeps the remote aircraft in frame too (whole metres, so it only moves on real change). */
+  private frame(): void {
+    if (!remoteBodies.size) {
+      if (this.framed) framingExtras.delete('arena')
+      this.framed = ''
+      return
+    }
+    let minX = Infinity
+    let maxX = -Infinity
+    let minY = Infinity
+    let maxY = -Infinity
+    let maxZ = 0
+    for (const p of remoteBodies.values()) {
+      const [x, y, z] = sceneToEnu(p.x, p.y, p.z)
+      minX = Math.min(minX, Math.floor(x))
+      maxX = Math.max(maxX, Math.ceil(x))
+      minY = Math.min(minY, Math.floor(y))
+      maxY = Math.max(maxY, Math.ceil(y))
+      maxZ = Math.max(maxZ, Math.ceil(z))
+    }
+    const key = `${minX},${maxX},${minY},${maxY},${maxZ}`
+    if (key === this.framed) return
+    this.framed = key
+    framingExtras.set('arena', { minX, maxX, minY, maxY, maxZ })
   }
 
   dispose(): void {
     remoteBodies.clear()
+    framingExtras.delete('arena')
     this.body.dispose()
     this.lamp.dispose()
     this.lampGeo.dispose()
