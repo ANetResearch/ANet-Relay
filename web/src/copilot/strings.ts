@@ -42,6 +42,10 @@ const en = {
   'cp.danger.rc': 'RC override',
   'cp.danger.param': 'Parameter write',
   'cp.danger.motion': 'Motion',
+  // onboard programs (WP-4b, 06 §6)
+  'cp.danger.program': 'Onboard program',
+  'cp.approval.programBody': 'Copilot wants to run an onboard program on a real aircraft. The program flies it until it is stopped. Check the area and the aircraft, and keep the stop control within reach.',
+  'cp.suggest.program': 'Write a hover program for the selected simulator and run its tests',
   'cp.approval.approve': 'Approve',
   'cp.approval.decline': 'Decline',
   'cp.approval.approved': 'Approved',
@@ -123,6 +127,10 @@ const zh: Record<CopilotKey, string> = {
   'cp.danger.rc': 'RC 覆盖',
   'cp.danger.param': '参数写入',
   'cp.danger.motion': '运动',
+  // 机载程序（WP-4b，06 §6）
+  'cp.danger.program': '机载程序',
+  'cp.approval.programBody': 'Copilot 请求在一架真机上运行机载程序。程序将持续驾驶飞机，直到被停止。批准前请确认场地与飞机状态，并随时准备急停。',
+  'cp.suggest.program': '为选中的模拟机编写一个悬停程序并运行单元测试',
   'cp.approval.approve': '批准',
   'cp.approval.decline': '拒绝',
   'cp.approval.approved': '已批准',

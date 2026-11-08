@@ -253,7 +253,9 @@ function ApprovalCard({ item }: { item: Extract<CopilotItem, { kind: 'approval' 
       )}
       {item.state === 'pending' ? (
         <>
-          <p className="text-[var(--g400)]">{generic ? t('cp.approval.dangerBody') : t('cp.approval.body')}</p>
+          <p className="text-[var(--g400)]">
+            {danger === 'program' ? t('cp.approval.programBody') : generic ? t('cp.approval.dangerBody') : t('cp.approval.body')}
+          </p>
           <div className="flex gap-1.5">
             <button type="button" className="cp-approve" onClick={() => decide(true)} data-approve="">
               {t('cp.approval.approve')}
@@ -370,7 +372,7 @@ function Empty() {
     <div className="flex flex-col gap-3 px-3 py-4">
       <p className="text-hud-sub text-[var(--g400)]">{t('cp.empty')}</p>
       <div className="flex flex-col items-start gap-1.5">
-        {(['cp.suggest.status', 'cp.suggest.routine', 'cp.suggest.battery'] as const).map((k) => (
+        {(['cp.suggest.status', 'cp.suggest.routine', 'cp.suggest.program', 'cp.suggest.battery'] as const).map((k) => (
           <button key={k} type="button" disabled={busy} className="cp-suggest" onClick={() => void sendToCopilot(t(k), selectedId)}>
             {t(k)}
           </button>
