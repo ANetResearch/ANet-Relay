@@ -13,6 +13,7 @@ import { live } from '../live'
 import { enuToScene, expAlpha, smoothAngle } from '../math'
 import { useStage } from '../store'
 import { Aircraft, handles, TRAIL_HZ, TRAIL_POINTS, type AircraftHandles } from './Aircraft'
+import { trailJump } from './trail'
 import type { AirframeTemplate } from './model'
 
 const SMOOTH_TAU = 0.12
@@ -166,6 +167,7 @@ export function Fleet({ template }: { template: AirframeTemplate }) {
         h.trailLastAt = now
         const attr = h.trail.geometry.getAttribute('position') as THREE.BufferAttribute
         const arr = attr.array as Float32Array
+        if (h.trailCount && trailJump(arr, (h.trailCount - 1) * 3, st.pos)) h.trailCount = 0 // a respawn, not a flight
         if (h.trailCount >= TRAIL_POINTS) arr.copyWithin(0, 3)
         else h.trailCount++
         const i = (h.trailCount - 1) * 3
