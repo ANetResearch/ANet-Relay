@@ -444,6 +444,8 @@ class Challenge:
             "name_zh": self.name_zh,
             "goal_en": self.goal_en,
             "goal_zh": self.goal_zh,
+            "scene_en": self.scene_en,
+            "scene_zh": self.scene_zh,
             "duration_s": self.duration_s,
             "visible_seeds": list(self.visible),
             "hidden_seeds": len(self.hidden),
@@ -453,8 +455,6 @@ class Challenge:
     def detail(self) -> dict[str, Any]:
         return {
             **self.summary(),
-            "scene_en": self.scene_en,
-            "scene_zh": self.scene_zh,
             "scoring_en": self.scoring_en,
             "scoring_zh": self.scoring_zh,
             "sensors": dict(self.sensors),

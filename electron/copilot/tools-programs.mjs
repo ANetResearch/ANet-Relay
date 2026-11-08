@@ -281,7 +281,7 @@ export function programTools(relay) {
       "Pit 2 to 8 programs against each other in the arena for some rounds in the headless evaluator; the result has each round's winner, hits and survival times and the Elo table. wait (default true) waits for it.",
       Type.Object({
         programs: Type.Array(PID, { minItems: 2, maxItems: 8 }),
-        rounds: opt(Type.Integer({ minimum: 1, maximum: 50 })),
+        rounds: opt(Type.Integer({ minimum: 1, maximum: 20 })),
         seed: opt(Type.Integer({ minimum: 0 })),
         scenario: opt(ANY_OBJECT),
         wait: opt(Type.Boolean()),

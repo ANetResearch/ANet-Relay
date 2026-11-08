@@ -1,21 +1,24 @@
 // REST helpers of the Lab (06 §2, §3, §7). Program routes are WP-1's (backend/relay/api/routes_programs.py) and
-// typed from the generated schema. Challenge, job, duel, ladder and trace routes belong to WP-2b; until they are in
-// the exported schema their bodies are read through the tolerant normalisers below, which accept the shapes of
-// 06 §3.2-§3.4 and the field names documented here. A missing field becomes null or empty, never an exception.
+// typed from the generated schema. Challenge, job, duel, ladder and trace routes are WP-2b's
+// (backend/relay/api/routes_judge.py, models in schemas_judge.py); their bodies are read through the tolerant
+// normalisers below so a missing field becomes null or empty, never an exception. The normalisers read the
+// backend's field names first and also accept the earlier aliases (used by the dev fixture in dev/labFixture.ts).
 //
-// Expected WP-2b shapes (integrator: keep these or adjust the normalisers):
-//   GET  /challenges                 -> {challenges: [{id, name, name_zh, description, description_zh, pass_en?,
-//                                         pass_zh?, best: {score, passed, program, rev, t} | null, submissions}]}
-//   POST /challenges/{id}/submit     {program, rev?} -> {job: Job} | Job
-//   GET  /jobs/{id}                  -> Job = {id, kind: challenge|duel, state: queued|running|done|failed|cancelled,
-//                                         progress 0..1, error?, result}
-//        challenge result            {challenge, program, rev, score, passed, metrics: {name: value},
-//                                         seeds: [{seed, hidden, score, passed, metrics?, trace_id?}], trace_id}
-//        duel result                 {rounds: [{round, seed, winner | null, entries: [{program, name?, hits, hp,
-//                                         alive_s, survived}], trace_id}], ladder: LadderRow[]}
-//   POST /duels                      {programs: [id x 2..8], rounds, seed, scenario?} -> {job: Job} | Job
-//   GET  /ladder                     -> {ladder: [{program, name?, elo, delta?, played, wins, losses, draws}]}
-//   GET  /traces/{id}                -> the trace of ./trace.ts
+// Backend shapes (schemas_judge.py; alias in brackets):
+//   GET  /challenges                 -> {challenges: [{id, kind, name_en [name], name_zh, scene_en [description],
+//                                         scene_zh, goal_en [pass_en], goal_zh, best: {score, passed, program, rev,
+//                                         t} | null, attempts [submissions]}]}
+//   POST /challenges/{id}/submit     {program, rev?} -> {job: Job}
+//   GET  /jobs/{id}                  -> {job: Job}, Job = {id, kind: challenge|duel, state: queued|running|done|failed|
+//                                         cancelled, progress 0..1, programs: [{program, rev, name}], error?, result}
+//        challenge result            {challenge, score, passed, metrics: {name: value},
+//                                         seeds: [{seed | null, hidden, score, passed, metrics, trace_id}], trace_id}
+//        duel result                 {rounds: [{round, seed, winner (program) | null, aircraft [entries]: [{program,
+//                                         name, hits, hp, survived_s [alive_s], alive [survived]}], trace_id}],
+//                                         ladder: [{program, name, rating, delta}]}
+//   POST /duels                      {programs: [id x 2..8], rounds, seed, scenario?} -> {job: Job}
+//   GET  /ladder                     -> {ladder: [{program, name, rating [elo], games [played], wins, losses, draws}]}
+//   GET  /traces/{id}                -> the trace of ./trace.ts (version 1 of relay.judge)
 import { request, type Program, type ProgramLog, type ProgramRevision, type ProgramRunView, type ProgramSummary, type ProgramTestResults, type ProgramValidation } from '@/api'
 
 const enc = encodeURIComponent
@@ -75,7 +78,7 @@ export const labApi = {
   submit: async (challenge: string, program: string, rev?: number) =>
     normJob(await op<unknown>('POST', `/challenges/${enc(challenge)}/submit`, rev === undefined ? { program } : { program, rev })),
   job: async (id: string) => normJob(await request<unknown>('GET', `/jobs/${enc(id)}`)),
-  duel: async (body: { programs: string[]; rounds: number; seed: number; scenario?: string }) => normJob(await op<unknown>('POST', '/duels', body)),
+  duel: async (body: { programs: string[]; rounds: number; seed: number; scenario?: Record<string, unknown> }) => normJob(await op<unknown>('POST', '/duels', body)),
   ladder: async () => normLadder(await request<unknown>('GET', '/ladder')),
   trace: (id: string) => request<unknown>('GET', `/traces/${enc(id)}`),
 } as const
@@ -115,16 +118,19 @@ export function normChallenge(raw: unknown): ChallengeView | null {
   if (!id) return null
   const b = o.best && typeof o.best === 'object' ? obj(o.best) : null
   const score = b ? num(b.score) : null
+  const name = str(o.name_en, str(o.name, id))
+  const description = str(o.scene_en, str(o.description))
+  const pass_en = str(o.goal_en, str(o.pass_en))
   return {
     id,
-    name: str(o.name, id),
-    name_zh: str(o.name_zh, str(o.name, id)),
-    description: str(o.description),
-    description_zh: str(o.description_zh, str(o.description)),
-    pass_en: str(o.pass_en),
-    pass_zh: str(o.pass_zh, str(o.pass_en)),
+    name,
+    name_zh: str(o.name_zh, name),
+    description,
+    description_zh: str(o.scene_zh, str(o.description_zh, description)),
+    pass_en,
+    pass_zh: str(o.goal_zh, str(o.pass_zh, pass_en)),
     best: b && score !== null ? { score, passed: b.passed === true, program: strOrNull(b.program), rev: num(b.rev), t: num(b.t) } : null,
-    submissions: num(o.submissions) ?? 0,
+    submissions: num(o.attempts) ?? num(o.submissions) ?? 0,
   }
 }
 
@@ -214,14 +220,14 @@ function metricValue(x: unknown): string | number | boolean | null {
 export function normLadderRow(raw: unknown): LadderRow | null {
   const o = obj(raw)
   const program = str(o.program, str(o.id))
-  const elo = num(o.elo) ?? num(o.rating)
+  const elo = num(o.rating) ?? num(o.elo)
   if (!program || elo === null) return null
   return {
     program,
     name: str(o.name, program),
     elo,
     delta: num(o.delta),
-    played: num(o.played) ?? (num(o.wins) ?? 0) + (num(o.losses) ?? 0) + (num(o.draws) ?? 0),
+    played: num(o.games) ?? num(o.played) ?? (num(o.wins) ?? 0) + (num(o.losses) ?? 0) + (num(o.draws) ?? 0),
     wins: num(o.wins) ?? 0,
     losses: num(o.losses) ?? 0,
     draws: num(o.draws) ?? 0,
@@ -236,7 +242,7 @@ export function normLadder(raw: unknown): LadderRow[] {
     .sort((a, b) => b.elo - a.elo)
 }
 
-function normResult(raw: unknown, kind: 'challenge' | 'duel'): ChallengeResult | DuelResult | null {
+function normResult(raw: unknown, kind: 'challenge' | 'duel', programs: unknown[] = []): ChallengeResult | DuelResult | null {
   if (!raw || typeof raw !== 'object') return null
   const o = obj(raw)
   if (kind === 'duel' || Array.isArray(o.rounds)) {
@@ -246,22 +252,24 @@ function normResult(raw: unknown, kind: 'challenge' | 'duel'): ChallengeResult |
         round: num(x.round) ?? i + 1,
         seed: num(x.seed),
         winner: strOrNull(x.winner),
-        entries: arr(x.entries ?? x.programs).map((e) => {
+        entries: arr(x.aircraft ?? x.entries ?? x.programs).map((e) => {
           const y = obj(e)
           const program = str(y.program, str(y.id))
-          return { program, name: str(y.name, program), hits: num(y.hits), hp: num(y.hp), alive_s: num(y.alive_s), survived: y.survived === true }
+          return { program, name: str(y.name, program), hits: num(y.hits), hp: num(y.hp), alive_s: num(y.survived_s) ?? num(y.alive_s), survived: y.alive === true || y.survived === true }
         }),
         trace_id: strOrNull(x.trace_id),
       }
     })
     return { kind: 'duel', rounds, ladder: normLadder(o.ladder ?? []) }
   }
+  // the backend names the program and revision on the job (job.programs), not in the result
+  const first = obj(programs[0])
   const metrics = Object.entries(obj(o.metrics)).map(([k, v]) => [k, metricValue(v)] as [string, string | number | boolean | null])
   return {
     kind: 'challenge',
     challenge: strOrNull(o.challenge),
-    program: strOrNull(o.program),
-    rev: num(o.rev),
+    program: strOrNull(o.program) ?? strOrNull(first.program),
+    rev: num(o.rev) ?? num(first.rev),
     score: num(o.score) ?? 0,
     passed: o.passed === true,
     metrics,
@@ -287,7 +295,7 @@ export function normJob(raw: unknown): JobView {
       : e && typeof e === 'object'
         ? { code: str(obj(e).code, 'job_failed'), message_en: str(obj(e).message_en, str(obj(e).code)), message_zh: str(obj(e).message_zh, str(obj(e).message_en, str(obj(e).code))) }
         : null
-  return { id: str(o.id, str(o.job_id)), kind, state, progress: Math.min(1, Math.max(0, progress)), error, result: normResult(o.result, kind) }
+  return { id: str(o.id, str(o.job_id)), kind, state, progress: Math.min(1, Math.max(0, progress)), error, result: normResult(o.result, kind, arr(o.programs)) }
 }
 
 export const jobFinished = (j: JobView | null) => j !== null && (j.state === 'done' || j.state === 'failed' || j.state === 'cancelled')

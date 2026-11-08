@@ -424,7 +424,7 @@ def program_tools() -> list[Tool]:
             "winner, hits and survival times and the Elo table.",
             {
                 "programs": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 8},
-                "rounds": {"type": "integer", "minimum": 1, "maximum": 50},
+                "rounds": {"type": "integer", "minimum": 1, "maximum": 20},
                 "seed": {"type": "integer", "minimum": 0},
                 "scenario": OBJ,
                 "wait": WAIT,

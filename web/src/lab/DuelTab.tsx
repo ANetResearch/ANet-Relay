@@ -21,7 +21,7 @@ import { useLab } from './store'
 
 export const DUEL_MIN = 2
 export const DUEL_MAX = 8
-const ROUNDS_MAX = 50
+const ROUNDS_MAX = 20
 
 function Ladder({ rows }: { rows: LadderRow[] }) {
   const tl = useTL()

@@ -77,6 +77,8 @@ class ChallengeSummary(_Model):
     name_zh: str
     goal_en: str
     goal_zh: str
+    scene_en: str
+    scene_zh: str
     duration_s: float
     visible_seeds: list[int]
     hidden_seeds: int = Field(description="number of hidden seeds")
@@ -86,8 +88,6 @@ class ChallengeSummary(_Model):
 
 
 class Challenge(ChallengeSummary):
-    scene_en: str
-    scene_zh: str
     scoring_en: str
     scoring_zh: str
     sensors: dict[str, Any]

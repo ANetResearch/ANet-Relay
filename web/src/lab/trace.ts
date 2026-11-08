@@ -24,6 +24,11 @@
 // Times are seconds from the start of the run. Shots fly the arena integrator (arena/ballistics.ts, 1/240 s, drag
 // and gravity) from (p, v) at t0 until t_end (a hit) or the 2.5 s lifetime, so the replay draws the same paths the
 // evaluator flew without storing every bullet sample.
+//
+// The evaluator (backend relay.judge, trace version 1) writes a compact form that parseTrace converts to the above:
+// a shared "t" column and a "fields" list, each aircraft's "frames" rows in the order of "fields" (angles in radians,
+// "flags" bit 1 = armed), "states" as [t, name] changes, shots with "shooter" and no end time (the end is the hit
+// event of that shooter whose point is nearest the round's path), and events with "shooter". See fromJudgeTrace.
 
 export interface TraceArena {
   radius: number
@@ -157,10 +162,84 @@ function parseCraft(raw: unknown, index: number): TraceCraft | null {
   }
 }
 
+const RAD = 180 / Math.PI
+
+/**
+ * Converts a version 1 evaluator trace (backend relay.judge: shared t column, frames rows in the order of fields,
+ * radians) into the column form above (degrees). A body without "fields" and "t" is returned unchanged.
+ */
+export function fromJudgeTrace(o: Obj): Obj {
+  if (!Array.isArray(o.fields) || !Array.isArray(o.t)) return o
+  const fields = (o.fields as unknown[]).map(String)
+  const col = (name: string) => fields.indexOf(name)
+  const ts = o.t as unknown[]
+  const angle = new Set(['roll', 'pitch', 'yaw'])
+  const aircraft = (Array.isArray(o.aircraft) ? o.aircraft : []).map((a) => {
+    const x = obj(a)
+    const frames = Array.isArray(x.frames) ? (x.frames as unknown[]) : []
+    const n = Math.min(ts.length, frames.length)
+    const row = (i: number) => (Array.isArray(frames[i]) ? (frames[i] as unknown[]) : [])
+    const column = (name: string): unknown[] => {
+      const k = col(name)
+      if (k < 0) return []
+      return Array.from({ length: n }, (_, i) => {
+        const v = row(i)[k]
+        return angle.has(name) && finite(v) ? v * RAD : v
+      })
+    }
+    const flags = col('flags')
+    const armed = flags < 0 ? [] : Array.from({ length: n }, (_, i) => (finite(row(i)[flags]) ? ((row(i)[flags] as number) & 1) === 1 : null))
+    // state names: [t, name] at every change, held until the next one
+    const changes = (Array.isArray(x.states) ? x.states : []).filter((c): c is [number, string] => Array.isArray(c) && finite(c[0]) && typeof c[1] === 'string')
+    let k = -1
+    const state = Array.from({ length: n }, (_, i) => {
+      const ti = ts[i]
+      while (finite(ti) && k + 1 < changes.length && changes[k + 1][0] <= ti + 1e-6) k++
+      return k >= 0 ? changes[k][1] : null
+    })
+    const samples: Record<string, unknown[]> = { t: ts.slice(0, n), state, armed }
+    for (const c of ['x', 'y', 'z', 'roll', 'pitch', 'yaw', 'throttle', 'hp']) samples[c] = column(c)
+    return { id: x.id, name: x.name ?? x.label, program: x.program, rev: x.rev, team: x.team, samples }
+  })
+  const events = (Array.isArray(o.events) ? o.events : []).map((e): Obj => {
+    const x = obj(e)
+    return { ...x, by: typeof x.by === 'string' ? x.by : x.shooter }
+  })
+  const shots = (Array.isArray(o.shots) ? o.shots : []).map((s): Obj => {
+    const x = obj(s)
+    return { ...x, id: x.id === undefined ? undefined : String(x.id), owner: typeof x.owner === 'string' ? x.owner : x.shooter, t_end: finite(x.t_end) ? x.t_end : null }
+  })
+  // a hit ends the round of that shooter in flight whose straight-line path passes nearest the hit point
+  for (const e of events) {
+    const te = e.t
+    if (e.kind !== 'hit' || !finite(te)) continue
+    const point = vec3(e.point)
+    let best: Obj | null = null
+    let bestD = Infinity
+    for (const s of shots) {
+      const p = vec3(s.p)
+      const v = vec3(s.v)
+      const t0 = s.t0
+      if (!p || !v || !finite(t0) || s.owner !== e.by || s.t_end !== null || t0 > te || te - t0 > 2.5) continue
+      const dt = te - t0
+      const d = point ? Math.hypot(p[0] + v[0] * dt - point[0], p[1] + v[1] * dt - point[1], p[2] + v[2] * dt - point[2]) : dt
+      if (d < bestD) {
+        bestD = d
+        best = s
+      }
+    }
+    if (best) best.t_end = te
+  }
+  const label = typeof o.challenge === 'string' ? o.challenge : typeof o.scenario === 'string' ? o.scenario : ''
+  const round = finite(o.round) ? ` · ${o.round}` : ''
+  const seed = finite(o.seed) ? ` · #${o.seed}` : ''
+  return { ...o, title: typeof o.title === 'string' ? o.title : `${label}${round}${seed}`, aircraft, shots, events }
+}
+
 /** Reads a trace body; null when it holds no aircraft with usable samples. */
 export function parseTrace(raw: unknown): Trace | null {
   const top = obj(raw)
-  const o = top.trace && typeof top.trace === 'object' ? obj(top.trace) : top
+  const o = fromJudgeTrace(top.trace && typeof top.trace === 'object' ? obj(top.trace) : top)
   const aircraft = (Array.isArray(o.aircraft) ? o.aircraft : []).map(parseCraft).filter((c): c is TraceCraft => c !== null)
   if (!aircraft.length) return null
   const shots: TraceShot[] = []

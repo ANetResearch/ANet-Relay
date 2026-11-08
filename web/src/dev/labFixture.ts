@@ -450,7 +450,7 @@ export function startLabFixture(host: LabFixtureHost): { handle(method: string, 
     }
     if (path === '/duels' && method === 'POST') {
       const ids = ((b.programs as string[]) ?? []).filter((x) => programs.has(x))
-      const rounds = Math.max(1, Math.min(50, Number(b.rounds) || 1))
+      const rounds = Math.max(1, Math.min(20, Number(b.rounds) || 1))
       const seed = Number(b.seed) || 0
       const id = `job-${++jobSeq}`
       const rnd = seeded(seed + 17)

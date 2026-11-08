@@ -808,6 +808,12 @@
         "goal_zh": {
           "type": "string"
         },
+        "scene_en": {
+          "type": "string"
+        },
+        "scene_zh": {
+          "type": "string"
+        },
         "duration_s": {
           "type": "number"
         },
@@ -844,12 +850,6 @@
         "attempts": {
           "type": "integer"
         },
-        "scene_en": {
-          "type": "string"
-        },
-        "scene_zh": {
-          "type": "string"
-        },
         "scoring_en": {
           "type": "string"
         },
@@ -879,14 +879,14 @@
         "name_zh",
         "goal_en",
         "goal_zh",
+        "scene_en",
+        "scene_zh",
         "duration_s",
         "visible_seeds",
         "hidden_seeds",
         "opponent",
         "best",
         "attempts",
-        "scene_en",
-        "scene_zh",
         "scoring_en",
         "scoring_zh",
         "sensors",
@@ -1055,6 +1055,12 @@
         "goal_zh": {
           "type": "string"
         },
+        "scene_en": {
+          "type": "string"
+        },
+        "scene_zh": {
+          "type": "string"
+        },
         "duration_s": {
           "type": "number"
         },
@@ -1099,6 +1105,8 @@
         "name_zh",
         "goal_en",
         "goal_zh",
+        "scene_en",
+        "scene_zh",
         "duration_s",
         "visible_seeds",
         "hidden_seeds",

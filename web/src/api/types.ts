@@ -1409,6 +1409,8 @@ export interface ChallengeSummary {
   name_zh: string
   goal_en: string
   goal_zh: string
+  scene_en: string
+  scene_zh: string
   duration_s: number
   visible_seeds: number[]
   /**
@@ -1450,6 +1452,8 @@ export interface Challenge {
   name_zh: string
   goal_en: string
   goal_zh: string
+  scene_en: string
+  scene_zh: string
   duration_s: number
   visible_seeds: number[]
   /**
@@ -1459,8 +1463,6 @@ export interface Challenge {
   opponent: string | null
   best: ChallengeEntry | null
   attempts: number
-  scene_en: string
-  scene_zh: string
   scoring_en: string
   scoring_zh: string
   sensors: {}
