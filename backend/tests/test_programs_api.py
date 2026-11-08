@@ -66,6 +66,13 @@ def test_builtins_are_listed_read_only_and_copyable(client):
     copy = client.post("/api/v1/programs", headers=agent, json={"copy_of": "hover_trim"}).json()
     assert copy["program"]["source"] == hover["source"] and not copy["program"]["builtin"]
     assert copy["validation"]["ok"] and copy["program"]["author"] == "coder"
+    # WP-5: the copy keeps no stored overrides, so an edit of PARAMS in its source takes effect
+    assert copy["program"]["params"] == {}
+    line = hover["source"].splitlines().index('    "target_alt": 1.0,') + 1
+    patch = [{"start": line, "end": line, "text": '    "target_alt": 1.2,'}]
+    cid = copy["program"]["id"]
+    edited = client.put(f"/api/v1/programs/{cid}", headers=agent, json={"patch": patch}).json()
+    assert edited["validation"]["params"]["target_alt"] == 1.2 and edited["program"]["params"] == {}
     assert code(client.get("/api/v1/programs/nope")) == "program_not_found"
 
 

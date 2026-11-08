@@ -340,7 +340,10 @@ class ProgramStore:
             if copy_of is not None:
                 origin = self._find(str(copy_of))
                 source = body.get("source", origin["source"])
-                params = body.get("params", origin.get("params") or {})
+                # WP-5: a built-in's params are its PARAMS defaults, which the copied source already carries;
+                # keeping them as stored overrides would mask every later edit of PARAMS in the copy
+                inherited = {} if origin.get("builtin") else (origin.get("params") or {})
+                params = body.get("params", inherited)
                 tests = body.get("tests", origin.get("tests") or [])
                 name = body.get("name") or f"{origin['name']} copy"
                 description = body.get("description", origin.get("description", ""))
