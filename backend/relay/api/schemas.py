@@ -493,6 +493,8 @@ EventKind = Literal[
     "program_faulted",
     "program_host_restarted",
     "program_gate",
+    # WP-2b challenges and duels (06 §3.4)
+    "judge_finished",
 ]
 
 

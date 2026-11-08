@@ -169,6 +169,8 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     ),
     "program_host_restarted": ("The program host was restarted: {reason}.", "程序宿主已重启：{reason}。"),
     "program_gate": ("{vehicle}: onboard programs {detail}.", "{vehicle}：机载程序{detail}。"),
+    # WP-2b challenges and duels (06 §3.4); {detail} is filled from detail_en / detail_zh
+    "judge_finished": ("{detail}.", "{detail}。"),
 }
 
 INPUT_LABELS = {"keyboard": ("keyboard", "键盘"), "screen": ("on-screen sticks", "屏幕摇杆")}

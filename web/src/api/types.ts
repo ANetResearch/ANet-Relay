@@ -34,6 +34,11 @@ export interface RelaySchema {
   ProgramValidation: Validation
   ProgramTestResults: TestResults
   ProgramLog: ProgramLog
+  ChallengeSummary: ChallengeSummary
+  Challenge: Challenge
+  Job: Job
+  Ladder: Ladder
+  Trace: Trace
 }
 /**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
@@ -663,6 +668,7 @@ export interface Event {
     | 'program_faulted'
     | 'program_host_restarted'
     | 'program_gate'
+    | 'judge_finished'
   vehicle: string | null
   session: string | null
   text_en: string
@@ -1391,4 +1397,311 @@ export interface ProgramLogLine {
   t: number
   level: 'log' | 'error' | 'event'
   text: string
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ChallengeSummary".
+ */
+export interface ChallengeSummary {
+  id: string
+  kind: 'flight' | 'duel'
+  name_en: string
+  name_zh: string
+  goal_en: string
+  goal_zh: string
+  duration_s: number
+  visible_seeds: number[]
+  /**
+   * number of hidden seeds
+   */
+  hidden_seeds: number
+  opponent: string | null
+  best: ChallengeEntry | null
+  attempts: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ChallengeEntry".
+ */
+export interface ChallengeEntry {
+  job: string
+  program: string
+  rev: number
+  name: string
+  score: number
+  passed: boolean
+  visible_only: boolean
+  /**
+   * [{seed (null when hidden), hidden, score, passed}]
+   */
+  seeds: {}[]
+  trace_id: string | null
+  author: string | null
+  t: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "Challenge".
+ */
+export interface Challenge {
+  id: string
+  kind: 'flight' | 'duel'
+  name_en: string
+  name_zh: string
+  goal_en: string
+  goal_zh: string
+  duration_s: number
+  visible_seeds: number[]
+  /**
+   * number of hidden seeds
+   */
+  hidden_seeds: number
+  opponent: string | null
+  best: ChallengeEntry | null
+  attempts: number
+  scene_en: string
+  scene_zh: string
+  scoring_en: string
+  scoring_zh: string
+  sensors: {}
+  hover_assist: boolean
+  info: {}
+  history: ChallengeEntry[]
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "Job".
+ */
+export interface Job {
+  id: string
+  kind: 'challenge' | 'duel'
+  state: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
+  progress: number
+  queue_position: number | null
+  created: number
+  started: number | null
+  finished: number | null
+  challenge: string | null
+  programs: JobProgram[]
+  result: ChallengeResult | DuelResult | null
+  /**
+   * {code, message_en, message_zh, detail} when failed
+   */
+  error: {} | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "JobProgram".
+ */
+export interface JobProgram {
+  program: string
+  rev: number
+  name: string
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ChallengeResult".
+ */
+export interface ChallengeResult {
+  challenge: string
+  score: number
+  passed: boolean
+  metrics: {}
+  seeds: SeedResult[]
+  trace_id: string | null
+  best: ChallengeEntry | null
+  speed: Speed | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "SeedResult".
+ */
+export interface SeedResult {
+  /**
+   * null for a hidden seed
+   */
+  seed: number | null
+  hidden: boolean
+  score: number
+  passed: boolean
+  metrics: {}
+  trace_id: string | null
+  sim_s: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "Speed".
+ */
+export interface Speed {
+  sim_s: number
+  wall_s: number
+  /**
+   * simulated seconds per wall second
+   */
+  factor: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "DuelResult".
+ */
+export interface DuelResult {
+  rounds: DuelRound[]
+  standings: Standing[]
+  ladder: LadderChange[]
+  scenario: {} | null
+  speed: Speed | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "DuelRound".
+ */
+export interface DuelRound {
+  round: number
+  seed: number
+  winner: string | null
+  winner_id: string | null
+  draw: boolean
+  duration_s: number
+  aircraft: RoundAircraft[]
+  trace_id: string | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "RoundAircraft".
+ */
+export interface RoundAircraft {
+  id: string
+  program: string
+  rev: number
+  name: string
+  role: string
+  team: string | null
+  alive: boolean
+  hp: number | null
+  hits: number
+  hits_taken: number
+  survived_s: number
+  airborne_s: number
+  reason: ('shot_down' | 'crashed' | 'out') | null
+  place: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "Standing".
+ */
+export interface Standing {
+  program: string
+  rev: number
+  name: string
+  rounds: number
+  wins: number
+  draws: number
+  losses: number
+  hits: number
+  hits_taken: number
+  survived_s: number
+  mean_place: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "LadderChange".
+ */
+export interface LadderChange {
+  program: string
+  name: string
+  rating: number
+  delta: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "Ladder".
+ */
+export interface Ladder {
+  ladder: LadderRow[]
+  duels: {}[]
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "LadderRow".
+ */
+export interface LadderRow {
+  program: string
+  name: string
+  rating: number
+  games: number
+  wins: number
+  draws: number
+  losses: number
+  updated: number
+  rank: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "Trace".
+ */
+export interface Trace {
+  id: string
+  created: number
+  job: string
+  version: number
+  kind: 'challenge' | 'duel'
+  scenario: string
+  seed: number
+  hz: number
+  duration_s: number
+  fields: string[]
+  arena: {
+    [k: string]: number | undefined
+  } | null
+  course: {} | null
+  markers: {}[]
+  t: number[]
+  aircraft: TraceAircraft[]
+  shots: TraceShot[]
+  events: TraceEvent[]
+  result: {}
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TraceAircraft".
+ */
+export interface TraceAircraft {
+  id: string
+  label: string
+  program: string
+  rev: number
+  name: string
+  role: string
+  team: string
+  spawn: {
+    [k: string]: number | undefined
+  }
+  /**
+   * one row per t, in the order of fields
+   */
+  frames: (number | null)[][]
+  /**
+   * [t, state] whenever ctx.state changed
+   */
+  states: (number | string)[][]
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TraceShot".
+ */
+export interface TraceShot {
+  id: number
+  shooter: string
+  t0: number
+  p: number[]
+  v: number[]
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TraceEvent".
+ */
+export interface TraceEvent {
+  t: number
+  kind: string
+  vehicle: string | null
 }

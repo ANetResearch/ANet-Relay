@@ -74,6 +74,7 @@ from .fleet_device import DeviceOps
 from .fleet_sim import SimOps
 from .flighthealth import FlightHealth
 from .history import History
+from .judge.service import JudgeService  # WP-2b: challenges, duels and the headless evaluator (06 §3)
 from .mav import bridge as bridgemod
 from .mav import decode, discovery, modes
 from .mav.link import UdpLink
@@ -420,6 +421,8 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps):
         self.arena.apply_settings()
         # WP-1 onboard programs (06 §2): store, program host and the 50 Hz program tick
         self.programs = ProgramService(self)
+        # WP-2b challenges and duels (06 §3.2-§3.4): job queue, worker processes, results, ladder, traces
+        self.judge = JudgeService(self)
         self._build_snapshot(self.clock())
 
     # ====================================================================== lifecycle
@@ -448,6 +451,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps):
         if self.link is not None:
             self.link.close()
         self.arena.close()
+        self.judge.close()  # WP-2b: cancel evaluation jobs and wait for their workers
         self.programs.close()  # WP-1
         self.history.close()
 

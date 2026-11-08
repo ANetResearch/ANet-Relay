@@ -88,6 +88,21 @@
     },
     "ProgramLog": {
       "$ref": "#/$defs/ProgramLog"
+    },
+    "ChallengeSummary": {
+      "$ref": "#/$defs/ChallengeSummary"
+    },
+    "Challenge": {
+      "$ref": "#/$defs/Challenge"
+    },
+    "Job": {
+      "$ref": "#/$defs/Job"
+    },
+    "Ladder": {
+      "$ref": "#/$defs/Ladder"
+    },
+    "Trace": {
+      "$ref": "#/$defs/Trace"
     }
   },
   "required": [
@@ -118,7 +133,12 @@
     "ProgramRevision",
     "ProgramValidation",
     "ProgramTestResults",
-    "ProgramLog"
+    "ProgramLog",
+    "ChallengeSummary",
+    "Challenge",
+    "Job",
+    "Ladder",
+    "Trace"
   ],
   "additionalProperties": false,
   "$defs": {
@@ -764,6 +784,331 @@
       "title": "CatalogueStep",
       "type": "object"
     },
+    "Challenge": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "flight",
+            "duel"
+          ],
+          "type": "string"
+        },
+        "name_en": {
+          "type": "string"
+        },
+        "name_zh": {
+          "type": "string"
+        },
+        "goal_en": {
+          "type": "string"
+        },
+        "goal_zh": {
+          "type": "string"
+        },
+        "duration_s": {
+          "type": "number"
+        },
+        "visible_seeds": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "hidden_seeds": {
+          "description": "number of hidden seeds",
+          "type": "integer"
+        },
+        "opponent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "best": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChallengeEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attempts": {
+          "type": "integer"
+        },
+        "scene_en": {
+          "type": "string"
+        },
+        "scene_zh": {
+          "type": "string"
+        },
+        "scoring_en": {
+          "type": "string"
+        },
+        "scoring_zh": {
+          "type": "string"
+        },
+        "sensors": {
+          "type": "object"
+        },
+        "hover_assist": {
+          "type": "boolean"
+        },
+        "info": {
+          "type": "object"
+        },
+        "history": {
+          "items": {
+            "$ref": "#/$defs/ChallengeEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name_en",
+        "name_zh",
+        "goal_en",
+        "goal_zh",
+        "duration_s",
+        "visible_seeds",
+        "hidden_seeds",
+        "opponent",
+        "best",
+        "attempts",
+        "scene_en",
+        "scene_zh",
+        "scoring_en",
+        "scoring_zh",
+        "sensors",
+        "hover_assist",
+        "info",
+        "history"
+      ],
+      "title": "Challenge",
+      "type": "object"
+    },
+    "ChallengeEntry": {
+      "properties": {
+        "job": {
+          "type": "string"
+        },
+        "program": {
+          "type": "string"
+        },
+        "rev": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "visible_only": {
+          "type": "boolean"
+        },
+        "seeds": {
+          "description": "[{seed (null when hidden), hidden, score, passed}]",
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "trace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "author": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "t": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "job",
+        "program",
+        "rev",
+        "name",
+        "score",
+        "passed",
+        "visible_only",
+        "seeds",
+        "trace_id",
+        "author",
+        "t"
+      ],
+      "title": "ChallengeEntry",
+      "type": "object"
+    },
+    "ChallengeResult": {
+      "properties": {
+        "challenge": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "metrics": {
+          "type": "object"
+        },
+        "seeds": {
+          "items": {
+            "$ref": "#/$defs/SeedResult"
+          },
+          "type": "array"
+        },
+        "trace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "best": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChallengeEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "speed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Speed"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "challenge",
+        "score",
+        "passed",
+        "metrics",
+        "seeds",
+        "trace_id",
+        "best",
+        "speed"
+      ],
+      "title": "ChallengeResult",
+      "type": "object"
+    },
+    "ChallengeSummary": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "flight",
+            "duel"
+          ],
+          "type": "string"
+        },
+        "name_en": {
+          "type": "string"
+        },
+        "name_zh": {
+          "type": "string"
+        },
+        "goal_en": {
+          "type": "string"
+        },
+        "goal_zh": {
+          "type": "string"
+        },
+        "duration_s": {
+          "type": "number"
+        },
+        "visible_seeds": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "hidden_seeds": {
+          "description": "number of hidden seeds",
+          "type": "integer"
+        },
+        "opponent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "best": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChallengeEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attempts": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name_en",
+        "name_zh",
+        "goal_en",
+        "goal_zh",
+        "duration_s",
+        "visible_seeds",
+        "hidden_seeds",
+        "opponent",
+        "best",
+        "attempts"
+      ],
+      "title": "ChallengeSummary",
+      "type": "object"
+    },
     "ClaimView": {
       "properties": {
         "session_id": {
@@ -920,6 +1265,121 @@
       "title": "CourseRunView",
       "type": "object"
     },
+    "DuelResult": {
+      "properties": {
+        "rounds": {
+          "items": {
+            "$ref": "#/$defs/DuelRound"
+          },
+          "type": "array"
+        },
+        "standings": {
+          "items": {
+            "$ref": "#/$defs/Standing"
+          },
+          "type": "array"
+        },
+        "ladder": {
+          "items": {
+            "$ref": "#/$defs/LadderChange"
+          },
+          "type": "array"
+        },
+        "scenario": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "speed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Speed"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "rounds",
+        "standings",
+        "ladder",
+        "scenario",
+        "speed"
+      ],
+      "title": "DuelResult",
+      "type": "object"
+    },
+    "DuelRound": {
+      "properties": {
+        "round": {
+          "type": "integer"
+        },
+        "seed": {
+          "type": "integer"
+        },
+        "winner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "winner_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "draw": {
+          "type": "boolean"
+        },
+        "duration_s": {
+          "type": "number"
+        },
+        "aircraft": {
+          "items": {
+            "$ref": "#/$defs/RoundAircraft"
+          },
+          "type": "array"
+        },
+        "trace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "round",
+        "seed",
+        "winner",
+        "winner_id",
+        "draw",
+        "duration_s",
+        "aircraft",
+        "trace_id"
+      ],
+      "title": "DuelRound",
+      "type": "object"
+    },
     "ErrorBody": {
       "properties": {
         "error": {
@@ -1056,7 +1516,8 @@
             "program_resumed",
             "program_faulted",
             "program_host_restarted",
-            "program_gate"
+            "program_gate",
+            "judge_finished"
           ],
           "type": "string"
         },
@@ -1467,6 +1928,232 @@
         "session"
       ],
       "title": "Hello",
+      "type": "object"
+    },
+    "Job": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "challenge",
+            "duel"
+          ],
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "queued",
+            "running",
+            "done",
+            "failed",
+            "cancelled"
+          ],
+          "type": "string"
+        },
+        "progress": {
+          "type": "number"
+        },
+        "queue_position": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created": {
+          "type": "number"
+        },
+        "started": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "finished": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "challenge": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "programs": {
+          "items": {
+            "$ref": "#/$defs/JobProgram"
+          },
+          "type": "array"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChallengeResult"
+            },
+            {
+              "$ref": "#/$defs/DuelResult"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "{code, message_en, message_zh, detail} when failed"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "state",
+        "progress",
+        "queue_position",
+        "created",
+        "started",
+        "finished",
+        "challenge",
+        "programs",
+        "result",
+        "error"
+      ],
+      "title": "Job",
+      "type": "object"
+    },
+    "JobProgram": {
+      "properties": {
+        "program": {
+          "type": "string"
+        },
+        "rev": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "program",
+        "rev",
+        "name"
+      ],
+      "title": "JobProgram",
+      "type": "object"
+    },
+    "Ladder": {
+      "properties": {
+        "ladder": {
+          "items": {
+            "$ref": "#/$defs/LadderRow"
+          },
+          "type": "array"
+        },
+        "duels": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ladder",
+        "duels"
+      ],
+      "title": "Ladder",
+      "type": "object"
+    },
+    "LadderChange": {
+      "properties": {
+        "program": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "rating": {
+          "type": "number"
+        },
+        "delta": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "program",
+        "name",
+        "rating",
+        "delta"
+      ],
+      "title": "LadderChange",
+      "type": "object"
+    },
+    "LadderRow": {
+      "properties": {
+        "program": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "rating": {
+          "type": "number"
+        },
+        "games": {
+          "type": "integer"
+        },
+        "wins": {
+          "type": "integer"
+        },
+        "draws": {
+          "type": "integer"
+        },
+        "losses": {
+          "type": "integer"
+        },
+        "updated": {
+          "type": "number"
+        },
+        "rank": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "program",
+        "name",
+        "rating",
+        "games",
+        "wins",
+        "draws",
+        "losses",
+        "updated",
+        "rank"
+      ],
+      "title": "LadderRow",
       "type": "object"
     },
     "Link": {
@@ -2986,6 +3673,96 @@
       "title": "Ring",
       "type": "object"
     },
+    "RoundAircraft": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "program": {
+          "type": "string"
+        },
+        "rev": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "team": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "alive": {
+          "type": "boolean"
+        },
+        "hp": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hits": {
+          "type": "integer"
+        },
+        "hits_taken": {
+          "type": "integer"
+        },
+        "survived_s": {
+          "type": "number"
+        },
+        "airborne_s": {
+          "type": "number"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "enum": [
+                "shot_down",
+                "crashed",
+                "out"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "place": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "program",
+        "rev",
+        "name",
+        "role",
+        "team",
+        "alive",
+        "hp",
+        "hits",
+        "hits_taken",
+        "survived_s",
+        "airborne_s",
+        "reason",
+        "place"
+      ],
+      "title": "RoundAircraft",
+      "type": "object"
+    },
     "RunActor": {
       "properties": {
         "kind": {
@@ -3073,6 +3850,57 @@
         "error"
       ],
       "title": "Scan",
+      "type": "object"
+    },
+    "SeedResult": {
+      "properties": {
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "null for a hidden seed"
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "score": {
+          "type": "number"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "metrics": {
+          "type": "object"
+        },
+        "trace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sim_s": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "seed",
+        "hidden",
+        "score",
+        "passed",
+        "metrics",
+        "trace_id",
+        "sim_s"
+      ],
+      "title": "SeedResult",
       "type": "object"
     },
     "Sensor": {
@@ -3299,6 +4127,79 @@
         "detail"
       ],
       "title": "SkillView",
+      "type": "object"
+    },
+    "Speed": {
+      "properties": {
+        "sim_s": {
+          "type": "number"
+        },
+        "wall_s": {
+          "type": "number"
+        },
+        "factor": {
+          "description": "simulated seconds per wall second",
+          "type": "number"
+        }
+      },
+      "required": [
+        "sim_s",
+        "wall_s",
+        "factor"
+      ],
+      "title": "Speed",
+      "type": "object"
+    },
+    "Standing": {
+      "properties": {
+        "program": {
+          "type": "string"
+        },
+        "rev": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "rounds": {
+          "type": "integer"
+        },
+        "wins": {
+          "type": "integer"
+        },
+        "draws": {
+          "type": "integer"
+        },
+        "losses": {
+          "type": "integer"
+        },
+        "hits": {
+          "type": "integer"
+        },
+        "hits_taken": {
+          "type": "integer"
+        },
+        "survived_s": {
+          "type": "number"
+        },
+        "mean_place": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "program",
+        "rev",
+        "name",
+        "rounds",
+        "wins",
+        "draws",
+        "losses",
+        "hits",
+        "hits_taken",
+        "survived_s",
+        "mean_place"
+      ],
+      "title": "Standing",
       "type": "object"
     },
     "StatusText": {
@@ -3614,6 +4515,268 @@
         "runs"
       ],
       "title": "TestRuns",
+      "type": "object"
+    },
+    "Trace": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "created": {
+          "type": "number"
+        },
+        "job": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "challenge",
+            "duel"
+          ],
+          "type": "string"
+        },
+        "scenario": {
+          "type": "string"
+        },
+        "seed": {
+          "type": "integer"
+        },
+        "hz": {
+          "type": "number"
+        },
+        "duration_s": {
+          "type": "number"
+        },
+        "fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "arena": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "course": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "markers": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "t": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "aircraft": {
+          "items": {
+            "$ref": "#/$defs/TraceAircraft"
+          },
+          "type": "array"
+        },
+        "shots": {
+          "items": {
+            "$ref": "#/$defs/TraceShot"
+          },
+          "type": "array"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/TraceEvent"
+          },
+          "type": "array"
+        },
+        "result": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "created",
+        "job",
+        "version",
+        "kind",
+        "scenario",
+        "seed",
+        "hz",
+        "duration_s",
+        "fields",
+        "arena",
+        "course",
+        "markers",
+        "t",
+        "aircraft",
+        "shots",
+        "events",
+        "result"
+      ],
+      "title": "Trace",
+      "type": "object"
+    },
+    "TraceAircraft": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "program": {
+          "type": "string"
+        },
+        "rev": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "team": {
+          "type": "string"
+        },
+        "spawn": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "frames": {
+          "description": "one row per t, in the order of fields",
+          "items": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "states": {
+          "description": "[t, state] whenever ctx.state changed",
+          "items": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "program",
+        "rev",
+        "name",
+        "role",
+        "team",
+        "spawn",
+        "frames",
+        "states"
+      ],
+      "title": "TraceAircraft",
+      "type": "object"
+    },
+    "TraceEvent": {
+      "properties": {
+        "t": {
+          "type": "number"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "vehicle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "t",
+        "kind",
+        "vehicle"
+      ],
+      "title": "TraceEvent",
+      "type": "object"
+    },
+    "TraceShot": {
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "shooter": {
+          "type": "string"
+        },
+        "t0": {
+          "type": "number"
+        },
+        "p": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "v": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "shooter",
+        "t0",
+        "p",
+        "v"
+      ],
+      "title": "TraceShot",
       "type": "object"
     },
     "UiCommandMessage": {
