@@ -141,7 +141,7 @@ class World:
         af = sim.quad.active_airframe()
         return af.mass if af is not None else MASS
 
-    def _apply(
+    def apply_contact(
         self,
         body: Body,
         dv: Vec3,
@@ -153,6 +153,9 @@ class World:
         crash: bool,
         t: float,
     ) -> None:
+        """Apply one contact to a local aircraft: velocity change ``dv`` (ENU), the rim rate kick, a crash at
+        or above the threshold, and the record ``obs.collision`` shows. The LAN arena uses it for a remote
+        terminal's ``COLLIDE`` once it has checked it against its own state (07 §2)."""
         quad = body.sim.quad
         s = quad.s
         kick = collide.rate_kick(dv, n, s.q, self._mass(body.sim), _INERTIA)
@@ -224,9 +227,9 @@ class World:
                 crash = collide.crashes(closing)
                 point = tuple(cb[c] + n[c] * collide.CRAFT_RADIUS for c in range(3))
                 crashed = [x.id for x, s in ((a, sa), (b, sb)) if crash and not s.crashed]
-                self._apply(a, dva, n, point, closing, b.id, b.label, crash, t)  # type: ignore[arg-type]
+                self.apply_contact(a, dva, n, point, closing, b.id, b.label, crash, t)  # type: ignore[arg-type]
                 neg = (-n[0], -n[1], -n[2])
-                self._apply(b, dvb, neg, point, closing, a.id, a.label, crash, t)  # type: ignore[arg-type]
+                self.apply_contact(b, dvb, neg, point, closing, a.id, a.label, crash, t)  # type: ignore[arg-type]
                 self._report(reports, a, b.id, b.label, point, closing, crashed, "craft", t)  # type: ignore[arg-type]
 
     def _rings(
@@ -254,7 +257,7 @@ class World:
                 crash = collide.crashes(closing)
                 crashed = [body.id] if crash and not s.crashed else []
                 label = f"ring {key.split(':', 1)[-1]}"
-                self._apply(body, dv, n, point, closing, key, label, crash, t)
+                self.apply_contact(body, dv, n, point, closing, key, label, crash, t)
                 self._report(reports, body, key, label, point, closing, crashed, "ring", t)
 
     def _externals(
@@ -288,7 +291,7 @@ class World:
                 crash = collide.crashes(closing)
                 point = tuple(cb[c] + n[c] * collide.CRAFT_RADIUS for c in range(3))
                 crashed = [body.id] if crash and not s.crashed else []
-                self._apply(body, dv, n, point, closing, e.key, e.label, crash, t)  # type: ignore[arg-type]
+                self.apply_contact(body, dv, n, point, closing, e.key, e.label, crash, t)  # type: ignore[arg-type]
                 self._report(reports, body, e.key, e.label, point, closing, crashed, "craft", t)  # type: ignore[arg-type]
                 if self.on_external_contact is not None:
                     self.on_external_contact(e.key, body.id, point, closing, crash)  # type: ignore[arg-type]

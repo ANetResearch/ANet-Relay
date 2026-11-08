@@ -189,3 +189,27 @@ def test_contacts_carry_the_closing_speed(svc, stepper):
     stepper.run(0.15)
     (contact,) = ObsBuilder(1, arena=None).build(svc, v1, svc.clock())["contacts"]
     assert contact["closing"] == pytest.approx(2.0, abs=0.4)  # noisy, like rel and vrel
+
+
+def test_judge_trace_records_collisions_and_crashes():
+    from relay.judge.headless import TRACE_EVENTS, Headless
+
+    run = Headless.__new__(Headless)  # only the trace mapping is under test
+    run._crash_logged = set()
+    data = {"a": "sim-1", "b": "sim-2", "b_label": "SIM-2", "point": [0.1, 0.0, 1.0], "v_rel": 2.4}
+    event = {"kind": "collision", "vehicle": "sim-1", "data": {**data, "crashed": ["sim-1", "sim-2"]}}
+    out = run._trace_event(1.25, TRACE_EVENTS["collision"], event)
+    assert out == {
+        "t": 1.25,
+        "kind": "collision",
+        "vehicle": "sim-1",
+        "with": "sim-2",
+        "point": [0.1, 0.0, 1.0],
+        "v_rel": 2.4,
+        "crashed": ["sim-1", "sim-2"],
+    }
+    where = [0.1, 0.0, 1.0]
+    crash = {"kind": "crashed", "vehicle": "sim-2", "data": {"reason_code": "collision", "point": where}}
+    out = run._trace_event(1.25, TRACE_EVENTS["crashed"], crash)
+    assert out == {"t": 1.25, "kind": "crash", "vehicle": "sim-2", "point": where, "reason": "collision"}
+    assert run._crash_logged == {"sim-2"}  # the 10 Hz fallback does not log it twice
