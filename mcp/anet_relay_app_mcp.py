@@ -27,6 +27,7 @@ from relay_mcp_common import (
     run_main,
     schema_tool,
 )
+from relay_mcp_match import MATCH_INSTRUCTIONS, match_tools  # WP-B (07 §3-§4)
 from relay_mcp_programs import PROGRAM_INSTRUCTIONS, program_tools  # WP-4b (06 §6)
 
 SERVER_NAME = "anet-relay-app"
@@ -44,6 +45,7 @@ INSTRUCTIONS = (
     "only when asked. app_stop_all cuts the motors of every aircraft. app_remove_vehicle and the sim "
     "tools change the fleet. Flight and device control live in the anet-relay and anet-relay-device servers. "
     + PROGRAM_INSTRUCTIONS
+    + MATCH_INSTRUCTIONS
 )
 
 APP = "App operation (needs agents_app_control). "
@@ -471,6 +473,7 @@ def build_tools() -> list[Tool]:
         ),
     ]
     t += program_tools()  # WP-4b: onboard programs, judge, duels and simulator airframes (06 §6)
+    t += match_tools()  # WP-B: dogfight scenario and leaderboard (07 §3-§4)
     return t
 
 

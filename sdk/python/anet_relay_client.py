@@ -766,6 +766,65 @@ class RelayClient:
         a real aircraft. Returns ``{id, firing, ammo, max, reloading, hp}``."""
         return self._post(f"/vehicles/{vehicle_id}/fire", {"seconds": float(seconds)})
 
+    # ------------------------------------------------------------------ dogfight and leaderboard (07 §3-§4)
+    # WP-B: the same operations as Copilot's and the app MCP server's dogfight_start / dogfight_stop /
+    # dogfight_status / leaderboard. Starting and stopping are app operations (agents_app_control).
+
+    def dogfight_start(
+        self,
+        aircraft: int = 6,
+        teams: str | int = "ffa",
+        roles: dict | None = None,
+        programs: dict | None = None,
+        arena: dict | None = None,
+        airframe: str | None = None,
+        hover_assist: bool | None = None,
+        duration_s: float | None = None,
+        respawn: bool | None = None,
+        seed: int | None = None,
+        vehicles: list[str] | None = None,
+    ) -> dict:
+        """A timed dogfight of 2 to 8 simulators, e.g. ``dogfight_start(6, roles={"gunner": 4, "rammer": 2})``.
+
+        Relay adds or reuses the simulators, places them on a ring facing the centre, arms them and deploys a
+        program per role (gunners fire, rammers ram); the programs fly with sticks only. Real aircraft never
+        take part (``dogfight_real_aircraft``, 400). Returns the scenario ``{running, phase, config, aircraft,
+        match, ...}``."""
+        body = _drop_none(
+            aircraft=aircraft,
+            teams=teams,
+            roles=roles,
+            programs=programs,
+            arena=arena,
+            airframe=airframe,
+            hover_assist=hover_assist,
+            duration_s=duration_s,
+            respawn=respawn,
+            seed=seed,
+            vehicles=list(vehicles) if vehicles is not None else None,
+        )
+        return self._app("POST", "/scenarios/dogfight", body)
+
+    def dogfight_stop(self) -> dict:
+        """End the running dogfight: programs stop, airborne aircraft land, the standings stay."""
+        return self._app("DELETE", "/scenarios/dogfight")
+
+    def dogfight_status(self) -> dict:
+        return self._get("/scenarios/dogfight")
+
+    def leaderboard(self, by: str = "downs") -> dict:
+        """``{by, match, rows}``: every aircraft of this terminal and its LAN peers, sorted by ``downs``,
+        ``survival``, ``accuracy`` or ``rams``; a Relay 0.4 peer's rows have null statistics."""
+        return self._get("/arena/leaderboard", by=by)
+
+    def match_start(self, duration_s: float = 180.0) -> dict:
+        """Start a match here and on every version 2 LAN peer (the arena must be on)."""
+        return self._app("POST", "/arena/match", {"duration_s": float(duration_s)})
+
+    def match_end(self) -> dict:
+        """End the running match everywhere; without one, reset the accumulated statistics."""
+        return self._app("DELETE", "/arena/match")
+
     # ------------------------------------------------------------------ simulators (app operations)
 
     def add_sims(

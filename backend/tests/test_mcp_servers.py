@@ -19,6 +19,7 @@ sys.path.insert(0, str(REPO / "sdk" / "python"))
 import anet_relay_app_mcp as app_mcp  # noqa: E402
 import anet_relay_device_mcp as device_mcp  # noqa: E402
 import anet_relay_mcp as flight_mcp  # noqa: E402
+import relay_mcp_match as match_mcp  # noqa: E402
 import relay_mcp_programs as programs_mcp  # noqa: E402
 
 PNG = "iVBORw0KGgo="
@@ -170,7 +171,9 @@ def test_prefixes_and_counts(stub):
     assert all(n.startswith("relay_") for n in names[flight_mcp])
     assert all(n.startswith("device_") for n in names[device_mcp])
     # WP-4b: the program tools keep the names of the 06 §6 table
-    assert all(n.startswith("app_") or n in programs_mcp.PROGRAM_TOOL_NAMES for n in names[app_mcp])
+    # WP-B: and the dogfight tools of 07 §3
+    extra = set(programs_mcp.PROGRAM_TOOL_NAMES) | set(match_mcp.MATCH_TOOL_NAMES)
+    assert all(n.startswith("app_") or n in extra for n in names[app_mcp])
     ui = {
         "app_set_language",
         "app_set_workspace",
@@ -814,3 +817,51 @@ def test_flight_server_points_to_the_program_tools_at_sticks(stub):
     server = make(flight_mcp, stub)
     instructions = rpc(server, "initialize", {"protocolVersion": "2025-06-18"})["result"]["instructions"]
     assert "program_deploy" in instructions and "anet-relay-app" in instructions
+
+
+# ---------------------------------------------------------------------------- WP-B dogfight tools (07 §3-§4)
+
+MATCH_REST = [
+    (
+        "dogfight_start",
+        {"aircraft": 6, "teams": "ffa", "roles": {"gunner": 4, "rammer": 2}, "duration_s": 120},
+        "POST",
+        "/scenarios/dogfight",
+        {"aircraft": 6, "teams": "ffa", "roles": {"gunner": 4, "rammer": 2}, "duration_s": 120},
+    ),
+    ("dogfight_start", {}, "POST", "/scenarios/dogfight", {"aircraft": 6, "teams": "ffa"}),
+    ("dogfight_stop", {}, "DELETE", "/scenarios/dogfight", None),
+    ("dogfight_status", {}, "GET", "/scenarios/dogfight", None),
+    ("leaderboard", {"by": "rams"}, "GET", "/arena/leaderboard", None),
+]
+
+
+def test_app_server_lists_the_dogfight_tools(stub):
+    names = {"dogfight_start", "dogfight_stop", "dogfight_status", "leaderboard"}
+    assert set(match_mcp.MATCH_TOOL_NAMES) == names
+    assert "dogfight_start" in app_mcp.INSTRUCTIONS and "sticks only" in app_mcp.INSTRUCTIONS
+    server = make(app_mcp, stub)
+    listed = {t["name"]: t for t in rpc(server, "tools/list")["result"]["tools"]}
+    assert set(match_mcp.MATCH_TOOL_NAMES) <= set(listed)
+    assert listed["leaderboard"]["annotations"]["readOnlyHint"] is True
+    assert listed["dogfight_status"]["annotations"]["readOnlyHint"] is True
+    props = set(listed["dogfight_start"]["inputSchema"]["properties"])
+    assert {"aircraft", "teams", "roles", "programs", "arena", "airframe", "duration_s", "respawn"} <= props
+
+
+@pytest.mark.parametrize(
+    ("tool", "args", "method", "path", "body"),
+    MATCH_REST,
+    ids=[f"{c[0]}-{i}" for i, c in enumerate(MATCH_REST)],
+)
+def test_dogfight_tool_requests(stub, tool, args, method, path, body):
+    server = make(app_mcp, stub)
+    stub.responses["/scenarios/dogfight"] = {"running": True, "phase": "booting", "aircraft": []}
+    stub.responses["/arena/leaderboard"] = {"by": "rams", "match": None, "rows": []}
+    result = call(server, tool, args)
+    assert result["isError"] is False, result
+    req = last(stub)
+    assert (req["method"], req["path"], req["body"]) == (method, path, body)
+    assert req["session"] == "tok1"
+    if tool == "leaderboard":
+        assert req["query"] == {"by": ["rams"]}

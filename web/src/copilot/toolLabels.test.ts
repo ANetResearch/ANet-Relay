@@ -18,4 +18,8 @@ describe('tool labels', () => {
     expect(toolLabel('challenge_submit', 'en')).toBe('Submit to challenge')
     expect(toolLabel('airframe_set', 'zh')).toBe('设置机体')
   })
+  it('names the dogfight tools (WP-B)', () => {
+    expect(toolLabel('dogfight_start', 'zh')).toBe('开始狗斗')
+    expect(toolLabel('leaderboard', 'en')).toBe('Leaderboard')
+  })
 })

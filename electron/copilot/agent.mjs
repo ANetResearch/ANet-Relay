@@ -15,6 +15,7 @@ import { appTools } from "./tools-app.mjs";
 import { compactVehicle, defineTool, enc, flightHelpers, SESSION_NAME, text, Type, VID } from "./tools-common.mjs";
 import { dangerResolver, deviceTools } from "./tools-device.mjs";
 import { PROGRAM_DANGER, programTools } from "./tools-programs.mjs";
+import { matchTools } from "./tools-match.mjs"; // WP-B (07 §3-§4)
 
 export const APIS = ["openai-completions", "anthropic-messages", "openai-responses"];
 const PROVIDER = "relay-copilot";
@@ -374,6 +375,7 @@ export function toolsFor(relay, scope = "all", danger = dangerResolver(relay), l
   const sticks = level !== "full";
   const tools = relayTools(relay).filter((t) => !sticks || STICKS_TOOLS.has(t.name));
   tools.push(...programTools(relay));
+  tools.push(...matchTools(relay)); // WP-B: dogfight and leaderboard, in every scope
   if (scope === "flight") return tools;
   tools.push(...deviceTools(relay, danger).filter((t) => !sticks || !STICKS_HIDDEN_DEVICE.has(t.name)));
   if (scope === "flight+device") return tools;
@@ -399,6 +401,8 @@ export function systemPrompt(lang, scope = "all", level = "full") {
       ? "- relay_* (flight): read status, set a manual mode, arm and disarm, push the sticks for a few seconds (relay_sticks_for), land as a safety action, release the claim and stop."
       : "- relay_* (flight): read status and fly with takeoff, hover, move, yaw, land, whole sequences (relay_plan), timed stick pushes (relay_sticks_for), arming, manual modes and flying a recorded flight again (relay_refly).",
     "- program_*, challenge_*, job_status, duel_run, ladder, airframe_set (programs): write, check, test, judge and deploy onboard flight programs that fly the aircraft at 50 Hz, tune them live, read their status and log, run duels, and set simulator airframe defects. The guide at the end of these instructions explains how to write them.",
+    // WP-B (07 §3-§4)
+    "- dogfight_start, dogfight_stop, dogfight_status, leaderboard (arena): start a timed dogfight of simulated aircraft in one call (Relay adds the simulators, arms them and deploys a program per role; the programs fly with sticks only), stop it, read its state and the leaderboard of this terminal and its LAN peers.",
   );
   if (scope !== "flight") {
     parts.push(
@@ -417,6 +421,8 @@ export function systemPrompt(lang, scope = "all", level = "full") {
       : "- For several actions in a row (for example take off, hover, move, turn, land), plan them and call relay_plan once.",
     "- Programs: write -> program_validate -> program_test -> challenge_submit or a simulator -> program_deploy -> program_params. Editing programs needs no approval; deploying, resuming or retuning (program_params) one on a real aircraft waits for the operator. Releasing the claim, pushing sticks yourself or starting a skill ends your program.",
     "- Before flying, check relay_fleet or relay_vehicle when you are not sure which aircraft is meant or whether it is ready.",
+    // WP-B (07 §3): phrases that mean a dogfight go straight to dogfight_start; it sets up the aircraft itself
+    '- Dogfights: call dogfight_start directly, without arming or deploying anything first. "开一场 6 机混战，4 架开火 2 架撞击" or "a six-aircraft free-for-all, four shooting and two ramming" -> dogfight_start {aircraft: 6, teams: "ffa", roles: {gunner: 4, rammer: 2}}; "两队对抗" / "two teams" -> teams: 2; "三队" -> teams: 3; "打 5 分钟" -> duration_s: 300; "不复活" -> respawn: false; "用困难猎手" -> programs: {gunner: "hunter_hard"}. "谁击落最多" / "排行榜" -> leaderboard {by: "downs"}; "谁活得最久" -> by: "survival"; "命中率" -> by: "accuracy"; "撞毁最多" -> by: "rams". Simulators only: never put a real aircraft in a dogfight.',
     "- If the user did not name an aircraft, use the selected aircraft given in the message context; if none, ask.",
     "- A person can possess any aircraft at any time and always wins. If a tool reports possessed_by_human, stop and tell the user to release the aircraft first. Never retry around it.",
     "- Real aircraft only move after the operator approves each command in the chat; this covers every motion tool, arming, mode changes, program deployment and every device tool that can spin a motor, drive an output, override RC, reboot, calibrate, terminate, force-arm, write a parameter or fly a target. If they decline, do not insist. The approval is the confirmation: never ask the user to type a confirm word.",
