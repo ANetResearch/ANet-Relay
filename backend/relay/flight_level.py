@@ -2,13 +2,14 @@
 
 ``agent_flight_level`` is ``sticks`` (the default) or ``full``; only the operator changes it. At ``sticks``
 an agent session flies like a person with a radio: sticks (WebSocket stream, ``POST /sticks``, the
-``sticks`` skill), arm / disarm, the manual-class modes (STABILIZE / ACRO / DRIFT, PX4 MANUAL / STABILIZED /
-ACRO), fire, onboard programs, and the safety actions (emergency stop; ``land`` is kept as a safety action
-and its event is tagged ``safety``). Everything that flies for it is refused with 403 ``sticks_only``
-(``detail.level = "sticks"``): the high-level skills, plans containing them, switches to altitude, position
-or automatic modes, re-flying a plan or a path (or recorded sticks in such modes), the high-level raw
-MAVLink commands of the device interface and RC overrides beyond channels 1-4 (a mode switch channel).
-The operator is never limited.
+``sticks`` skill), arm / disarm, the manual modes (STABILIZE / ACRO, PX4 MANUAL / STABILIZED / ACRO; not
+DRIFT, which damps velocity and holds the climb rate), fire, onboard programs, and the safety actions
+(emergency stop; ``land`` is kept as a safety action and its event is tagged ``safety``). Everything that
+flies for it is refused with 403 ``sticks_only`` (``detail.level = "sticks"``): the high-level skills, plans
+containing them, switches to altitude, position or automatic modes, re-flying a plan or a path (or recorded
+sticks in such modes), the high-level raw MAVLink commands of the device interface, RC overrides beyond
+channels 1-4 (a mode switch channel) and switching a simulator's hover assist on (on a new simulator too):
+it would hold the hover for the session. The operator is never limited.
 
 The checks are plain functions called by the fleet service at each entry point (REST, WebSocket and the
 MCP servers all reach these), so every surface enforces the same rule.
@@ -75,8 +76,19 @@ def check_plan(settings: Any, actor: Actor, steps: Iterable[dict[str, Any]]) -> 
             _refuse(f"plan step {action}")
 
 
+# 06 §5: STABILIZE / MANUAL / ACRO (PX4 STABILIZED is its STABILIZE). ArduPilot DRIFT is classed manual for
+# possession (it takes sticks) but assists: it damps velocity and holds the climb rate.
+STICKS_MODES = frozenset({"STABILIZE", "ACRO", "MANUAL", "STABILIZED"})
+
+
 def manual_mode(autopilot: str | None, mode: str) -> bool:
-    return modes.mode_class(autopilot, mode) == "manual"
+    return mode in STICKS_MODES and modes.mode_class(autopilot, mode) == "manual"
+
+
+def check_sim_assist(settings: Any, actor: Actor, on: bool) -> None:
+    """Hover assist holds the hover for the pilot: a session at ``sticks`` may switch it off, not on."""
+    if on and limited(settings, actor):
+        _refuse("hover assist")
 
 
 def check_mode(settings: Any, actor: Actor, autopilot: str | None, mode: str) -> None:

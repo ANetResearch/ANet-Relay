@@ -73,7 +73,7 @@ Setting `agent_flight_level` (design 06 §5) decides what agent sessions may fly
 
 | Level | Agent sessions may |
 |---|---|
-| `sticks` (default) | Push sticks (WebSocket stream, `POST /vehicles/{id}/sticks`, the `sticks` skill), arm and disarm, switch to a manual mode (ArduPilot STABILIZE / ACRO / DRIFT, PX4 MANUAL / STABILIZED / ACRO), fire, deploy and run onboard programs, and the safety actions: emergency stop and `land` (its events carry `safety`) |
+| `sticks` (default) | Push sticks (WebSocket stream, `POST /vehicles/{id}/sticks`, the `sticks` skill), arm and disarm, switch to a manual mode (ArduPilot STABILIZE / ACRO, PX4 MANUAL / STABILIZED / ACRO; not DRIFT, which assists), switch a simulator's hover assist off (not on), fire, deploy and run onboard programs, and the safety actions: emergency stop and `land` (its events carry `safety`) |
 | `full` | Everything in this guide, as in 0.3 |
 
 At `sticks` the skills `takeoff`, `hold`, `move`, `yaw`, `goto`, `rtl`, `velocity` and `attitude`, plans that contain them, re-fly as a plan or a path, altitude, position and automatic modes, the flight commands of the device interface and RC overrides above channel 4 return 403 `sticks_only` with `detail.level = "sticks"` and `detail.action`. The flight MCP server lists only the tools that still work (13 of 20; it reads the setting on every `tools/list`), and Copilot drops the same tools and tells its model to write programs. Stable flight at this level is the job of an onboard program: the agent works at its own pace on the program, its parameters and its results, and the program closes the 50 Hz loop.

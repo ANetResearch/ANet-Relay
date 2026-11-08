@@ -194,6 +194,17 @@ def test_rest_and_websocket_enforce_the_level(client):
         assert client.svc.vehicles["sim-1"].sticks.source == "agent"
     # the level is the operator's: an agent cannot raise it, even with app control
     client.svc.update_settings({"agents_app_control": True})
+    # hover assist holds the hover for the session: not on a new simulator, not switched on (off is fine)
+    resp = client.post("/api/v1/sims", headers=agent, json={"count": 1, "hover_assist": True})
+    assert resp.status_code == 403 and code(resp) == "sticks_only"
+    resp = client.post("/api/v1/sims", headers=agent, json={"count": 1, "hover_assist": False})
+    assert resp.status_code == 200, resp.json()
+    resp = client.post("/api/v1/vehicles/sim-1/mode", headers=agent, json={"name": "DRIFT"})
+    assert resp.status_code == 403 and code(resp) == "sticks_only"
+    resp = client.post("/api/v1/sims/sim-2/assist", headers=agent, json={"on": True})
+    assert resp.status_code == 403 and code(resp) == "sticks_only"
+    resp = client.post("/api/v1/sims/sim-2/assist", headers=agent, json={"on": False})
+    assert resp.status_code == 200, resp.json()
     resp = client.put("/api/v1/settings", headers=agent, json={"agent_flight_level": "full"})
     assert resp.status_code == 403 and code(resp) == "operator_required"
     resp = client.put("/api/v1/settings", headers=HEADERS, json={"agent_flight_level": "full"})

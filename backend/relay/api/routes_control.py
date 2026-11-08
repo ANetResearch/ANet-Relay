@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
 
+from .. import flight_level
 from ..errors import err
 from . import schemas
 from .deps import actor, require_app_control, require_operator, service
@@ -56,6 +57,9 @@ def confirm(request: Request, vid: str, body: schemas.ConfirmBody) -> dict[str, 
 def add_sims(request: Request, body: schemas.SimsBody | None = None) -> dict[str, Any]:
     body = body or schemas.SimsBody()
     airframe = body.airframe.model_dump(exclude_none=True) if body.airframe else None  # WP-2a
+    # WP-1 (06 §5): a session at the sticks level cannot ask for hover assist on a new simulator either
+    if body.hover_assist:
+        flight_level.check_sim_assist(service(request).settings, actor(request, "other"), True)
     return {
         "added": service(request).add_sims(
             body.count, body.autopilot, body.position, body.hover_assist, airframe

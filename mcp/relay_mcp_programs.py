@@ -19,7 +19,7 @@ from relay_mcp_common import VID, RelayClient, RelayError, Tool, schema_tool
 
 GUIDE_PATH = Path(__file__).resolve().parent.parent / "docs" / "programs-guide.md"
 MANUAL_MODE = {"px4": "STABILIZED"}  # anything else (ArduPilot): STABILIZE
-MANUAL_MODES = frozenset({"STABILIZE", "ACRO", "DRIFT", "MANUAL", "STABILIZED"})
+MANUAL_MODES = frozenset({"STABILIZE", "ACRO", "MANUAL", "STABILIZED"})  # 06 §5; not DRIFT
 REVISIONS_SHOWN = 20
 
 PROGRAM_INSTRUCTIONS = (

@@ -73,7 +73,7 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 
 | 等级 | 智能体会话可以 |
 |---|---|
-| `sticks`（缺省） | 推杆（WebSocket 流、`POST /vehicles/{id}/sticks`、`sticks` 技能）、解锁与上锁、切换到手动类模式（ArduPilot STABILIZE / ACRO / DRIFT，PX4 MANUAL / STABILIZED / ACRO）、射击、部署并运行机载程序，以及安全动作：急停与 `land`（其事件标注 `safety`） |
+| `sticks`（缺省） | 推杆（WebSocket 流、`POST /vehicles/{id}/sticks`、`sticks` 技能）、解锁与上锁、切换到手动类模式（ArduPilot STABILIZE / ACRO，PX4 MANUAL / STABILIZED / ACRO；DRIFT 带速度阻尼辅助，不属于此类）、关闭模拟机的悬停辅助（不能开启）、射击、部署并运行机载程序，以及安全动作：急停与 `land`（其事件标注 `safety`） |
 | `full` | 本文的全部接口，与 0.3 相同 |
 
 在 `sticks` 等级下，技能 `takeoff`、`hold`、`move`、`yaw`、`goto`、`rtl`、`velocity`、`attitude`，包含这些动作的动作序列，以动作序列或轨迹方式再飞，定高、定点与自动类模式，设备级接口中的飞行类命令，以及 4 通道以上的 RC 覆盖，均返回 403 `sticks_only`（`detail.level = "sticks"`，`detail.action` 指明被拒绝的操作）。飞行 MCP 服务只列出仍可用的工具（20 个中的 13 个；每次 `tools/list` 都重新读取设置），Copilot 同样去掉这些工具，并提示模型编写程序。在这一等级下，稳定飞行由机载程序完成：智能体按自己的节奏修改程序、调整参数、查看结果，程序负责 50 Hz 的闭环。

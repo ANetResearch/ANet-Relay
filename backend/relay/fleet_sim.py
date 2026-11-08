@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import authority as auth
+from . import flight_level
 from .authority import Actor
 from .errors import err
 from .mav import modes
@@ -62,6 +63,7 @@ class SimOps:
             if v.kind != "sim":
                 raise err("sim_only")
             self._check_sim_assist(v, actor, app_control)
+            flight_level.check_sim_assist(self.settings, actor, bool(on))  # WP-1 (06 §5)
             sim = v.driver.sim
             before = sim.hover_assist
             enter_hold = self.settings.possess_mode != "stabilize"
