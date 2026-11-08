@@ -300,6 +300,37 @@ The arena (05 §7) lets Relay terminals on the same broadcast domain see each ot
 
 A round deals 20 damage (five bring a simulator down) and pushes the airframe; a shot-down simulator stops its motors, falls, disarms on the ground and returns to its seat's spawn point after 5 s (setting `arena_auto_respawn`) or on a reset. Hits are not safety events: they raise no alert. Settings: `peer_enabled`, `peer_port`, `peer_callsign` (≤ 16 characters; empty uses the computer name), `arena_auto_respawn`. SDK: `arena()`, `fire(id, seconds)`.
 
+### Challenges and duels
+
+Onboard programs (design 06 §2) are judged like exercises on a practice site: a **challenge** is a fixed scenario with a scoring rule, a **duel** sets 2–8 programs against each other in the arena. Both run in a **headless evaluator**: a separate worker process that builds an isolated fleet (no sockets, nothing on disk, an injected clock) and steps the same simulated autopilot, airframe defects, stick path, arena rules and program engine as live flight, as fast as the machine allows (about 12× real time with one aircraft, 5–7× with two). Hover assist is always off. The same scenario, seeds and program revisions always give the same result. At most two jobs run at once; the rest wait in a queue of 16.
+
+| Method and path | Auth | Purpose |
+|---|---|---|
+| `GET /challenges` | – | `{challenges: [{id, kind, name_en, name_zh, goal_en, goal_zh, duration_s, visible_seeds, hidden_seeds, opponent, best, attempts}]}` |
+| `GET /challenges/{id}` | – | Adds `scene_*`, `scoring_*`, `sensors`, `hover_assist`, `info` (corners, rings and other public parameters) and the last 20 submissions in `history` |
+| `POST /challenges/{id}/submit` | session or operator | `{program, rev?, params?, visible_only?}` → `{job}`; every visible and hidden seed, or only the visible ones with `visible_only` (not counted as best) |
+| `POST /duels` | session or operator | `{programs: [id or {program, rev?, params?}, …2–8], rounds? (1–20, default 3), seed? (default 1), scenario?: {duration_s (10–180), arena, airframe (ideal / typical / rough), sensors, turbulence}}` → `{job}` |
+| `GET /jobs`, `GET /jobs/{id}` | – | `{job: {id, kind, state (queued / running / done / failed / cancelled), progress, queue_position, programs, result, error}}` |
+| `DELETE /jobs/{id}` | session or operator | Cancel a queued or running job (its worker is stopped) |
+| `GET /ladder` | – | `{ladder: [{rank, program, name, rating, games, wins, draws, losses}], duels}` (Elo, start 1200) |
+| `GET /traces/{id}` | – | A replay trace (below) |
+
+| Challenge | Scenario | Passes when |
+|---|---|---|
+| `liftoff` | Payload: hover throttle about 0.62; barometer, no position | Off the ground within 5 s, then 3 s without a break at 1.0 ± 0.2 m |
+| `hover` | CG forward of the middle and a level error; barometer, no position | From 6 to 26 s: drift ≤ 0.8 m and height 1.0 ± 0.25 m (judged on the truth) |
+| `heading` | Unequal motor efficiencies (yaw drift) | From 5 to 20 s: heading within 10° of the spawn heading, at least 0.4 m up |
+| `square` | UWB-like position (10 Hz, σ 5 cm) | The four corners of `info.corners` (radius 0.4 m) in order within 40 s; faster scores higher |
+| `rings` | The `cage-loop` ring course, UWB-like position | Every ring in order within 60 s; timed |
+| `pursuit` | A scripted target circles the centre (3 m, 0.5 m/s, 1.2 m up); contacts and UWB-like position | Within 2 m of the target for at least half of the 60 s; the score is that share |
+| `duel_easy` / `duel_medium` / `duel_hard` | One against one with `hunter_easy` / `hunter_medium` / `hunter_hard` (arena radius 8 m, ceiling 4 m) | A win: the opponent shot down, crashed or out of the arena while you still fly; time up scores by hit points left |
+
+Scores are 0–100. A submission runs every seed, passes when every seed passes and scores their mean; `result = {score, passed, metrics, seeds: [{seed (null when hidden), hidden, score, passed, metrics, trace_id}], trace_id, best, speed}`. Hidden seeds fly other airframes and leave no trace. Each challenge keeps its best full submission and the last 50 in `<data_dir>/programs/results.json`.
+
+A duel round puts one aircraft per program on a ring of spawn points around the arena centre (shuffled and with airframes seeded by `seed + round − 1`), all facing the centre. An aircraft is out when it is shot down, crashes or leaves the arena box; the round ends when one is left (after one second) or the time is up. Placement: still flying first, then survival time, hit points, hits. The last aircraft flying wins the round; otherwise it is a draw. The ladder (`<data_dir>/programs/ladder.json`) moves by pairwise Elo over each round's placements (K = 32, split over the other entrants). `result = {rounds: [{round, seed, winner, draw, duration_s, aircraft: [{id, program, alive, hp, hits, hits_taken, survived_s, reason, place}], trace_id}], standings, ladder: [{program, rating, delta}], speed}`. Event `judge_finished` (`data.job`, `data.state`, `data.score`, `data.passed`) when a job ends.
+
+A **trace** (`GET /traces/{id}`, gzip on disk, the newest 300 kept) replays every aircraft of one seed or round at 10 Hz: `{id, job, version: 1, kind, challenge?, round?, scenario, seed, hz, duration_s, fields: ["x", "y", "z", "roll", "pitch", "yaw", "throttle", "hp", "flags"], arena, course, markers, t: [...], aircraft: [{id, label, program, rev, name, role, team, spawn, frames: [[…one row per t…]], states: [[t, state]]}], shots: [{id, shooter, t0, p, v}], events: [{t, kind, vehicle, …}], result}`. Positions are world ENU metres with the arena centre at the origin (the snapshot's frame), attitude in radians (yaw is the compass heading 0..2π), `flags` bits 1 armed, 2 airborne, 4 shot down, 8 crashed, 16 out. A shot leaves `p` at `t0` with velocity `v` and follows the arena ballistics (`web/src/arena/ballistics.ts`). Events: `hit`, `down`, `crash`, `out`, `liftoff`, `corner`, `ring`, `course_finished`, `program_faulted`, `program_stopped`. The full contract is in the `relay.judge` module docstring and in `Trace` of `web/src/api/schema.json`.
+
 ## 6. WebSocket `/api/v1/stream`
 
 Server → client:
@@ -333,6 +364,7 @@ Each event is `{seq, t, kind, vehicle, session, text_en, text_zh, data}`. The ki
 | `refly_started` / `refly_finished` / `refly_failed` | Re-fly |
 | `sim_assist_changed` | Hover assist of a simulated aircraft switched (`data.hover_assist`) |
 | `sim_airframe_changed` | Airframe defects of a simulated aircraft set (`data.preset`, `data.seed`, `data.by`) |
+| `judge_finished` | A challenge or duel job ended (`data.job`, `data.kind`, `data.state`, `data.score`, `data.passed`) |
 | `peer_joined` / `peer_left` / `arena_hit` / `arena_down` | LAN arena: a terminal joined or left, a hit scored or taken, a simulator shot down |
 | `device_command` / `motor_test` / `motor_test_stopped` / `actuator_set` / `rc_override` / `message_interval` / `home_set` / `rebooting` / `calibration_started` / `terminated` | Device-level operations |
 | `app_command` | An interface action run by a session or the operator (`data.action`, `data.by`) |
@@ -349,10 +381,10 @@ The full list is in `web/src/api/schema.json` (`EventKind`). Errors share one bo
 | 400 | `invalid_request`, `confirm_required`, `outside_safety_volume`, `unknown_mode`, `command_not_allowed` |
 | 401 | `auth_required`, `session_expired` (open a new session) |
 | 403 | `operator_required`, `session_required`, `untrusted_host`, `app_control_disabled` |
-| 404 | `vehicle_not_found`, `course_not_found`, `unknown_skill`, `param_not_found`, `record_not_found`, `procedure_unknown`, `procedure_not_found`, `test_run_not_found` |
+| 404 | `vehicle_not_found`, `course_not_found`, `unknown_skill`, `param_not_found`, `record_not_found`, `procedure_unknown`, `procedure_not_found`, `test_run_not_found`, `challenge_not_found`, `job_not_found`, `trace_not_found` |
 | 409 | `not_claimed`, `claimed_by_other`, `possessed_by_human`, `claim_suspended`, `preflight_blocked`, `arm_rejected`, `mode_rejected`, `not_armed`, `crashed`, `capability_missing`, `no_position_estimate`, `not_airborne`, `no_plan`, `must_be_disarmed`, `message_not_seen`, `refly_unavailable`, `ui_action_failed`, `procedure_running`, `no_procedure`, `procedure_step_mismatch`, `procedure_not_waiting`, `arena_off`, `arena_down` |
-| 429 | `rate_limited` |
-| 503 | `link_not_ready`, `backend_busy`, `ui_unavailable` |
+| 429 | `rate_limited`, `judge_queue_full` |
+| 503 | `link_not_ready`, `backend_busy`, `ui_unavailable`, `judge_unavailable` |
 | 504 | `ui_timeout` |
 
 ## 8. MCP servers

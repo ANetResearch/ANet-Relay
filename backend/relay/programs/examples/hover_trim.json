@@ -1,12 +1,13 @@
 {
   "name": "Hover trim",
   "name_zh": "悬停配平",
-  "description": "Climbs to target_alt and holds it on the barometer; an integrator learns the hover throttle. Attitude stays level.",
-  "description_zh": "爬升到 target_alt 并依据气压高度保持；积分项学习悬停油门，姿态保持水平。",
+  "description": "Climbs to target_alt and holds it on the barometer; an integrator learns the hover throttle. Without a position source it holds its place from the accelerometer: it levels the reading on the ground, then turns the drag it feels into a velocity and leans against the drift.",
+  "description_zh": "爬升到 target_alt 并依据气压高度保持；积分项学习悬停油门。没有定位源时依据加速度计保持位置：先在地面校准读数，再把感受到的空气阻力换算为速度，以小角度倾斜抵消漂移。",
   "tests": [
     {"name": "Below target climbs", "obs": {"alt": 0.5, "vz": 0.0}, "expect": {"throttle": [0.55, 1.0], "roll": [0, 0], "pitch": [0, 0], "state": "climb"}},
     {"name": "Above target descends", "obs": {"alt": 1.5, "vz": 0.0}, "expect": {"throttle": [0.0, 0.45]}},
     {"name": "At target holds", "obs": {"alt": 1.0, "vz": 0.0}, "expect": {"throttle": [0.45, 0.55], "state": "hold"}},
-    {"name": "Disarmed idles", "obs": {"armed": false, "airborne": false}, "expect": {"throttle": [0, 0], "state": "disarmed"}}
+    {"name": "Disarmed idles", "obs": {"armed": false, "airborne": false}, "expect": {"throttle": [0, 0], "state": "disarmed"}},
+    {"name": "Levels on the ground first", "obs": {"airborne": false, "alt": 0.0, "vz": 0.0}, "expect": {"throttle": [0, 0], "roll": [0, 0], "pitch": [0, 0], "state": "level"}}
   ]
 }

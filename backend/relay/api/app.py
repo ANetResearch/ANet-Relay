@@ -23,6 +23,7 @@ from . import (
     routes_control,
     routes_device,
     routes_fleet,
+    routes_judge,
     routes_procedures,
     routes_programs,
     routes_records,
@@ -124,5 +125,6 @@ def create_app(
     app.include_router(routes_procedures.router, prefix=API_PREFIX)  # bench procedures (WP-B)
     app.include_router(routes_arena.router, prefix=API_PREFIX)  # WP-D: LAN arena
     app.include_router(routes_programs.router, prefix=API_PREFIX)  # WP-1: onboard programs
+    app.include_router(routes_judge.router, prefix=API_PREFIX)  # WP-2b: challenges, duels, jobs, traces
     app.include_router(stream.router, prefix=API_PREFIX)
     return app

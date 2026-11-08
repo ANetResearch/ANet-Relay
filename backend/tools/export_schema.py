@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from pydantic.json_schema import models_json_schema  # noqa: E402
 
-from relay.api import schemas, schemas_app, schemas_procedures, schemas_programs  # noqa: E402
+from relay.api import schemas, schemas_app, schemas_judge, schemas_procedures, schemas_programs  # noqa: E402
 
 DEFAULT_OUT = ROOT / "web" / "src" / "api" / "schema.json"
 
@@ -54,6 +54,7 @@ def build() -> dict[str, Any]:
         **schemas_app.EXPORTED,
         **schemas_procedures.EXPORTED,
         **schemas_programs.EXPORTED,  # WP-1
+        **schemas_judge.EXPORTED,  # WP-2b
     }
     models = [(model, "serialization") for model in exported.values()]
     keys, defs = models_json_schema(models, by_alias=True, ref_template="#/$defs/{model}")

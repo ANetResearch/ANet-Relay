@@ -300,6 +300,37 @@ POST /api/v1/vehicles/sim-1/plan
 
 每发伤害 20（5 发击落），并对机体施加冲量；被击落的模拟机电机停转、坠落、触地后上锁，5 s 后回到座位出生点（设置 `arena_auto_respawn`）或在复位时恢复。命中不是安全事件，不产生告警。设置：`peer_enabled`、`peer_port`、`peer_callsign`（≤ 16 字符，留空使用计算机名）、`arena_auto_respawn`。SDK：`arena()`、`fire(id, seconds)`。
 
+### 题目与对抗
+
+机载程序（设计 06 §2）可以像刷题一样评测：**题目**是固定场景加判分规则，**对抗**让 2–8 个程序在对抗场中比赛。两者都在**无头评测器**中运行：独立的工作进程构造一个隔离的机群（不开端口、不写磁盘、注入时钟），以机器允许的最快速度推进与实时飞行相同的模拟飞控、机体缺陷、摇杆路径、对抗规则与程序引擎（单机约 12 倍实时，双机约 5–7 倍）。悬停辅助一律关闭。同一场景、种子与程序版本的结果完全相同。同时最多运行 2 个任务，其余在最多 16 个的队列中等待。
+
+| 方法与路径 | 认证 | 用途 |
+|---|---|---|
+| `GET /challenges` | – | `{challenges: [{id, kind, name_en, name_zh, goal_en, goal_zh, duration_s, visible_seeds, hidden_seeds, opponent, best, attempts}]}` |
+| `GET /challenges/{id}` | – | 另含 `scene_*`、`scoring_*`、`sensors`、`hover_assist`、`info`（角点、圆环等公开参数）与最近 20 次提交 `history` |
+| `POST /challenges/{id}/submit` | 会话或操作员 | `{program, rev?, params?, visible_only?}` → `{job}`；运行全部可见与隐藏种子，`visible_only` 时只运行可见种子（不计入最好成绩） |
+| `POST /duels` | 会话或操作员 | `{programs: [id 或 {program, rev?, params?}，2–8 个], rounds?（1–20，缺省 3）, seed?（缺省 1）, scenario?: {duration_s（10–180）, arena, airframe（ideal / typical / rough）, sensors, turbulence}}` → `{job}` |
+| `GET /jobs`、`GET /jobs/{id}` | – | `{job: {id, kind, state（queued / running / done / failed / cancelled）, progress, queue_position, programs, result, error}}` |
+| `DELETE /jobs/{id}` | 会话或操作员 | 取消排队或运行中的任务（停止其工作进程） |
+| `GET /ladder` | – | `{ladder: [{rank, program, name, rating, games, wins, draws, losses}], duels}`（Elo，初始 1200） |
+| `GET /traces/{id}` | – | 回放轨迹（见下） |
+
+| 题目 | 场景 | 通过条件 |
+|---|---|---|
+| `liftoff` | 载重使悬停油门约 0.62；有气压计、无定位源 | 5 s 内离地，并在 1.0 ± 0.2 m 连续保持 3 s |
+| `hover` | 重心前偏与水平校准误差；有气压计、无定位源 | 6–26 s 内漂移 ≤ 0.8 m、高度 1.0 ± 0.25 m（按真值判分） |
+| `heading` | 电机效率不一致（偏航漂移） | 5–20 s 内航向与出生航向相差 ≤ 10°，高度不低于 0.4 m |
+| `square` | UWB 式定位（10 Hz，σ 5 cm） | 40 s 内按序经过 `info.corners` 四个角点（半径 0.4 m），越快分越高 |
+| `rings` | `cage-loop` 穿环航线，UWB 式定位 | 60 s 内按序穿过全部圆环，计时 |
+| `pursuit` | 脚本目标机绕中心飞行（半径 3 m、0.5 m/s、高 1.2 m）；有接触传感器与 UWB 式定位 | 60 s 内至少一半时间与目标相距 2 m 以内；分数即该比例 |
+| `duel_easy` / `duel_medium` / `duel_hard` | 与 `hunter_easy` / `hunter_medium` / `hunter_hard` 一对一（场地半径 8 m、天花板 4 m） | 胜利：对手被击落、坠毁或出界而自身仍在飞行；到时按剩余生命值计分 |
+
+分数 0–100。一次提交运行全部种子，全部通过才算通过，分数为各种子平均；`result = {score, passed, metrics, seeds: [{seed（隐藏种子为 null）, hidden, score, passed, metrics, trace_id}], trace_id, best, speed}`。隐藏种子的机体缺陷不同，不保存轨迹。每题的最好成绩与最近 50 次提交保存在 `<data_dir>/programs/results.json`。
+
+对抗的每一局把每个程序的一架飞机放在场地中心周围的出生环上（位置打乱、机体缺陷按 `seed + 局号 − 1` 生成），均面向中心。被击落、坠毁或飞出场地边界即出局；只剩一架（再等 1 s）或时间到时本局结束。名次：仍在飞行者优先，其次按存活时间、剩余生命值、命中数。最后仍在飞行的飞机赢得本局，否则为平局。排名表（`<data_dir>/programs/ladder.json`）按每局名次两两计算 Elo（K = 32，按其他参赛者数均分）。`result = {rounds: [{round, seed, winner, draw, duration_s, aircraft: [{id, program, alive, hp, hits, hits_taken, survived_s, reason, place}], trace_id}], standings, ladder: [{program, rating, delta}], speed}`。任务结束时发出事件 `judge_finished`（`data.job`、`data.state`、`data.score`、`data.passed`）。
+
+**轨迹**（`GET /traces/{id}`，磁盘上 gzip 压缩，保留最近 300 条）以 10 Hz 回放一个种子或一局中的全部飞机：`{id, job, version: 1, kind, challenge?, round?, scenario, seed, hz, duration_s, fields: ["x", "y", "z", "roll", "pitch", "yaw", "throttle", "hp", "flags"], arena, course, markers, t: [...], aircraft: [{id, label, program, rev, name, role, team, spawn, frames: [[…每个 t 一行…]], states: [[t, 状态名]]}], shots: [{id, shooter, t0, p, v}], events: [{t, kind, vehicle, …}], result}`。位置为世界 ENU 坐标（米，场地中心为原点，与快照相同），姿态为弧度（yaw 为罗盘航向 0..2π），`flags` 位：1 已解锁、2 离地、4 被击落、8 坠毁、16 出界。子弹在 `t0` 时刻以速度 `v` 从 `p` 射出，之后按对抗场弹道运动（`web/src/arena/ballistics.ts`）。事件：`hit`、`down`、`crash`、`out`、`liftoff`、`corner`、`ring`、`course_finished`、`program_faulted`、`program_stopped`。完整约定见 `relay.judge` 模块说明与 `web/src/api/schema.json` 中的 `Trace`。
+
 ## 6. WebSocket `/api/v1/stream`
 
 服务端 → 客户端：
@@ -333,6 +364,7 @@ POST /api/v1/vehicles/sim-1/plan
 | `refly_started` / `refly_finished` / `refly_failed` | 再飞 |
 | `sim_assist_changed` | 模拟机悬停辅助已切换（`data.hover_assist`） |
 | `sim_airframe_changed` | 模拟机机体缺陷已设置（`data.preset`、`data.seed`、`data.by`） |
+| `judge_finished` | 题目或对抗评测任务结束（`data.job`、`data.kind`、`data.state`、`data.score`、`data.passed`） |
 | `peer_joined` / `peer_left` / `arena_hit` / `arena_down` | 局域网联机：终端加入或离开、我方命中或被命中、模拟机被击落 |
 | `device_command` / `motor_test` / `motor_test_stopped` / `actuator_set` / `rc_override` / `message_interval` / `home_set` / `rebooting` / `calibration_started` / `terminated` | 设备级操作 |
 | `app_command` | 会话或操作员执行的界面动作（`data.action`、`data.by`） |
@@ -349,10 +381,10 @@ POST /api/v1/vehicles/sim-1/plan
 | 400 | `invalid_request`、`confirm_required`、`outside_safety_volume`、`unknown_mode`、`command_not_allowed` |
 | 401 | `auth_required`、`session_expired`（重新打开会话） |
 | 403 | `operator_required`、`session_required`、`untrusted_host`、`app_control_disabled` |
-| 404 | `vehicle_not_found`、`course_not_found`、`unknown_skill`、`param_not_found`、`record_not_found`、`procedure_unknown`、`procedure_not_found`、`test_run_not_found` |
+| 404 | `vehicle_not_found`、`course_not_found`、`unknown_skill`、`param_not_found`、`record_not_found`、`procedure_unknown`、`procedure_not_found`、`test_run_not_found`、`challenge_not_found`、`job_not_found`、`trace_not_found` |
 | 409 | `not_claimed`、`claimed_by_other`、`possessed_by_human`、`claim_suspended`、`preflight_blocked`、`arm_rejected`、`mode_rejected`、`not_armed`、`crashed`、`capability_missing`、`no_position_estimate`、`not_airborne`、`no_plan`、`must_be_disarmed`、`message_not_seen`、`refly_unavailable`、`ui_action_failed`、`procedure_running`、`no_procedure`、`procedure_step_mismatch`、`procedure_not_waiting`、`arena_off`、`arena_down` |
-| 429 | `rate_limited` |
-| 503 | `link_not_ready`、`backend_busy`、`ui_unavailable` |
+| 429 | `rate_limited`、`judge_queue_full` |
+| 503 | `link_not_ready`、`backend_busy`、`ui_unavailable`、`judge_unavailable` |
 | 504 | `ui_timeout` |
 
 ## 8. MCP 服务
