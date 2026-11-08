@@ -13,8 +13,11 @@ own sticks. Programs only ever fly with sticks (06 §5); nothing here commands a
 target. While the scenario runs, an aircraft that leaves the arena (radius + 0.5 m, ceiling + 0.5 m) is
 brought down; a shot-down or crashed aircraft comes back at its spawn point after ``RESPAWN_S`` when
 ``respawn`` is on; a person who possesses an aircraft flies it (the program pauses) and gets it back to the
-program when they release it. At the end (time up or ``stop``) the programs stop, airborne aircraft land as a
-safety action, the session closes and the arena leaves practice mode; the match board stays.
+program when they release it. An emergency stop (one aircraft, or stop-all) is final for the scenario: the
+aircraft it stopped never respawns, re-arms or gets its program back, and when it stops every aircraft the
+scenario ends (reason ``emergency_stop``, no landing skill over the stop). At the end (time up or ``stop``)
+the programs stop, airborne aircraft land as a safety action, the session closes and the arena leaves
+practice mode; the match board stays.
 
 Roles: gunners fire (``hunter_medium`` by default), rammers never do (``rammer``; the arena ignores their
 trigger). Teams: ``ffa`` (every aircraft on its own) or 2 / 3 teams around the ring; a program that declares a
@@ -143,6 +146,7 @@ class Dogfights:
         self._thread: threading.Thread | None = None
         self._wake = threading.Event()
         self._closed = False
+        self._estopped: set[str] = set()  # written on the fleet thread without the lock, read by poll
 
     # ------------------------------------------------------------------ requests (API threads)
 
@@ -164,6 +168,14 @@ class Dogfights:
             self._begin_end(run, reason)
         self._kick()
         return self.view()
+
+    def on_emergency_stop(self, vid: str) -> None:
+        """The fleet applied an emergency stop to ``vid`` (fleet thread). Never takes the lock: ``poll`` holds
+        it while it waits for the fleet thread."""
+        run = self.run
+        if run is not None and run.phase != "done" and any(c.vid == vid for c in run.crafts):
+            self._estopped.add(vid)
+            self._wake.set()
 
     def view(self) -> dict[str, Any]:
         with self._lock:
@@ -422,6 +434,8 @@ class Dogfights:
             if run.phase == "ending":
                 self._ending(run, now)
                 return run.phase != "done"
+            if self._emergency(run, now):
+                return True
             if now >= run.ends_at:
                 self._begin_end(run, "time")
                 return True
@@ -445,6 +459,32 @@ class Dogfights:
                 run.error = run.crafts[0].error
                 self._begin_end(run, "error")
             return True
+
+    def _emergency(self, run: _Run, now: float) -> bool:
+        """Aircraft an operator stopped leave the scenario for good; True when that ended the scenario."""
+        stopped = [c for c in run.crafts if c.vid in self._estopped]
+        self._estopped.difference_update(c.vid for c in stopped)
+        fleet = self.fleet
+        for c in stopped:
+            if c.state in ("stopped", "failed"):
+                continue
+            c.error = "emergency stop"
+            self._set(c, "stopped", now)
+            v = fleet.vehicles.get(c.vid)
+            if v is None:
+                continue
+            # a step of this scenario that raced the stop (an arm, a deploy) is undone; the stop itself stands
+            try:
+                if v.program is not None and v.program.active:
+                    fleet.programs.stop(c.vid, run.actor)
+                if v.armed and not v.airborne():
+                    fleet.arm(c.vid, run.actor, False, wait=False)
+            except RelayError as exc:
+                log.info("dogfight %s after the emergency stop: %s", c.vid, exc.message_en)
+        if stopped and all(c.state in ("stopped", "failed") for c in run.crafts):
+            self._begin_end(run, "emergency_stop")
+            return True
+        return False
 
     def _set(self, c: Craft, state: str, now: float) -> None:
         c.state = state
@@ -562,7 +602,13 @@ class Dogfights:
             except RelayError:
                 pass
             try:
-                if v.airborne() and not v.driver.sim.quad.s.crashed and v.auth.possession is None:
+                if (
+                    reason != "emergency_stop"  # the stop's own descent stands; no skill over it
+                    and c.error != "emergency stop"
+                    and v.airborne()
+                    and not v.driver.sim.quad.s.crashed
+                    and v.auth.possession is None
+                ):
                     fleet.run_skill(c.vid, run.actor, "land", {})  # a safety action at every flight level
             except RelayError as exc:
                 log.info("dogfight %s land: %s", c.vid, exc.message_en)
@@ -635,12 +681,18 @@ class Dogfights:
             "dogfight_finished",
             data={
                 "reason": run.reason,
-                "detail_en": {"time": "time is up", "stopped": "stopped", "error": "set-up failed"}.get(
-                    run.reason or "", run.reason or "-"
-                ),
-                "detail_zh": {"time": "时间到", "stopped": "已停止", "error": "建立失败"}.get(
-                    run.reason or "", run.reason or "-"
-                ),
+                "detail_en": {
+                    "time": "time is up",
+                    "stopped": "stopped",
+                    "error": "set-up failed",
+                    "emergency_stop": "emergency stop",
+                }.get(run.reason or "", run.reason or "-"),
+                "detail_zh": {
+                    "time": "时间到",
+                    "stopped": "已停止",
+                    "error": "建立失败",
+                    "emergency_stop": "急停",
+                }.get(run.reason or "", run.reason or "-"),
             },
         )
 

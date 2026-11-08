@@ -207,6 +207,46 @@ def test_rammers_never_fire(svc, stepper):
     svc.dogfights.stop(OPERATOR)
 
 
+def test_an_emergency_stop_of_one_aircraft_is_final_for_the_scenario(svc, stepper):
+    svc.dogfights.start({"aircraft": 2, "duration_s": 60, "seed": 3}, OPERATOR)
+    assert until(svc, stepper, lambda: all(c.state == "flying" for c in crafts(svc).values()), 10)
+    run(svc, stepper, 1.0)
+    svc.stop("sim-1", OPERATOR)
+    run(svc, stepper, 0.3)
+    assert crafts(svc)["sim-1"].state == "stopped" and crafts(svc)["sim-2"].state == "flying"
+    run(svc, stepper, RESPAWN_S + 4.0)  # no respawn, no re-arm, no program again
+    v = svc.vehicles["sim-1"]
+    assert crafts(svc)["sim-1"].state == "stopped"
+    assert v.program is None or not v.program.active
+    assert (
+        not v.armed or v.airborne()
+    )  # still coming down from the stop at most, never re-armed on the ground
+    assert svc.dogfights.view()["running"]  # the other aircraft fights on
+    svc.dogfights.stop(OPERATOR)
+
+
+def test_stop_all_ends_a_dogfight_and_nothing_flies_again(svc, stepper):
+    svc.dogfights.start({"aircraft": 2, "duration_s": 60, "seed": 4}, OPERATOR)
+    assert until(svc, stepper, lambda: all(c.state == "flying" for c in crafts(svc).values()), 10)
+    run(svc, stepper, 1.0)
+    landings = len(kinds(svc, "skill_started"))
+    svc.stop_all()
+    run(svc, stepper, 0.3)
+    view = svc.dogfights.view()
+    assert not view["running"] and view["reason"] == "emergency_stop"
+    assert len(kinds(svc, "skill_started")) == landings  # no landing skill over the stop
+    assert until(svc, stepper, lambda: svc.dogfights.view()["phase"] == "done", 30)
+    run(svc, stepper, RESPAWN_S + 4.0)
+    stepper.run(1.0)
+    for vid in ("sim-1", "sim-2"):
+        v = svc.vehicles[vid]
+        assert not v.armed and (v.program is None or not v.program.active)
+    finished = kinds(svc, "dogfight_finished")[-1]
+    assert (
+        finished["text_en"] == "Dogfight ended: emergency stop." and finished["text_zh"] == "狗斗结束：急停。"
+    )
+
+
 def test_on_the_lan_a_dogfight_joins_the_running_match(svc, stepper):
     svc.update_settings({"peer_enabled": True})
     stepper.run(game.SEAT_LISTEN_S + 0.1)

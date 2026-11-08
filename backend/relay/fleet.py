@@ -1213,6 +1213,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps, WorldOps):
                 if v.motor_seq is not None or now < v.motor_until:
                     self._stop_motors(v)
                 v.stop_seq = {"until": now + STOP_THROTTLE_S}
+                self.dogfights.on_emergency_stop(v.id)  # WP-B (07 §3): an e-stop ends the aircraft's part
         self.programs.on_authority(v, outcome)  # WP-1: possession pauses, stop and claim end stop programs
         self._update_segment(v, v.controller(self.sessions), wall)
 
