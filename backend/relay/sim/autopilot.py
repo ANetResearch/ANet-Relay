@@ -20,6 +20,11 @@ self-levelled, but the throttle stick is thrust, SYS_STATUS and the estimator re
 horizontal position, every mode that holds altitude or position is refused, LAND descends open loop on
 the learned hover thrust, and the physical effects of ``Quad`` (voltage, ground effect, motor asymmetry,
 turbulence, propeller wake) are switched on.
+
+Airframe defects (06 §4, WP-2a): ``airframe`` (``sim.airframe.Airframe``, ideal by default) adds take-off
+weight, CG offset, level calibration error, motor efficiency, propeller damage and IMU noise, again only
+while hover assist is off. ATTITUDE, SCALED_IMU, VIBRATION and SERVO_OUTPUT_RAW then report what the board
+measures (noise, the level error, per-motor outputs); SCALED_IMU streams only when asked for.
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ from typing import Any
 from ..mav import modes as modetab
 from ..mav.decode import px4_param_decode, px4_param_encode
 from ..mav.mavlink import Encoder, M, Parser
+from .airframe import Airframe, specific_force_body
 from .physics import (
     DRAG_LINEAR,
     DRAG_QUADRATIC,
@@ -133,6 +139,7 @@ EMITTABLE = {
     "VIBRATION",
     "AUTOPILOT_VERSION",
     "HOME_POSITION",
+    "SCALED_IMU",  # WP-2a: on request only (SET_MESSAGE_INTERVAL / REQUEST_MESSAGE), never in a stream group
 }
 REBOOT_SILENCE_S = 2.5
 SETPOINT_STALE_S = 1.0
@@ -250,6 +257,7 @@ class SimAutopilot:
         name: str = "SIM",
         hover_assist: bool = True,
         turbulence: float = 0.0,
+        airframe: Airframe | None = None,
     ) -> None:
         if flavour not in (ARDUPILOT, PX4):
             raise ValueError(flavour)
@@ -272,6 +280,7 @@ class SimAutopilot:
         # Hover assist survives reset(); the airframe seed is the aircraft name, so turbulence repeats.
         self.hover_assist = bool(hover_assist)
         self.quad = Quad(effects=not self.hover_assist, turbulence=turbulence, seed=seed_for(name))
+        self.quad.set_airframe(airframe or Airframe())  # WP-2a: survives reset() like hover assist
         self.estimator_status = False  # PX4: ESTIMATOR_STATUS streams once hover assist has been off
         self.t: float | None = None
         self.boot: float | None = None
@@ -375,6 +384,20 @@ class SimAutopilot:
     @turbulence.setter
     def turbulence(self, value: float) -> None:
         self.quad.turbulence = min(1.0, max(0.0, float(value)))
+
+    # ------------------------------------------------------------------ airframe defects (06 §4, WP-2a)
+
+    @property
+    def airframe(self) -> Airframe:
+        return self.quad.airframe_spec
+
+    def set_airframe(self, airframe: Airframe) -> None:
+        """Fly with a new airframe from the next physics step; allowed armed and in flight.
+
+        The angle-loop integrator starts again from zero, as after a parameter change on a real controller.
+        Call it on the thread that steps the simulation.
+        """
+        self.quad.set_airframe(airframe)
 
     @property
     def has_baro(self) -> bool:
@@ -1095,6 +1118,18 @@ class SimAutopilot:
                 battery_remaining=b.remaining_pct,
             )
         if name == "ATTITUDE":
+            af = self.quad.active_airframe()
+            if af is not None:  # WP-2a: the board's estimate (level error, noise)
+                roll, pitch, yaw, rates = af.noisy_attitude(s.roll, s.pitch, s.yaw, s.rates, self._spin())
+                return M.MAVLink_attitude_message(
+                    time_boot_ms=boot_ms,
+                    roll=roll,
+                    pitch=pitch,
+                    yaw=wrap_pi(yaw),
+                    rollspeed=rates[0],
+                    pitchspeed=rates[1],
+                    yawspeed=rates[2],
+                )
             return M.MAVLink_attitude_message(
                 time_boot_ms=boot_ms,
                 roll=s.roll,
@@ -1104,6 +1139,8 @@ class SimAutopilot:
                 pitchspeed=s.rates[1],
                 yawspeed=s.rates[2],
             )
+        if name == "SCALED_IMU":
+            return self._scaled_imu(boot_ms)
         if name == "LOCAL_POSITION_NED":
             if not self.has_position:
                 return None
@@ -1174,6 +1211,9 @@ class SimAutopilot:
                 (t for o, (t, _) in self.motor_tests.items() if self._motor_testing(o, now)), default=0.0
             )
             level = 4.0 + 3.0 * s.motor if self.armed else 0.3 + 6.0 * spin
+            af = self.quad.active_airframe()
+            if af is not None:  # WP-2a: a damaged propeller shakes the frame
+                level += af.vibration_extra(self._spin())
             return M.MAVLink_vibration_message(
                 time_usec=int(boot_ms * 1000),
                 vibration_x=level,
@@ -1264,8 +1304,43 @@ class SimAutopilot:
         if test is not None and self._motor_testing(output, now):
             return int(1000 + 1000 * test[0])
         if output <= MOTOR_OUTPUTS:
-            return int(1000 + 1000 * self.quad.s.motor) if self.armed else 1000
+            if not self.armed:
+                return 1000
+            af = self.quad.active_airframe()
+            if af is not None and not self.quad.s.crashed:  # WP-2a: the mixer's per-motor outputs
+                return int(1000 + 1000 * af.motor_outputs(thrust_fraction(self.quad.s.motor))[output - 1])
+            return int(1000 + 1000 * self.quad.s.motor)
         return 0
+
+    def _spin(self) -> float:
+        return self.quad.s.motor if self.armed else 0.0
+
+    def _scaled_imu(self, boot_ms: int) -> Any:
+        """SCALED_IMU (WP-2a): specific force in board FRD axes (mG) and body rates (mrad/s), with noise."""
+        s = self.quad.s
+        af = self.quad.active_airframe()
+        trim = af.trim if af is not None else (0.0, 0.0)
+        acc = list(specific_force_body(s.accel, s.roll - trim[0], s.pitch - trim[1], s.yaw))
+        gyro = list(s.rates)
+        if af is not None:
+            a_sigma, g_sigma = af.accel_noise(self._spin()), af.gyro_noise(self._spin())
+            acc = [a + af.gauss(a_sigma) for a in acc]
+            gyro = [g + af.gauss(g_sigma) for g in gyro]
+        mg = [max(-32767, min(32767, round(a / G * 1000.0))) for a in acc]
+        mrad = [max(-32767, min(32767, round(g * 1000.0))) for g in gyro]
+        return M.MAVLink_scaled_imu_message(
+            time_boot_ms=boot_ms,
+            xacc=mg[0],
+            yacc=mg[1],
+            zacc=mg[2],
+            xgyro=mrad[0],
+            ygyro=mrad[1],
+            zgyro=mrad[2],
+            xmag=0,
+            ymag=0,
+            zmag=0,
+            temperature=3500,
+        )
 
     def _emit_due(self, now: float) -> None:
         if now >= self.next_heartbeat:

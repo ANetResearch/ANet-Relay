@@ -14,6 +14,7 @@ import math
 import random
 import zlib
 from dataclasses import dataclass, field
+from typing import Any
 
 G = 9.80665
 DT = 1.0 / 250.0
@@ -186,12 +187,29 @@ class Quad:
         self.effects = effects
         self.turbulence = min(1.0, max(0.0, turbulence))
         self.seed = seed
+        # WP-2a airframe defects (06 §4): an AirframeModel for a non-nominal airframe, consulted only while
+        # ``effects`` is on, so the assisted model and a nominal airframe stay exactly the 05 model.
+        self.airframe: Any = None
+        self.airframe_spec: Any = None
         self._reset_noise()
 
     def reset(self, yaw: float = 0.0) -> None:
         self.s = State(yaw=yaw)
         self.battery = Battery()
         self._reset_noise()
+        if self.airframe is not None:
+            self.airframe.reset()
+
+    def set_airframe(self, spec: Any) -> None:
+        """Fly with ``spec`` (a ``sim.airframe.Airframe``, None for nominal). WP-2a."""
+        from .airframe import AirframeModel  # airframe imports this module
+
+        self.airframe_spec = spec
+        self.airframe = None if spec is None or spec.nominal else AirframeModel(spec)
+
+    def active_airframe(self) -> Any:
+        """The airframe model in effect: only with the physical effects on (hover assist off)."""
+        return self.airframe if self.effects else None
 
     def _reset_noise(self) -> None:
         self.rng = random.Random(self.seed)
@@ -223,11 +241,19 @@ class Quad:
         gain = self.voltage_factor() * self.ground_effect(height)
         if gain <= 0:
             return 1.0
+        af = self.active_airframe()
+        if af is not None:  # WP-2a: take-off weight and motor efficiency
+            return throttle_for_fraction(af.mass / (MASS * THRUST_TO_WEIGHT * gain * af.efficiency()))
         return throttle_for_fraction(1.0 / (THRUST_TO_WEIGHT * gain))
 
     def thrust(self) -> float:
         """Thrust in newtons for the current motor output (voltage, ground effect and wake applied)."""
-        thrust = self.max_thrust * thrust_fraction(self.s.motor) * self.voltage_factor()
+        af = self.active_airframe()
+        if af is not None:  # WP-2a: per-motor efficiency and saturation
+            fraction = af.thrust_fraction(thrust_fraction(self.s.motor))
+            thrust = self.max_thrust * fraction * self.voltage_factor()
+        else:
+            thrust = self.max_thrust * thrust_fraction(self.s.motor) * self.voltage_factor()
         if self.effects:
             thrust *= self.ground_effect() * (1.0 + self.wash)
         return thrust
@@ -282,6 +308,11 @@ class Quad:
         self.battery.step(s.motor, armed, dt)
         if self.effects:
             self._noise(dt)
+        af = self.active_airframe()
+        mass = MASS
+        if af is not None:  # WP-2a
+            mass = af.mass
+            af.step(dt, thrust_fraction(s.motor), armed and not s.on_ground, s.motor if armed else 0.0)
 
         if s.on_ground and not armed:
             s.rates = [0.0, 0.0, 0.0]
@@ -295,6 +326,10 @@ class Quad:
         prev = (s.roll, s.pitch, s.yaw)
         roll_t, pitch_t = cmd.roll, cmd.pitch
         yaw_rate_t = max(-MAX_YAW_RATE, min(MAX_YAW_RATE, cmd.yaw_rate))
+        if af is not None and not s.on_ground:  # WP-2a: what the loops do not correct, and the level error
+            roll_t += af.offset[0]
+            pitch_t += af.offset[1]
+            yaw_rate_t += af.offset[2]
         if s.on_ground:
             roll_t = pitch_t = 0.0
             yaw_rate_t = 0.0 if s.motor < 0.2 else yaw_rate_t
@@ -309,9 +344,9 @@ class Quad:
         cp, sp = math.cos(s.pitch), math.sin(s.pitch)
         cy, sy = math.cos(s.yaw), math.sin(s.yaw)
         # Body z-up axis in NED is -(third column of R_nb); thrust acts along body up.
-        a_n = -thrust / MASS * (cr * sp * cy + sr * sy)
-        a_e = -thrust / MASS * (cr * sp * sy - sr * cy)
-        a_u = thrust / MASS * (cr * cp) - G
+        a_n = -thrust / mass * (cr * sp * cy + sr * sy)
+        a_e = -thrust / mass * (cr * sp * sy - sr * cy)
+        a_u = thrust / mass * (cr * cp) - G
         rel = [s.v[i] - self.wind[i] for i in range(3)]
         speed = math.sqrt(sum(c * c for c in rel))
         # Drag is specified as acceleration (per unit mass), which gives ~7 m/s top speed at 30 deg tilt.
