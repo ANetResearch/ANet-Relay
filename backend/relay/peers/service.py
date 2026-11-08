@@ -22,6 +22,11 @@ peers count against ``MAX_PEERS``.
 
 Nothing here touches a vehicle. ``tick`` returns shots and hits for the arena rules and the joins and
 departures for its events; peers live in ``self.peers`` and nowhere else.
+
+WP-B (07 §4): a peer is version 2 from its first valid version 2 packet (``Peer.version``); its statistics
+block (once per second in STATE) is kept in ``Peer.stats``. COLLIDE and MATCH packets are handed to the arena
+like HIT, with their age at receipt (sender clock difference plus half the round trip), only from joined
+peers; the arena checks them against its own state.
 """
 
 from __future__ import annotations
@@ -101,6 +106,9 @@ class Peer:
     downs: int = 0
     deaths: int = 0
     rtt: deque[float] = field(default_factory=lambda: deque(maxlen=RTT_SAMPLES))
+    # WP-B (07 §4): protocol version and the last statistics block (None: not received, or a 0.4 peer)
+    version: int = wire.LEGACY_VERSION
+    stats: wire.Stats | None = None
 
     @property
     def key(self) -> str:
@@ -134,6 +142,10 @@ class TickResult:
     shots: list[tuple[Peer, wire.Shot, float]] = field(default_factory=list)
     hits: list[tuple[Peer, wire.Hit]] = field(default_factory=list)
     states: list[Peer] = field(default_factory=list)
+    # WP-B (07 §4): (peer, packet, age_s) with the age as for shots; (peer, packet, age_s) for MATCH
+    collides: list[tuple[Peer, wire.Collide, float]] = field(default_factory=list)
+    matches: list[tuple[Peer, wire.Match, float]] = field(default_factory=list)
+    stats: list[Peer] = field(default_factory=list)  # peers whose statistics block changed
 
 
 class _Bucket:
@@ -317,6 +329,13 @@ class PeerService:
 
     def send_hit(self, hit: wire.Hit) -> None:
         self.send(wire.encode_hit(self._next_seq(), self.instance, self.mono_ms(), hit))
+
+    # WP-B (07 §4)
+    def send_collide(self, collide: wire.Collide) -> None:
+        self.send(wire.encode_collide(self._next_seq(), self.instance, self.mono_ms(), collide))
+
+    def send_match(self, match: wire.Match) -> None:
+        self.send(wire.encode_match(self._next_seq(), self.instance, self.mono_ms(), match))
 
     def median_rtt(self) -> int | None:
         values = [p.rtt_ms for p in self.peers.values() if p.rtt_ms is not None]
@@ -503,6 +522,8 @@ class PeerService:
             peer = Peer(head.instance, item.ip, first_seen=item.at, last_seen=item.at)
             self.peers[head.instance] = peer
         peer.last_seen = max(peer.last_seen, item.at)
+        if head.version > peer.version:
+            peer.version = head.version  # WP-B: a valid version 2 packet makes it a version 2 peer
         if packet.type == wire.STATE and isinstance(body, wire.State):
             if peer.last_state_seq is not None and not _seq_newer(head.seq, peer.last_state_seq):
                 return  # out of order: a newer state is already applied
@@ -513,6 +534,9 @@ class PeerService:
             peer.state_at = item.at
             peer.aircraft = {a.index: a for a in body.aircraft}
             peer.hits, peer.downs, peer.deaths = body.hits, body.downs, body.deaths
+            if body.stats is not None and body.stats != peer.stats:
+                peer.stats = body.stats  # WP-B: the leaderboard block (once per second)
+                out.stats.append(peer)
             if not peer.joined:
                 peer.joined = True
                 out.joined.append(peer)
@@ -523,6 +547,12 @@ class PeerService:
             self._shot(peer, body, head.mono_ms, item.at, now, out)
         elif packet.type == wire.HIT and isinstance(body, wire.Hit):
             out.hits.append((peer, body))
+        elif packet.type == wire.COLLIDE and isinstance(body, wire.Collide):
+            if peer.joined and body.to_instance == self.instance:
+                out.collides.append((peer, body, self._age(peer, head.mono_ms, body.t_ms, item.at, now)))
+        elif packet.type == wire.MATCH and isinstance(body, wire.Match):
+            if peer.joined:
+                out.matches.append((peer, body, self._age(peer, 0, 0, item.at, now)))
         elif packet.type == wire.PING:
             self._pongs.append((head.instance, head.mono_ms, item.at))
         elif packet.type == wire.PONG and isinstance(body, wire.Pong):
@@ -549,6 +579,14 @@ class PeerService:
         age = flown_ms / 1000.0 + half + max(0.0, now - at)
         if math.isfinite(age):
             out.shots.append((peer, shot, age))
+
+    def _age(self, peer: Peer, sent_ms: int, t_ms: int, at: float, now: float) -> float:
+        """How old an event of the sender's clock ``t_ms`` is now (``sent_ms`` the packet's send time)."""
+        before_ms = (sent_ms - t_ms) & 0xFFFFFFFF
+        if before_ms >= 0x80000000:
+            before_ms = 0x7FFFFFFF  # an event "after" the send: far too old (or forged), dropped by the rules
+        half = (peer.rtt_ms or 0.0) / 2000.0
+        return before_ms / 1000.0 + half + max(0.0, now - at)
 
     def view(self) -> dict[str, Any]:
         return {
