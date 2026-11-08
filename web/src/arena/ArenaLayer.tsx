@@ -30,7 +30,7 @@ import { ringTouch } from '@/course/touch'
 import { useRelay } from '@/store/relay'
 import { flightAt, type Flight } from './ballistics'
 import { useTA } from './copy'
-import { effectsOf, type Vec3 } from './effects'
+import { effectsOf, liveEvents, type Vec3 } from './effects'
 import { applyEventEffects, applyMarks, explosionLifeS, fx, fxNow, localEnu } from './fx'
 import { useArena, watchArenaEvents, type ArenaRemote } from './store'
 import { ARENA_TOKENS, tokenMs } from './timing'
@@ -421,12 +421,13 @@ function Effects({ owner }: { owner: RedOwner }) {
       applyMarks(fresh, fx)
     })
   }, [])
-  // v0.5 (07 §5): collisions, crashes, shoot-downs and ring touches arrive as events; history is skipped
+  // v0.5 (07 §5): collisions, crashes, shoot-downs and ring touches arrive as events; history is skipped (the
+  // events before this layer mounted, and a backlog fetched after a reconnect: only live ones make effects)
   React.useEffect(() => {
     let last = useRelay.getState().lastSeq
     return useRelay.subscribe((s) => {
       if (s.lastSeq === last) return
-      const fresh = s.events.filter((e) => e.seq > last)
+      const fresh = liveEvents(s.events.filter((e) => e.seq > last), backendNow())
       last = s.lastSeq
       if (fresh.length) applyEventEffects(effectsOf(fresh, locate), fx, ringTouch)
     })

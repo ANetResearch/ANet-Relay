@@ -7,7 +7,11 @@
 //                                                 a ground crash at >= HARD_CRASH_V explodes; 'collision' explodes
 //                                                 (the collision event usually came first and wins the dedupe);
 //                                                 'shot_down' raises dust where the falling wreck lands
-//   ring_touch {vehicle, ring, point}             the ring flashes white (course layer)
+//   ring_touch {vehicle, ring, point}             the ring flashes white (course layer); `ring` is the ring's number in
+//                                                 the run, 1-based as the event text says it, stored 0-based
+//
+// Only live events make effects (`liveEvents`): a batch backfilled after a stream reconnect is history, not a new
+// explosion at an old place.
 //
 // Every explosion carries the key of the aircraft it belongs to (a local id such as "sim-2" or a remote key
 // "<peer>/sim-N"), so the queue can drop the second report of one destruction: a ram arrives as a collision and a
@@ -18,6 +22,9 @@ export type Vec3 = [number, number, number]
 
 /** A ground crash at or above this speed (m/s, when the backend reports one) explodes instead of raising dust. */
 export const HARD_CRASH_V = 6
+
+/** Events older than this (backend seconds) are history: they make no effect. */
+export const LIVE_EVENT_S = 2
 
 export type FxKind = 'explosion' | 'spark' | 'dust'
 
@@ -33,6 +40,7 @@ export interface FxRequest {
 
 export interface RingTouch {
   vehicle: string
+  /** 0-based index of the ring in the run (the course layer's ring index) */
   ring: number
 }
 
@@ -51,6 +59,11 @@ const str = (x: unknown): string | null => (typeof x === 'string' && x ? x : nul
 
 /** Event kinds are compared as strings: collision and ring_touch are v0.5 kinds the generated union may lack. */
 const kindOf = (e: Pick<RelayEvent, 'kind'>): string => e.kind as string
+
+/** The events of a batch that happened within `maxAgeS` of `now` (backend seconds): the ones that still make effects. */
+export function liveEvents<E extends Pick<RelayEvent, 't'>>(events: readonly E[], now: number, maxAgeS = LIVE_EVENT_S): E[] {
+  return events.filter((e) => typeof e.t === 'number' && now - e.t <= maxAgeS)
+}
 
 /** The effects of a batch of events, in order. */
 export function effectsOf(events: readonly RelayEvent[], locate: Locate): EventEffects {
@@ -88,7 +101,8 @@ export function effectsOf(events: readonly RelayEvent[], locate: Locate): EventE
       }
       case 'ring_touch': {
         const vehicle = str(d.vehicle) ?? e.vehicle
-        if (vehicle && typeof d.ring === 'number' && Number.isInteger(d.ring) && d.ring >= 0) out.rings.push({ vehicle, ring: d.ring })
+        // the backend numbers rings from 1 (course.py: the ring just passed); the course layer indexes from 0
+        if (vehicle && typeof d.ring === 'number' && Number.isInteger(d.ring) && d.ring >= 1) out.rings.push({ vehicle, ring: d.ring - 1 })
         break
       }
       default:

@@ -4,7 +4,7 @@ import type { Program } from '@/api'
 import { normChallenges, normJob, normLadder, jobFinished } from './api'
 import { LAB_DICTS, reasonKey, type LabKey } from './copy'
 import { diffStats, lineDiff, withContext } from './diff'
-import { impactsAt, parseTrace, recentEvent, sampleAt, sampleIndex, shotsAt, traceImpacts, traceStageId, type TraceImpactKind } from './trace'
+import { impactsAt, parseTrace, recentEvent, ringNumber, sampleAt, sampleIndex, shotsAt, traceImpacts, traceStageId, type TraceImpactKind } from './trace'
 import { isDirty, NEW_SOURCE, testsOf } from './store'
 import { intLiteral, paramRange, paramStep } from './ParamsTab'
 import { parseObject } from './TestsTab'
@@ -137,6 +137,8 @@ describe('trace', () => {
       ],
     })!
     expect(tr.events[1]).toMatchObject({ with: 'b', crashed: ['a', 'b'], v_rel: 3.1 })
+    // the evaluator numbers rings from 1: 'ring:1' is the first ring, read as "ring 1"
+    expect([ringNumber('ring:1'), ringNumber('ring:3'), ringNumber('ring:0'), ringNumber('b'), ringNumber(null)]).toEqual([1, 3, null, null, null])
     expect(tr.events[0].crashed).toEqual([])
     const fx = traceImpacts(tr).filter((m) => !m.key.startsWith('shot:'))
     expect(fx.map((m) => [m.t, m.kind, m.key])).toEqual([

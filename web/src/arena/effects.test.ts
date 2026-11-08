@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { RelayEvent } from '@/api'
 import { initMotionTier } from '@/ui/motion/tier'
-import { effectsOf, FxDedupe, HARD_CRASH_V, type Vec3 } from './effects'
+import { effectsOf, FxDedupe, HARD_CRASH_V, LIVE_EVENT_S, liveEvents, type Vec3 } from './effects'
 import { addShake, cameraShake, clearShakes, SHAKE_MAX, SHAKE_RANGE, shakeOffset } from './shake'
 
 let seq = 0
@@ -40,6 +40,8 @@ describe('event -> effect mapping (07 §5)', () => {
       ev('crashed', 'sim-2', { reason_code: 'collision', point: [3, 0, 1] }),
       ev('crashed', 'sim-2', { reason_code: 'shot_down', point: [3, 0, 0] }),
       ev('ring_touch', 'sim-1', { vehicle: 'sim-1', ring: 2, point: [0, 0, 1] }),
+      ev('ring_touch', 'sim-1', { vehicle: 'sim-1', ring: 1 }),
+      ev('ring_touch', 'sim-1', { vehicle: 'sim-1', ring: 0 }),
       ev('ring_touch', 'sim-1', { vehicle: 'sim-1', ring: -1 }),
     ], locate)
     expect(out.fx.map((f) => [f.kind, f.key, f.p[2]])).toEqual([
@@ -49,7 +51,15 @@ describe('event -> effect mapping (07 §5)', () => {
       ['explosion', 'sim-2', 1],
       ['dust', null, 0],
     ])
-    expect(out.rings).toEqual([{ vehicle: 'sim-1', ring: 2 }])
+    // the backend's ring numbers are 1-based (the event text); the course layer's ring index is 0-based
+    expect(out.rings).toEqual([{ vehicle: 'sim-1', ring: 1 }, { vehicle: 'sim-1', ring: 0 }])
+  })
+
+  it('makes effects of live events only: a backlog fetched after a reconnect is history', () => {
+    const at = (t: number) => ({ ...ev('collision', 'sim-1', { point: [0, 0, 1], crashed: ['sim-1'] }), t })
+    const batch = [at(100), at(1000 - LIVE_EVENT_S - 0.1), at(1000 - LIVE_EVENT_S + 0.1), at(1000)]
+    expect(liveEvents(batch, 1000).map((e) => e.t)).toEqual([1000 - LIVE_EVENT_S + 0.1, 1000])
+    expect(liveEvents([{ t: Number.NaN }], 1000)).toEqual([])
   })
 
   it('ignores other events and malformed data', () => {

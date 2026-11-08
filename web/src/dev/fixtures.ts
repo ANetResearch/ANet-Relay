@@ -324,6 +324,7 @@ export function startFixture(name: FixtureName): () => void {
     now = Date.now() / 1000
     k++
     // WP-C v0.5: SIM-2 grazes the tube of its next ring every 4 s (the ring flashes white)
+    // ring numbers are 1-based as the backend sends them (course.py): the second ring
     if (name !== 'dogfight' && name !== 'empty' && k % 40 === 0) emit('ring_touch' as RelayEvent['kind'], 'sim-2', { vehicle: 'sim-2', ring: 2, point: [0.4, 1.2, 1.1] })
     const w = Math.sin(k / 9)
     fleet = {

@@ -13,7 +13,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/ui/components/ui/toggle-group'
 import { Icon, StateIcon } from '@/ui/icons'
 import { tL, useTL } from './copy'
 import { attachReplayBar, closeTrace, REPLAY_SPEEDS, seekTrace, setTracePlaying, stepTrace, useTraceReplay, type ReplaySpeed } from './traceReplay'
-import { recentEvent, sampleAt, type Trace } from './trace'
+import { recentEvent, ringNumber, sampleAt, type Trace } from './trace'
 import './lab.css'
 
 function useDriver(active: boolean): void {
@@ -63,8 +63,8 @@ function eventText(trace: Trace, t: number, tl: ReturnType<typeof useTL>): strin
   if (e.kind === 'finish') return tl('lab.replay.finish')
   // v0.5 (07 §5)
   if (e.kind === 'collision') {
-    const ring = e.with?.startsWith('ring:') ? Number(e.with.slice(5)) : null
-    if (ring !== null && Number.isInteger(ring)) return tl('lab.replay.collisionRing', { vehicle: name(e.vehicle), n: ring + 1 })
+    const n = ringNumber(e.with)
+    if (n !== null) return tl('lab.replay.collisionRing', { vehicle: name(e.vehicle), n })
     return tl('lab.replay.collision', { vehicle: name(e.vehicle), other: name(e.with ?? null) })
   }
   if (e.kind === 'crash') return tl('lab.replay.crash', { vehicle: name(e.vehicle) })

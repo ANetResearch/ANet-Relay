@@ -446,3 +446,10 @@ export function recentEvent(events: readonly TraceEvent[], t: number, window = 1
 
 /** Stage ids of trace aircraft: prefixed so they never collide with a live aircraft of the same name. */
 export const traceStageId = (craftId: string) => `trace:${craftId}`
+
+/** The ring number of a trace contact id `ring:N` (the evaluator numbers rings from 1), else null. */
+export function ringNumber(id: string | null | undefined): number | null {
+  if (!id?.startsWith('ring:')) return null
+  const n = Number(id.slice(5))
+  return Number.isInteger(n) && n >= 1 ? n : null
+}
