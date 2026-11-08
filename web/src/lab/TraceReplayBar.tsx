@@ -12,7 +12,7 @@ import { Slider } from '@/ui/components/ui/slider'
 import { ToggleGroup, ToggleGroupItem } from '@/ui/components/ui/toggle-group'
 import { Icon, StateIcon } from '@/ui/icons'
 import { tL, useTL } from './copy'
-import { closeTrace, REPLAY_SPEEDS, seekTrace, setTracePlaying, stepTrace, useTraceReplay, type ReplaySpeed } from './traceReplay'
+import { attachReplayBar, closeTrace, REPLAY_SPEEDS, seekTrace, setTracePlaying, stepTrace, useTraceReplay, type ReplaySpeed } from './traceReplay'
 import { recentEvent, sampleAt, type Trace } from './trace'
 import './lab.css'
 
@@ -49,6 +49,11 @@ function useCloseOnPossession(active: boolean): void {
   }, [active])
 }
 
+/** Closes the replay when the Fly workspace goes away or the bar is really unmounted (`attachReplayBar`). */
+function useCloseOnLeave(): void {
+  React.useEffect(() => attachReplayBar(), [])
+}
+
 function eventText(trace: Trace, t: number, tl: ReturnType<typeof useTL>): string | null {
   const e = recentEvent(trace.events, t)
   if (!e) return null
@@ -65,7 +70,7 @@ export function TraceReplayBar() {
   const { t, playing, speed } = useTraceReplay(useShallow((s) => ({ t: s.t, playing: s.playing, speed: s.speed })))
   useDriver(Boolean(trace) && playing)
   useCloseOnPossession(Boolean(trace))
-  React.useEffect(() => () => closeTrace(), [])
+  useCloseOnLeave()
   if (!trace) return null
   const total = trace.duration_s
   const caption = eventText(trace, t, tl)

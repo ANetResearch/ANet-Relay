@@ -202,7 +202,9 @@ export const useLab = create<LabState>()((set, get) => {
         if (get().selectedId !== id) return
         load(res.program)
       } catch (e) {
-        set({ loading: false })
+        // the list points back at the program the editor still holds
+        if (get().selectedId === id) set({ selectedId: get().program?.id ?? null, loading: false })
+        else set({ loading: false })
         notifyError(e)
       }
     },
@@ -234,9 +236,18 @@ export const useLab = create<LabState>()((set, get) => {
         if (note) body.note = note
         if (!Object.keys(body).length) return true
         const res = await labApi.update(p.id, body)
-        writeDraft(null)
-        set({ validation: res.validation, validatedSource: res.program.source })
-        load(res.program, false)
+        const now = get()
+        if (now.program?.id !== p.id) {
+          // another program was opened meanwhile: its editor stays as it is
+        } else if (now.source === s.source && same(now.params, s.params) && same(now.tests, s.tests)) {
+          writeDraft(null)
+          set({ validation: res.validation, validatedSource: res.program.source })
+          load(res.program, false)
+        } else {
+          // edited while the request was out: keep the newer draft, only the saved revision moves on
+          set({ program: res.program, validation: res.validation, validatedSource: res.program.source })
+          persistDraft()
+        }
         notify(res.program.rev !== p.rev ? tL('lab.saved', { rev: res.program.rev }) : tL('lab.savedTests'))
         void get().refreshList()
         return true

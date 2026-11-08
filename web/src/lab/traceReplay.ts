@@ -100,6 +100,25 @@ export function closeTrace(): void {
   if (useReplay.getState().crafts) exitReplay()
 }
 
+let mountedBars = 0
+
+/** The replay bar is mounted; returns its unmount. While one is mounted, leaving the Fly workspace closes the
+ * replay. The last unmount closes it a microtask later, unless a bar mounted again meanwhile: StrictMode's
+ * mount, cleanup, mount in development must not close a trace that was just opened. */
+export function attachReplayBar(): () => void {
+  mountedBars += 1
+  const off = useUi.subscribe((s) => {
+    if (s.workspace !== 'fly' && useTraceReplay.getState().trace) closeTrace()
+  })
+  return () => {
+    mountedBars -= 1
+    off()
+    queueMicrotask(() => {
+      if (mountedBars === 0 && useTraceReplay.getState().trace) closeTrace()
+    })
+  }
+}
+
 export function seekTrace(t: number): void {
   const s = useTraceReplay.getState()
   if (!s.trace) return

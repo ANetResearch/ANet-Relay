@@ -40,27 +40,40 @@ function useAircraft(): AircraftOption[] {
   )
 }
 
-/** Log lines of the deployment on one aircraft, appended from `after` every 500 ms. */
-export function useProgramLog(vehicleId: string | null, enabled: boolean): ProgramLogLine[] {
+/** One poll answer applied to the log kept so far: a ring that restarted (a new deployment on the aircraft, its
+ * sequence numbers below what was read) replaces the lines instead of being appended to them. */
+export function nextLog(prev: { after: number; lines: ProgramLogLine[] }, res: { lines: ProgramLogLine[]; last_seq: number }): { after: number; lines: ProgramLogLine[] } {
+  const restarted = res.last_seq < prev.after
+  const base = restarted ? [] : prev.lines
+  const seen = base.length ? base[base.length - 1].seq : 0
+  const fresh = res.lines.filter((l) => l.seq > seen)
+  if (!fresh.length) return restarted ? { after: 0, lines: [] } : prev
+  return { after: fresh[fresh.length - 1].seq, lines: [...base, ...fresh].slice(-LOG_KEEP) }
+}
+
+/** Log lines of one deployment on one aircraft, appended from `after` every 500 ms. `deployment` names the run
+ * (program, revision and start time; null: nothing deployed): a new one starts an empty log. */
+export function useProgramLog(vehicleId: string | null, deployment: string | null): ProgramLogLine[] {
   const [lines, setLines] = React.useState<ProgramLogLine[]>([])
-  const [seen, setSeen] = React.useState(vehicleId)
-  if (seen !== vehicleId) {
-    setSeen(vehicleId)
+  const scope = `${vehicleId ?? ''}\u0000${deployment ?? ''}`
+  const [seen, setSeen] = React.useState(scope)
+  if (seen !== scope) {
+    setSeen(scope)
     setLines([])
   }
   React.useEffect(() => {
-    if (!vehicleId || !enabled) return
+    if (!vehicleId || !deployment) return
     let alive = true
-    let after = 0
+    let log: { after: number; lines: ProgramLogLine[] } = { after: 0, lines: [] }
     let timer: ReturnType<typeof setTimeout> | null = null
     const poll = async () => {
       try {
-        const res = await labApi.log(vehicleId, after)
+        const res = await labApi.log(vehicleId, log.after)
         if (!alive) return
-        if (res.last_seq < after) after = 0 // a new deployment restarted the ring
-        if (res.lines.length) {
-          after = res.lines[res.lines.length - 1].seq
-          setLines((l) => [...l, ...res.lines].slice(-LOG_KEEP))
+        const next = nextLog(log, res)
+        if (next !== log) {
+          log = next
+          setLines(next.lines)
         }
       } catch {
         /* no deployment yet, or the link is down: keep polling */
@@ -72,7 +85,7 @@ export function useProgramLog(vehicleId: string | null, enabled: boolean): Progr
       alive = false
       if (timer) clearTimeout(timer)
     }
-  }, [vehicleId, enabled])
+  }, [vehicleId, deployment])
   return lines
 }
 
@@ -112,7 +125,7 @@ export function RunTab() {
   const vid = chosen && aircraft.some((a) => a.id === chosen) ? chosen : (aircraft.find((a) => a.kind === 'sim')?.id ?? aircraft[0]?.id ?? null)
   const target = aircraft.find((a) => a.id === vid) ?? null
   const run = useRelay((s) => (vid ? (s.fleet?.vehicles.find((v) => v.id === vid)?.program ?? null) : null))
-  const lines = useProgramLog(vid, Boolean(run))
+  const lines = useProgramLog(vid, run ? `${run.id}\u0000${run.rev}\u0000${run.started_at}` : null)
   if (!program) return null
   if (!aircraft.length) {
     return (

@@ -151,19 +151,36 @@ function SeedField({ seed, disabled, onApply }: { seed: number; disabled: boolea
   )
 }
 
+/** What the editor shows: our own last answer for this exact state, else the poll's; while the poll refetches
+ * after the snapshot's preset or seed changed (our own edit turns the preset into custom), our last answer for
+ * the same aircraft bridges the gap, so the editor never flashes Loading or unmounts mid-edit. */
+export function airframeShown(
+  own: { key: string; base: string; data: SimAirframe } | null,
+  key: string,
+  base: string,
+  polled: SimAirframe | null,
+): SimAirframe | null {
+  if (own && own.key === key) return own.data
+  return polled ?? (own && own.base === base ? own.data : null)
+}
+
 function AirframeBodyView({ id, refKey, assist }: { id: string; refKey: string; assist: boolean }) {
   const t = useAT()
   const key = `${id}|${refKey}|${assist}`
+  const base = `${id}|${assist}`
   const poll = usePoll(() => api.simAirframe(id), 0, key)
-  const [own, setOwn] = React.useState<{ key: string; data: SimAirframe } | null>(null)
+  const [own, setOwn] = React.useState<{ key: string; base: string; data: SimAirframe } | null>(null)
   const [busy, setBusy] = React.useState(false)
-  const data = own && own.key === key ? own.data : poll.data
+  // Owned here, not in the editor: the editor stays mounted, and the Values section open, while a change of
+  // preset or seed (our own edit turns the preset into custom) refetches.
+  const [open, setOpen] = React.useState(false)
+  const data = airframeShown(own, key, base, poll.data)
 
   const send = (body: AirframeBody) => {
     setBusy(true)
     api
       .setSimAirframe(id, body)
-      .then((r) => setOwn({ key, data: r }))
+      .then((r) => setOwn({ key, base, data: r }))
       .catch(notifyError)
       .finally(() => setBusy(false))
   }
@@ -177,13 +194,33 @@ function AirframeBodyView({ id, refKey, assist }: { id: string; refKey: string; 
       </p>
     )
   }
-  return <AirframeEditor data={data} busy={busy} send={send} />
+  return <AirframeEditor data={data} busy={busy} send={send} open={open} onOpenChange={setOpen} />
 }
 
-/** The editor itself (pure: the values in, request bodies out). */
-export function AirframeEditor({ data, busy, send, defaultOpen = false }: { data: SimAirframe; busy: boolean; send(body: AirframeBody): void; defaultOpen?: boolean }) {
+/** The editor itself (pure: the values in, request bodies out). `open` / `onOpenChange` control the Values
+ * section from outside; without them it keeps its own state, starting at `defaultOpen`. */
+export function AirframeEditor({
+  data,
+  busy,
+  send,
+  defaultOpen = false,
+  open: openProp,
+  onOpenChange,
+}: {
+  data: SimAirframe
+  busy: boolean
+  send(body: AirframeBody): void
+  defaultOpen?: boolean
+  open?: boolean
+  onOpenChange?(open: boolean): void
+}) {
   const t = useAT()
-  const [open, setOpen] = React.useState(defaultOpen)
+  const [openOwn, setOpenOwn] = React.useState(defaultOpen)
+  const open = openProp ?? openOwn
+  const setOpen = (next: boolean) => {
+    setOpenOwn(next)
+    onOpenChange?.(next)
+  }
   const p = data.params
   return (
     <div className="flex flex-col gap-2" data-airframe={data.preset}>
