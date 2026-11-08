@@ -435,3 +435,34 @@ loading; buttons keep `Spinner`.
   overlay, bottom centre) plays, scrubs and exits, and closes the replay when an aircraft is newly possessed.
 - **Stage label:** a live aircraft under `controller === 'program'` reads `PROGRAM · <name> · <state>`.
 - **Inspector:** the Control tab mounts `lab/ProgramGroup` after the course group.
+
+## 12. v0.5.0 WP-C additions (visuals, docs/design/07 §5)
+
+- **Effects** (`arena/voxelFx.ts`): burst kinds `explosion` (white-hot core 0–120 ms, 60 cooling voxels white → r400 →
+  r600 → g500 under gravity and drag that settle and shrink, a grey ground dust ring below 1 m;
+  `--duration-arena-explosion` 1200 ms, core `--duration-arena-explosion-core`), `spark` (16 white / red voxels and a
+  white shock cube, `--duration-arena-burst`) and `dust` (ground ring and grey chunks). All are pure functions of age
+  and seed (`burstVoxels`); `Burst.still` is the reduced-motion marker. Tracer tail `--duration-arena-trail` 120 ms.
+- **Event → effect** (`arena/effects.ts`, pure): `arena_down` → explosion at the target; `collision` → sparks at
+  `point` and an explosion per `crashed` id; `crashed` with `reason_code` `ground` (or none) → dust, `collision` (or a
+  ground crash with `speed` ≥ 6 m/s) → explosion, `shot_down` → dust where the wreck lands; `ring_touch` → the ring
+  flashes white (`course/touch.ts`). One aircraft explodes at most once per explosion life (`FxDedupe`). The queue
+  (`arena/fx.ts`) runs whether or not the arena is on (local simulators collide too); the remote fleet's `down` flag
+  explodes the remote craft. Event kinds are compared as strings, so the generated union may lag.
+- **Camera shake** (`arena/shake.ts`): `cameraShake(pos)` is added to the chase camera (`stage/scene/CameraRig.tsx`);
+  explosions (strength 1) and sparks (0.5) within 5 m, at most 3 cm over `--duration-arena-shake`; off in reduced motion.
+- **Rings** (`course/voxelRing.ts`): voxel tori, major radius = ring `r`, tube `RING_TUBE` 0.03 m (`arena/collide.ts`
+  mirrors `backend/relay/sim/collide.py`); next ring of the featured run g300 with a white outline hull.
+- **Layer** `volumes` ("Collision volumes", default off, `stage/store.ts`): `arena/Volumes.tsx` draws a g500 wireframe
+  sphere of `CRAFT_RADIUS` and the dashed 0.12 m hit sphere around every simulator, remote and trace aircraft.
+- **Trace replay** (`lab/trace.ts`): events `collision {vehicle, with, point, v_rel, crashed: [ids] | bool}` and
+  `crash {vehicle, point, reason}`; `traceImpacts` kinds `hit | explosion | spark | dust` (a shoot-down is an explosion).
+- **Leaderboard** (`arena/LeaderboardPanel.tsx`, mounted by `ArenaHud` in place of the v0.4 scoreboard, which stays as
+  the fallback when `GET /arena/leaderboard` answers 404): `arena/board.ts` refetches on `board_rev` / `match` changes of
+  the arena view (`useBoardSignal`, read tolerantly from `ArenaViewV5`) and on a tab switch; `arena/leaderboard.ts`
+  normalises, sorts and formats. REST helpers in `arena/api.ts` (`leaderboard`, `matchStart`, `matchStop`, `dogfight`,
+  `dogfightStart`, `dogfightStop`).
+- **Dogfight dialog** (`arena/DogfightDialog.tsx`, `openDogfightDialog()`), from the chevron menu beside the top-bar
+  Arena toggle (`[data-arena-menu]`); form model in `arena/dogfight.ts`.
+- **Fixture** `?fixture=dogfight` (`dev/dogfightFixture.ts`, `&t0=<s>` starts the 24 s loop at that second;
+  `window.__relayDogfight.t()` gives the loop time to screenshot scripts).

@@ -6,6 +6,7 @@
 // scenario routes. `&t0=<s>` starts the loop at that second (screenshots of a given moment). The choreography is a
 // pure function of the loop time (dogfightAt; dogfightFixture.test.ts). Nothing here exists in production builds.
 import { RelayApiError, type ArenaView, type Vehicle } from '@/api'
+import { fx } from '@/arena/fx'
 import { useArena } from '@/arena/store'
 import type { BoardBy } from '@/arena/leaderboard'
 
@@ -346,6 +347,8 @@ export function startDogfightFixture(host: DogfightHost): { vehicles(now: number
   }
   push()
   const timer = setInterval(push, 50)
+  // screenshot scripts read the loop time (fixture only)
+  Object.assign(globalThis, { __relayDogfight: { t: () => loopAt(Date.now() / 1000).t, fx } })
 
   return {
     vehicles,

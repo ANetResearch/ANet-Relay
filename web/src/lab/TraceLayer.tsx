@@ -31,7 +31,7 @@ function toScene(p: readonly number[], out: THREE.Vector3): THREE.Vector3 {
 }
 
 class TraceFx {
-  readonly vox = new VoxelFx()
+  readonly vox = new VoxelFx(8192)
 
   constructor(private readonly light: boolean) {}
 

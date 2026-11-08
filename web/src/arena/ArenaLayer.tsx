@@ -279,7 +279,7 @@ class RemoteBoundary extends React.Component<{ children: React.ReactNode }, { fa
 
 /** All rounds in flight as voxel tracers (heads only on software renderers). */
 class BulletView {
-  readonly vox = new VoxelFx()
+  readonly vox = new VoxelFx(8192)
   private readonly flights = new Map<string, Flight>()
 
   constructor(private readonly light: boolean) {}

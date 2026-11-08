@@ -60,7 +60,7 @@ const DRAG = 3
 const G_FULL = 9.81
 const EXPLOSION_DRAG = 2.2
 const SPARK_DRAG = 7
-const TAIL_CUBES = 7
+const TAIL_CUBES = 16
 const HEAD_SIZE = 0.03
 const TAIL_SIZE = 0.014
 const HEAD_MIN_PX = 4
@@ -172,7 +172,7 @@ function explosionVoxels(b: Burst, age: number, coreS: number, lifeS: number, ou
     const k = Math.min(1, age / core)
     const swell = 1 - (1 - k) * (1 - k)
     const glow = age < core ? 1 : 1 - (age - core) / (0.6 * core)
-    out.push({ x: px, y: py, z: pz, size: 0.1 + 0.55 * swell, tone: 'core', glow })
+    out.push({ x: px, y: py, z: pz, size: 0.08 + 0.3 * swell, tone: 'core', glow })
   }
   const r = rng(b.seed)
   // shards leave from the core's edge from half-way through the swell
@@ -181,7 +181,7 @@ function explosionVoxels(b: Burst, age: number, coreS: number, lifeS: number, ou
   const fade = Math.pow(Math.max(0, 1 - Math.max(0, age - settle) / (lifeS - settle)), 0.8)
   for (let i = 0; i < EXPLOSION_SHARDS; i++) {
     const [dx, dy, dz] = direction(r, 0.3, 0.9)
-    const speed = 2.5 + r() * 4
+    const speed = 1.8 + r() * 3.4
     const size0 = 0.045 + r() * 0.05
     const jitter = r() * 0.18
     if (t < 0) continue
@@ -369,7 +369,7 @@ export class VoxelFx {
       if (c.size <= 0) continue
       tmpP.set(c.x, c.y, c.z)
       if (c.tone === 'core') {
-        this.halo(tmpP, c.size * (big ? 2.2 : 1.8), corePx * (big ? 2.2 : 1.8), this.mine, c.glow)
+        this.halo(tmpP, c.size * 1.8, corePx * 1.8, this.mine, c.glow * (big ? 0.6 : 1))
         this.cube(tmpP, c.size, corePx, this.head)
       } else if (c.tone === 'heat') {
         const heat = c.heat ?? 1
