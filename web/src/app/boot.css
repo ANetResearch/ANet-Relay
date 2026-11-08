@@ -1,29 +1,28 @@
-/* Director's-cut opening (05 §2.3), the layers app/bootCinema.ts adds to #boot-mask: #boot-film (and the second clip
-   of the full cut), the letterbox with the info line and the readiness cells, #boot-voxels. index.html still owns act 0
-   and the Minimal / reduced openings; these rules apply only while #boot-mask carries data-film. Acts are mirrored
-   onto data-act (cold, assemble, cut, film, wait, failed, reveal); data-mark is "word" (crisp mark centred) or
-   "badge" (mark in the top letterbox); data-rolled is set once the film has been uncovered. */
+/* Director's-cut opening (05 §2.3, reordered by 06 §8), the layers app/bootCinema.ts adds to #boot-mask: #boot-film
+   (and the second clip of the full cut), the letterbox with the info line and the readiness cells, #boot-voxels.
+   index.html still owns act 0 and the Minimal / reduced openings; these rules apply only while #boot-mask carries
+   data-film. Acts are mirrored onto data-act (cold, film, cut, assemble, hold, wait, failed, reveal); data-mark="word"
+   is set once the crisp mark (logo over RELAY) stands, data-instant when it stood up without act 3 (a skip, a failure). */
 #boot-mask[data-film] .boot-video {
   position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block;
   background: var(--g950); opacity: 0; pointer-events: none;
 }
-#boot-mask[data-film][data-rolled] .boot-video[data-on] { opacity: 1; }
-/* act 4 and failure: the frame holds at 40 % brightness */
-#boot-mask[data-film]:is([data-act="wait"], [data-act="failed"]) .boot-video { filter: brightness(0.4); }
+/* acts 1-2: the film; from act 3 on the window is g950 with the mark */
+#boot-mask[data-film]:is([data-act="film"], [data-act="cut"]) .boot-video[data-on] { opacity: 1; }
 
 #boot-mask[data-film] .boot-lb { position: absolute; left: 0; right: 0; height: 6%; background: var(--g950); visibility: hidden; pointer-events: none; }
 #boot-mask[data-film] .boot-lb[data-edge="top"] { top: 0; }
 #boot-mask[data-film] .boot-lb[data-edge="bottom"] { bottom: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; }
-#boot-mask[data-film][data-rolled] .boot-lb { visibility: visible; }
+#boot-mask[data-film]:is([data-act="film"], [data-act="cut"]) .boot-lb { visibility: visible; }
 
-/* act 3: the info line and the readiness cells cut in hard (no transition) */
+/* act 1: the info line and the readiness cells cut in hard (no transition) */
 #boot-mask[data-film] .boot-info,
 #boot-mask[data-film] .boot-inds {
   font: 400 11px/16px "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace; letter-spacing: 0.08em;
   color: var(--g300); white-space: pre; visibility: hidden;
 }
 #boot-mask[data-film] .boot-inds { text-transform: uppercase; }
-#boot-mask[data-film]:is([data-act="film"], [data-act="wait"], [data-act="failed"]) :is(.boot-info, .boot-inds) { visibility: visible; }
+#boot-mask[data-film]:is([data-act="film"], [data-act="cut"]) :is(.boot-info, .boot-inds) { visibility: visible; }
 #boot-mask[data-film] .boot-inds { display: flex; gap: 16px; }
 #boot-mask[data-film] .boot-ind { display: inline-flex; align-items: center; gap: 6px; color: var(--g600); }
 #boot-mask[data-film] .boot-ind > i { position: relative; width: 6px; height: 6px; background: currentColor; }
@@ -37,22 +36,23 @@
 
 #boot-mask[data-film] #boot-voxels { position: absolute; inset: 0; display: block; pointer-events: none; }
 
-/* the mark: hidden while the voxels assemble it, then the crisp copy cuts in and moves to the top-left badge */
-#boot-mask[data-film] .boot-mark {
-  width: var(--boot-logo-w, 168px); visibility: hidden; transform-origin: 50% 50%;
-  transition: transform var(--duration-medium) var(--ease-smooth-out);
-}
+/* the mark: hidden while the voxels assemble it, then the crisp copy cuts in and RELAY tracks in under it */
+#boot-mask[data-film] .boot-mark { width: var(--boot-logo-w, 168px); visibility: hidden; }
 #boot-mask[data-film] .boot-logo { width: 100%; animation: none; clip-path: none; opacity: 1; }
 #boot-mask[data-film] .boot-word { animation: none; opacity: 1; letter-spacing: 0.42em; visibility: hidden; }
 #boot-mask[data-film][data-mark] .boot-mark { visibility: visible; }
-#boot-mask[data-film][data-mark="word"] .boot-word { visibility: visible; }
-#boot-mask[data-film][data-mark="badge"] .boot-mark { transform: translate(var(--bm-x, 0px), var(--bm-y, 0px)) scale(var(--bm-s, 1)); }
+#boot-mask[data-film][data-mark="word"] .boot-word {
+  visibility: visible;
+  animation: boot-word-track var(--boot-word-hold) var(--ease-smooth-out) both;
+}
+#boot-mask[data-film][data-mark="word"][data-instant] .boot-word { animation: none; }
+@keyframes boot-word-track { from { opacity: 0; letter-spacing: 0.9em; } to { opacity: 1; letter-spacing: 0.42em; } }
 
-/* the hairline stays out of acts 1-3; act 4 puts it into the bottom letterbox, with the 8 s line under it */
+/* the hairline stays out of acts 1-4; the waiting frame puts it under the mark, with the 8 s line under it */
 #boot-mask[data-film] .boot-bar { animation: none; opacity: 1; visibility: hidden; }
 #boot-mask[data-film]:is([data-act="wait"], [data-act="failed"]) .boot-bar { visibility: visible; }
-#boot-mask[data-film][data-act="wait"] .boot-bar { bottom: calc(3% + 6px); }
-#boot-mask[data-film][data-act="wait"] .boot-status { top: auto; bottom: calc(3% - 18px); }
+#boot-mask[data-film][data-act="wait"] .boot-bar { bottom: auto; top: calc(50% - 24px + var(--boot-mark-half, 60px) + 40px); }
+#boot-mask[data-film][data-act="wait"] .boot-status { top: calc(50% - 24px + var(--boot-mark-half, 60px) + 64px); }
 
 /* act 5: only the voxel layer remains; the window underneath shows through as the cells flip away */
 #boot-mask[data-film][data-act="reveal"] { background: transparent; }

@@ -448,7 +448,7 @@ hud-cap 标签 + Mono 数值（总时 hud-kpi）。等待起飞时显示 `Take o
 
 ## 15. 启动（R-62）
 
-> v0.3.0 起，开屏由 `05-v030.zh-CN.md` §2"导演剪辑"覆盖；本节描述的 1.2 s 版本保留为设置中的 `Minimal` 选项，失败与慢启动规则不变。
+> v0.3.0 起，开屏由 `05-v030.zh-CN.md` §2"导演剪辑"覆盖，v0.4.0 起顺序与影片清单由 `06-v040.zh-CN.md` §8 覆盖（先影片、后体素组字）；本节描述的 1.2 s 版本保留为设置中的 `Minimal` 选项，失败与慢启动规则不变。
 
 DJI 式的质感来自"克制的仪式"：只有标识、只有明度、节奏准确。
 
@@ -504,7 +504,7 @@ General（语言、单位 m / ft、启动时视角）· Safety（安全区尺寸
 
 | 动效 | 触发 | 属性 | 时长 / 缓动 | reduced-motion |
 |---|---|---|---|---|
-| 启动（开屏，v0.3.0） | 应用启动 | 05 §2.3：体素组字、斜切入片、影片、等待、体素揭开；设置 → General → `Opening sequence`（Full / Short / Minimal） | Full ≈ 5.6 s、Short ≈ 3.2 s、Minimal = §15（1200 ms）；`--boot-*` token | 不加载影片；标识与字标直接出现，300 ms 后揭开，总 ≤ 400 ms |
+| 启动（开屏，v0.4.0） | 应用启动 | 06 §8（覆盖 05 §2.3 的顺序）：影片、斜切出片、体素组字、停留（等待时停在标识 + 进度线）、体素揭开；设置 → General → `Opening sequence`（Full / Short / Minimal） | Full ≈ 7.8 s、Short ≈ 4.4 s、Minimal = §15（1200 ms）；`--boot-*` token | 不加载影片；标识与字标直接出现，300 ms 后揭开，总 ≤ 400 ms |
 | 体素载入 `VoxelLoader` | 面板级加载（记录列表、回放、参数表、航线、Copilot 会话） | 3 × 3 × 3 体素逐块点亮再熄灭（transform + opacity），占一个循环名额 | `--voxel-cycle` 1200 循环 | 静态立方体 |
 | 体素擦除 `VoxelWipe` | 工作区切换、打开回放 | 内容区内 16 px 斜向体素波，`g850`→透明 | `--voxel-wipe` 300 | 关闭 |
 | 舞台载入 `StageLoading` | 三维舞台首次挂载、GLB 载入 | 40 px `VoxelLoader` + `Loading aircraft model`，就绪后体素散开淡出 | `--voxel-scatter` 350 | 无散开（软件渲染同） |
