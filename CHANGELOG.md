@@ -95,6 +95,12 @@ leaderboard shared across the LAN, and voxel explosions.
 - Bullet tracers are 120 ms long with a larger head glow.
 - Stage trails restart when an aircraft jumps more than 3 m between two
   samples (a respawn or a reset) instead of drawing a line across the stage.
+- The leaderboard panel coalesces its reads at most four times a second
+  instead of aborting the previous read on every revision, so it keeps
+  updating while rounds are flying.
+- A shorter README in English and Chinese with new key art and animations, and
+  a [wiki](https://github.com/ANetResearch/ANet-Relay/wiki) with the guides
+  that used to live in the README.
 
 ## [0.4.1] - 2026-11-08
 
