@@ -39,6 +39,7 @@ include = ["relay*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = ["sticks_level: run the fleet at the default agent flight level (06 §5)"]
 filterwarnings = ["ignore::DeprecationWarning", "ignore:Using `httpx`"]
 
 [tool.ruff]
@@ -49,6 +50,10 @@ extend-exclude = ["build", "dist", "data"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
 ignore = ["RUF001", "RUF002", "RUF003", "SIM105", "B008", "SIM108"]
+
+[tool.ruff.lint.per-file-ignores]
+# WP-1 example programs run with the relay library preloaded (Sticks, clamp, PID, ...)
+"relay/programs/examples/*.py" = ["F821"]
 
 [tool.ruff.format]
 quote-style = "double"

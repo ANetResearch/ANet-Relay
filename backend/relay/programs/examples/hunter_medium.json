@@ -1,0 +1,81 @@
+{
+  "name": "Hunter (medium)",
+  "name_zh": "猎手（中等）",
+  "description": "Arena bot: quicker, leads the target and evades briefly after a hit.",
+  "description_zh": "对抗机器人：反应较快，射击带提前量，被击中后短暂规避。",
+  "tests": [
+    {
+      "name": "No contact searches",
+      "obs": {
+        "contacts": []
+      },
+      "expect": {
+        "fire": false,
+        "state": "search"
+      }
+    },
+    {
+      "name": "Target dead ahead is shot",
+      "state": "shoot",
+      "obs": {
+        "hp": 100,
+        "contacts": [
+          {
+            "id": "sim-2",
+            "team": "sim-2",
+            "dist": 4.0,
+            "bearing": 0.0,
+            "elevation": 0.0,
+            "rel": [
+              4.0,
+              0.0,
+              0.0
+            ],
+            "vrel": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "hp": 100
+          }
+        ]
+      },
+      "expect": {
+        "fire": true
+      }
+    },
+    {
+      "name": "Target to the right turns right",
+      "state": "approach",
+      "obs": {
+        "contacts": [
+          {
+            "id": "sim-2",
+            "team": "sim-2",
+            "dist": 5.0,
+            "bearing": 37.0,
+            "elevation": 0.0,
+            "rel": [
+              4.0,
+              3.0,
+              0.0
+            ],
+            "vrel": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "hp": 100
+          }
+        ]
+      },
+      "expect": {
+        "yaw": [
+          0.05,
+          1.0
+        ],
+        "fire": false
+      }
+    }
+  ]
+}

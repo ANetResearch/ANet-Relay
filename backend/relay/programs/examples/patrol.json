@@ -1,0 +1,10 @@
+{
+  "name": "Patrol",
+  "name_zh": "巡逻",
+  "description": "Holds height on the barometer and flies timed legs with 90-degree turns on the gyro heading; needs no position source.",
+  "description_zh": "依据气压高度定高，按时间飞直线航段并依据陀螺航向转 90°；不需要定位源。",
+  "tests": [
+    {"name": "Disarmed idles", "obs": {"armed": false}, "expect": {"throttle": [0, 0]}},
+    {"name": "Climbs first", "obs": {"alt": 0.2, "vz": 0.0}, "expect": {"throttle": [0.55, 1.0], "pitch": [0, 0], "state": "climb"}}
+  ]
+}

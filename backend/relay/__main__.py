@@ -1,5 +1,8 @@
 """Entry point: ``python -m relay [--dev]`` (also the PyInstaller entry).
 
+``python -m relay --program-host`` (frozen: ``anet-relay-backend --program-host``) runs the onboard-program
+host instead (06 §2.4, WP-1): it is dispatched before the server modules are imported.
+
 Environment (set by the Electron shell): RELAY_HTTP_PORT, RELAY_OPERATOR_TOKEN, RELAY_DATA_DIR,
 RELAY_LISTEN_PORT, RELAY_ALLOW_LOOPBACK, RELAY_LIFELINE=stdin (exit when the shell's pipe closes).
 Tests only: RELAY_SCAN_NETWORKS="127.0.0.0/29:8080" is the default scan (needs RELAY_ALLOW_LOOPBACK).
@@ -19,11 +22,7 @@ import sys
 import threading
 from pathlib import Path
 
-import uvicorn
-
-from .api.app import create_app
 from .config import VERSION, default_data_dir, env_flag, env_int, load_settings
-from .fleet import FleetService
 
 API_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
@@ -72,6 +71,17 @@ def _scan_default() -> tuple[list[str], int] | None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    args_in = sys.argv[1:] if argv is None else argv
+    if args_in[:1] == ["--program-host"]:  # WP-1: onboard-program host process (06 §2.4)
+        from .programs.host import main as program_host
+
+        return program_host()
+
+    import uvicorn
+
+    from .api.app import create_app
+    from .fleet import FleetService
+
     parser = argparse.ArgumentParser(prog="relay", description=f"ANet Relay backend {VERSION}")
     parser.add_argument(
         "--dev", action="store_true", help="development mode: print a generated operator token"

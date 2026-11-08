@@ -133,6 +133,7 @@ EMITTABLE = {
     "VIBRATION",
     "AUTOPILOT_VERSION",
     "HOME_POSITION",
+    "SCALED_IMU",  # WP-1 programs (06 §2.2): body accelerations, only when requested
 }
 REBOOT_SILENCE_S = 2.5
 SETPOINT_STALE_S = 1.0
@@ -1149,6 +1150,8 @@ class SimAutopilot:
                 alt=HOME[2] + s.p[2],
                 climb=s.v[2],
             )
+        if name == "SCALED_IMU":  # WP-1 programs (06 §2.2): specific force and rates in the body frame
+            return self._scaled_imu(boot_ms)
         if name == "EXTENDED_SYS_STATE":
             return M.MAVLink_extended_sys_state_message(
                 vtol_state=M.MAV_VTOL_STATE_UNDEFINED, landed_state=self.landed_state()
@@ -1246,6 +1249,37 @@ class SimAutopilot:
                 uid=self.sysid,
             )
         return None
+
+    def _scaled_imu(self, boot_ms: int) -> Any:
+        """SCALED_IMU from the integrator's acceleration: FRD body axes, mG and mrad/s (WP-1, 06 §2.2)."""
+        s = self.quad.s
+        ae, an, au = s.accel
+        f = (an, ae, -au - G)  # specific force in NED: at rest (0, 0, -g)
+        cr, sr = math.cos(s.roll), math.sin(s.roll)
+        cp, sp = math.cos(s.pitch), math.sin(s.pitch)
+        cy, sy = math.cos(s.yaw), math.sin(s.yaw)
+        x1, y1, z1 = cy * f[0] + sy * f[1], -sy * f[0] + cy * f[1], f[2]
+        x2, y2, z2 = cp * x1 - sp * z1, y1, sp * x1 + cp * z1
+        bx, by, bz = x2, cr * y2 + sr * z2, -sr * y2 + cr * z2
+
+        def mg(value: float) -> int:
+            return max(-32767, min(32767, round(value / G * 1000.0)))
+
+        def mrad(value: float) -> int:
+            return max(-32767, min(32767, round(value * 1000.0)))
+
+        return M.MAVLink_scaled_imu_message(
+            time_boot_ms=boot_ms,
+            xacc=mg(bx),
+            yacc=mg(by),
+            zacc=mg(bz),
+            xgyro=mrad(s.rates[0]),
+            ygyro=mrad(s.rates[1]),
+            zgyro=mrad(s.rates[2]),
+            xmag=0,
+            ymag=0,
+            zmag=0,
+        )
 
     def _motor_testing(self, output: int, now: float) -> bool:
         test = self.motor_tests.get(output)

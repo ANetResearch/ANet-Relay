@@ -5,7 +5,8 @@
 #   .venv/bin/python -m PyInstaller backend/relay-backend.spec --noconfirm --clean \
 #       --distpath pyi-dist --workpath pyi-build        (npm run build:backend)
 #
-# Entry: scripts/relay_entry.py, i.e. `python -m relay` plus the stdin lifeline.
+# Entry: scripts/relay_entry.py, i.e. `python -m relay` plus the stdin lifeline. The same executable with
+# `--program-host` runs the onboard-program host (WP-1, 06 §2.4; relay/programs/host.py).
 import sys
 from pathlib import Path
 
@@ -32,7 +33,11 @@ a = Analysis(
     [str(ROOT / "scripts" / "relay_entry.py")],
     pathex=[str(BACKEND)],
     binaries=[],
-    datas=collect_data_files("relay"),
+    # WP-1: the built-in example programs are read as source text (collect_data_files skips .py files)
+    datas=[
+        *collect_data_files("relay"),
+        (str(BACKEND / "relay" / "programs" / "examples" / "*.py"), "relay/programs/examples"),
+    ],
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],

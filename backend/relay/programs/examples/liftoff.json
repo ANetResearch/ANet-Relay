@@ -1,0 +1,10 @@
+{
+  "name": "Lift-off",
+  "name_zh": "起飞",
+  "description": "Ramps the throttle until the barometer shows a climb, keeps that throttle as the hover point, then climbs to target_alt and holds it.",
+  "description_zh": "逐步加油门直到气压计显示爬升，以该油门作为悬停点，然后爬升到 target_alt 并保持。",
+  "tests": [
+    {"name": "Ramps on the ground", "obs": {"alt": 0.0, "vz": 0.0, "airborne": false}, "state": "search", "expect": {"throttle": [0.29, 0.35], "state": "search"}},
+    {"name": "Climb detected", "obs": {"alt": 0.12, "vz": 0.3}, "expect": {"state": "climb"}}
+  ]
+}
