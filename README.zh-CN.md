@@ -13,6 +13,7 @@ ANet Relay 是面向局域网 Wi-Fi 小型无人机机群的桌面地面站，�
 [![License](https://img.shields.io/badge/license-modified%20Apache--2.0-1f1f1f)](LICENSE)
 
 **[下载](https://github.com/ANetResearch/ANet-Relay/releases/latest)** · **[智能体接口](docs/agent-api.zh-CN.md)** ·
+[机载程序](docs/programs.zh-CN.md) ·
 [硬件配置](docs/hardware.zh-CN.md) ·
 [设计文档](docs/design/) ·
 [更新日志](CHANGELOG.md) · [ANet4D](https://github.com/ANetResearch/ANet4D) · [ANet](https://github.com/ANetResearch/ANet)
@@ -187,6 +188,10 @@ claude mcp add anet-relay-app -- python3 /path/to/ANet-Relay/mcp/anet_relay_app_
 
 顶栏的 **联机** 开关让本机加入同一网络中的所有 Relay 终端；没有房间与大厅，关闭即离开。远端模拟机以石墨色出现在舞台上，带有对方终端的呼号（设置 → Network），分布在半径 10 m 圆周上的 12 个座位。附身一架在空中的模拟机后按住 R1 或 `X` 射击：每秒 8 发，弹匣 24 发。所有终端使用同一弹道模型；命中由被命中飞机的所有者判定，5 发击落，5 s 后复位。舞台上显示记分板、准星与受击方向，驾驶状态 HUD 显示生命值与弹药。本机多架模拟机之间也可互射练习。**真机永不加入联机场地，也永不受虚拟子弹影响**：只共享模拟机；联机所用的 UDP 套接字不承载任何控制，来自网络的数据不会进入杆量、解锁、认领、参数、技能或动作序列。
 
+### 实验室与机载程序
+
+**实验室** 工作区（⌘4 / Ctrl+4）用来编写飞行程序：在本机以 50 Hz 运行的受限 Python，只读取机载能得到的观测，只输出摇杆量。左栏为程序、示例与题目；中部为编辑器（保存即产生版本，问题在行内标出）；右栏为参数、测试、运行、评测、对抗与历史。部署后的飞机显示为 `PROGRAM · <名称> · <状态>`，人附身即暂停程序；评测与对抗的每一局都能在飞行工作区的舞台上多机回放。[机载程序指南](docs/programs.zh-CN.md) 介绍语言、观测、`relay` 库、题目、对抗与接口。
+
 ### 智能体工作区
 
 <img src="docs/media/agents.png" alt="智能体工作区：会话、认领矩阵、最近调用，以及接口地址和 MCP 命令" width="100%" />
@@ -234,7 +239,7 @@ npm run dist:mac            # 或 dist:linux；安装包输出到 release/
 | `sdk/python/`、`mcp/` | Python SDK 与示例；MCP 服务器 |
 | `tools/fakes/` | 无硬件联调用的假数传与假飞控 |
 | `e2e/` | Playwright 测试，以及三种窗口尺寸、两种语言的逐屏走查 |
-| `docs/` | 智能体接口指南、硬件接入指南、飞行调参指南；`docs/design/` 为产品、体验与系统设计 |
+| `docs/` | 智能体接口指南、机载程序指南、硬件接入指南、飞行调参指南；`docs/design/` 为产品、体验与系统设计 |
 
 <details>
 <summary><b>与 ANet 的关系</b></summary>
