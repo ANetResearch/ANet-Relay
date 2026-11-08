@@ -5,6 +5,97 @@ All notable changes to ANet Relay are documented in this file. The format follow
 [Semantic Versioning](https://semver.org/). Each release section is published as the
 GitHub Release notes for its tag.
 
+## [0.5.0] - 2026-11-08
+
+A rigid-body flight model with four rotors after Gazebo's motor model, collision
+volumes for aircraft and rings, dogfights started in one sentence, matches and a
+leaderboard shared across the LAN, and voxel explosions.
+
+### Added
+
+- Collisions: every simulator is a sphere of 0.15 m and every ring a solid torus
+  with a 0.03 m tube. The fleet steps all simulators together at 250 Hz and
+  sweeps each step against the other simulators, the rings of the active course
+  and the aircraft of LAN peers, so fast aircraft never pass through each other.
+  At a closing speed of 2 m/s or more both aircraft crash; below it they bounce
+  with a restitution of 0.4 and the off-centre push upsets their attitude. A
+  shot-down aircraft keeps its volume while it falls. Ring passes count only
+  when the whole aircraft clears the tube; a pass that scrapes the tube still
+  counts and reports `ring_touch`. Events `collision` and `ring_touch`; the
+  `crashed` alert carries `reason_code` (`ground`, `collision`, `shot_down`),
+  the point and what the aircraft hit.
+- Program observation: `obs.collision` (the last contact within 1 s: `t_ago`,
+  `with`, `v_rel`, `normal`) and `closing` on every contact. The evaluator makes
+  course rings solid and writes `collision` and `crash` events into the trace.
+- Dogfights: `POST`, `GET` and `DELETE /scenarios/dogfight` start a timed fight
+  of 2 to 8 simulators (free-for-all or 2 or 3 teams) with gunners and rammers,
+  spawn points around the arena edge, the airframe, hover assist, respawn and a
+  seed. Relay adds the missing simulators, deploys each role's program, arms
+  the aircraft and lets the programs take off; at the end it stops them, lands
+  the aircraft and keeps the final standings. Off the LAN the arena runs in
+  practice mode without a socket. Real aircraft are refused
+  (`dogfight_real_aircraft`). Events `dogfight_started` and `dogfight_finished`.
+- Built-in program `rammer`: proportional-navigation pursuit of the nearest
+  enemy that weaves across the line of sight on the way in, a full push at close
+  range and a recovery state after the contact; it never fires. The hunters
+  side-step an aircraft that comes straight at them. New challenge `ram_easy`
+  (bring down a hovering target by collision, guns off), ten challenges in all.
+- Matches and leaderboard: a match starts with a dogfight or with
+  `POST /arena/match` on any terminal and resets the statistics of every
+  version 2 terminal; `DELETE /arena/match` ends it. `GET /arena/leaderboard`
+  with `by` = `downs`, `survival`, `accuracy` or `rams` merges this terminal's
+  lines with those its peers report: controller, downs, hits, shots, accuracy,
+  rams, deaths, crashes, survival time, best survival time and damage. The
+  arena view carries `match` and `board_rev`. Events `match_started` and
+  `match_finished`.
+- Arena wire protocol 2 with `COLLIDE`, `MATCH` and a statistics block in
+  `STATE`. Each terminal judges contacts of its own aircraft only and sends
+  `COLLIDE` to the owner of the other aircraft, which checks age, distance,
+  rate and pair cooldown against its own view before it applies the same rule.
+  Packets that Relay 0.4 knows are still sent as version 1, so 0.4 and 0.5
+  terminals see each other and hit each other with rounds; collisions and the
+  leaderboard work between 0.5 terminals.
+- Copilot, the application MCP server and the SDK: `dogfight_start`,
+  `dogfight_stop`, `dogfight_status` and `leaderboard` (Copilot now has 113
+  tools in all, 105 at `sticks`; the application MCP server 65), and the SDK's
+  `match_start` and `match_end`. "A six-aircraft free-for-all, four gunners and
+  two rammers" maps to one `dogfight_start` call.
+- Fly workspace: **Start dogfight…** in the Arena menu of the top bar opens a
+  dialog with the dogfight settings. A collapsible **Leaderboard** panel with
+  Downs, Survival, Accuracy and Rams tabs, the match countdown and **End match**
+  appears while the arena is on; this terminal's aircraft are set in bold.
+- Effects: voxel explosions for shoot-downs, rams and hard ground impacts (a
+  white-hot core, 60 cubes that cool from white to red to grey, fall and settle,
+  and a dust ring near the ground), sparks at light contacts, dust and debris for
+  ordinary crashes, and a short camera shake in the chase view within 5 m. Rings
+  are drawn as voxel tori with their real tube radius; the next ring is outlined
+  in white and flashes on a touch. A **Collision volumes** layer (off by default)
+  shows every aircraft's collision sphere and its hit sphere. Lab replays show
+  the same effects. Under reduced motion every effect is a still white cube.
+- Documentation: `docs/simulation.md` and `docs/simulation.zh-CN.md` (what the
+  built-in simulator is for, the simulators in the field and how to connect PX4
+  SITL with Gazebo or ArduPilot SITL), and the dogfight, match, leaderboard,
+  `obs.collision` and `rammer` sections of the agent API and programs guides.
+
+### Changed
+
+- Simulator physics: a rigid body with quaternion attitude and an inertia
+  tensor, flown by four rotors after Gazebo's `MulticopterMotorModel` (first
+  order rotor speed with separate spin-up and spin-down times, thrust and drag
+  torque from the rotor speed, rotor drag and rolling moment) and body drag per
+  axis. A simulated flight controller runs an angle loop, a rate loop with
+  filtered derivative and limited integral, and a mixer that keeps attitude
+  priority when the motors saturate; `SERVO_OUTPUT_RAW` reports its outputs.
+  Airframe defects act physically: a centre of gravity offset is a moment,
+  motor differences are per-rotor thrust factors, a damaged propeller loses and
+  shakes thrust, and the level error sits in the attitude estimate. Hover
+  throttle stays at 0.50 and the top speed at 30 degrees near 7 m/s; the stick
+  map, modes and hover assist are unchanged. Flights are still deterministic
+  by seed.
+- Bullet tracers are 120 ms long with a larger head glow.
+- Stage trails restart when an aircraft jumps more than 3 m between two
+  samples (a respawn or a reset) instead of drawing a line across the stage.
+
 ## [0.4.1] - 2026-11-08
 
 Bullets and hits that read from across the arena, and a reworked set of opening
@@ -478,6 +569,7 @@ xattr -dr com.apple.quarantine "/Applications/ANet Relay.app"
 - Stick timing has been verified on simulators and fake aircraft; check stick
   directions with the propellers removed before the first flight of each aircraft.
 
+[0.5.0]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.5.0
 [0.4.1]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.4.1
 [0.4.0]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.4.0
 [0.3.1]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.3.1

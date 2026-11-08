@@ -325,7 +325,7 @@ The snapshot carries `vehicle.program` (`{id, name, rev, state, status: running 
 
 ### Challenges and duels
 
-Onboard programs (design 06 §2) are judged like exercises on a practice site: a **challenge** is a fixed scenario with a scoring rule, a **duel** sets 2–8 programs against each other in the arena. Both run in a **headless evaluator**: a separate worker process that builds an isolated fleet (no sockets, nothing on disk, an injected clock) and steps the same simulated autopilot, airframe defects, stick path, arena rules and program engine as live flight, as fast as the machine allows (about 12× real time with one aircraft, 5–7× with two). Hover assist is always off. The same scenario, seeds and program revisions always give the same result. At most two jobs run at once; the rest wait in a queue of 16.
+Onboard programs (design 06 §2) are judged like exercises on a practice site: a **challenge** is a fixed scenario with a scoring rule, a **duel** sets 2–8 programs against each other in the arena. Both run in a **headless evaluator**: a separate worker process that builds an isolated fleet (no sockets, nothing on disk, an injected clock) and steps the same simulated autopilot, airframe defects, stick path, arena rules and program engine as live flight, as fast as the machine allows (about 13× real time with one aircraft, 5–6× with two and 3.5–4× with four). Hover assist is always off. The same scenario, seeds and program revisions always give the same result. At most two jobs run at once; the rest wait in a queue of 16.
 
 | Method and path | Auth | Purpose |
 |---|---|---|

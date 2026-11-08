@@ -14,7 +14,7 @@ through Relay instead.
 | Speaks MAVLink like a real aircraft | A simulated ArduPilot-style or PX4-style autopilot (modes, arming checks, failsafes, parameters, landing detection) behind the same driver, stick path, skills and preflight as a real aircraft |
 | Stick-level control | Agents and onboard programs fly with roll, pitch, yaw and throttle at 50 Hz (06 §5); hover assist can be switched off for physical flight |
 | Deterministic | The same scenario, seed and program revision always give the same flight; airframe defects (centre of gravity, level error, motor efficiency, propeller damage, noise) are seeded |
-| Headless and faster than real time | The judge's evaluator steps the same simulator without sockets or a window, about 12x real time with one aircraft, for challenges, duels and their replays |
+| Headless and faster than real time | The judge's evaluator steps the same simulator without sockets or a window, about 13x real time with one aircraft and 3.5–4x with four, for challenges, duels and their replays |
 | Arena | Virtual rounds, collisions, matches, dogfights and a leaderboard, also across terminals on the LAN; simulators only |
 
 It is not a replacement for a high-fidelity simulator: there are no camera or lidar images, the aerodynamics are a
