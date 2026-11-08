@@ -103,6 +103,12 @@
     },
     "Trace": {
       "$ref": "#/$defs/Trace"
+    },
+    "DogfightView": {
+      "$ref": "#/$defs/DogfightView"
+    },
+    "Leaderboard": {
+      "$ref": "#/$defs/Leaderboard"
     }
   },
   "required": [
@@ -138,7 +144,9 @@
     "Challenge",
     "Job",
     "Ladder",
-    "Trace"
+    "Trace",
+    "DogfightView",
+    "Leaderboard"
   ],
   "additionalProperties": false,
   "$defs": {
@@ -328,6 +336,32 @@
         "score"
       ],
       "title": "ArenaLocal",
+      "type": "object"
+    },
+    "ArenaMatch": {
+      "description": "WP-B (07 §4): the current or the last match; times on the backend wall clock.",
+      "properties": {
+        "id": {
+          "description": "8 hex digits",
+          "type": "string"
+        },
+        "started_at": {
+          "type": "number"
+        },
+        "ends_at": {
+          "type": "number"
+        },
+        "running": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "started_at",
+        "ends_at",
+        "running"
+      ],
+      "title": "ArenaMatch",
       "type": "object"
     },
     "ArenaMessage": {
@@ -588,6 +622,21 @@
         },
         "local": {
           "$ref": "#/$defs/ArenaLocal"
+        },
+        "match": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArenaMatch"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "board_rev": {
+          "default": 0,
+          "type": "integer"
         }
       },
       "required": [
@@ -599,7 +648,9 @@
         "error",
         "peers",
         "shots",
-        "local"
+        "local",
+        "match",
+        "board_rev"
       ],
       "title": "ArenaView",
       "type": "object"
@@ -1273,6 +1324,209 @@
       "title": "CourseRunView",
       "type": "object"
     },
+    "DogfightAircraft": {
+      "properties": {
+        "vid": {
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "gunner",
+            "rammer"
+          ],
+          "type": "string"
+        },
+        "program": {
+          "type": "string"
+        },
+        "team": {
+          "type": "string"
+        },
+        "state": {
+          "description": "booting | arming | deploying | flying | human | down | stopped | failed",
+          "type": "string"
+        }
+      },
+      "required": [
+        "vid",
+        "role",
+        "program",
+        "team",
+        "state"
+      ],
+      "title": "DogfightAircraft",
+      "type": "object"
+    },
+    "DogfightConfig": {
+      "properties": {
+        "aircraft": {
+          "type": "integer"
+        },
+        "teams": {
+          "enum": [
+            "ffa",
+            2,
+            3
+          ]
+        },
+        "roles": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "programs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "arena": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "airframe": {
+          "type": "string"
+        },
+        "hover_assist": {
+          "type": "boolean"
+        },
+        "duration_s": {
+          "type": "number"
+        },
+        "respawn": {
+          "type": "boolean"
+        },
+        "seed": {
+          "type": "integer"
+        },
+        "lan": {
+          "description": "on the LAN (the match is shared) or local practice",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "aircraft",
+        "teams",
+        "roles",
+        "programs",
+        "arena",
+        "airframe",
+        "hover_assist",
+        "duration_s",
+        "respawn",
+        "seed",
+        "lan"
+      ],
+      "title": "DogfightConfig",
+      "type": "object"
+    },
+    "DogfightView": {
+      "properties": {
+        "running": {
+          "type": "boolean"
+        },
+        "phase": {
+          "description": "idle | booting | arming | deploying | running | ending | done",
+          "type": "string"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "backend wall clock"
+        },
+        "ends_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "config": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DogfightConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aircraft": {
+          "items": {
+            "$ref": "#/$defs/DogfightAircraft"
+          },
+          "type": "array"
+        },
+        "match": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArenaMatch"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "operator, or the session that started it"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "why it ended: time | stopped | error"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "running",
+        "phase",
+        "started_at",
+        "ends_at",
+        "config",
+        "aircraft",
+        "match",
+        "by",
+        "reason",
+        "error"
+      ],
+      "title": "DogfightView",
+      "type": "object"
+    },
     "DuelResult": {
       "properties": {
         "rounds": {
@@ -1525,7 +1779,12 @@
             "program_faulted",
             "program_host_restarted",
             "program_gate",
-            "judge_finished"
+            "judge_finished",
+            "collision",
+            "dogfight_started",
+            "dogfight_finished",
+            "match_started",
+            "match_finished"
           ],
           "type": "string"
         },
@@ -2162,6 +2421,218 @@
         "rank"
       ],
       "title": "LadderRow",
+      "type": "object"
+    },
+    "Leaderboard": {
+      "properties": {
+        "by": {
+          "enum": [
+            "downs",
+            "survival",
+            "accuracy",
+            "rams"
+          ],
+          "type": "string"
+        },
+        "match": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArenaMatch"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/LeaderboardRow"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "by",
+        "match",
+        "rows"
+      ],
+      "title": "Leaderboard",
+      "type": "object"
+    },
+    "LeaderboardController": {
+      "properties": {
+        "kind": {
+          "enum": [
+            "program",
+            "agent",
+            "human",
+            "none"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "title": "LeaderboardController",
+      "type": "object"
+    },
+    "LeaderboardRow": {
+      "description": "One aircraft. The statistics are null for a 0.4 peer (no statistics block).",
+      "properties": {
+        "key": {
+          "description": "sim-N here, <peer id>/sim-N for a peer's aircraft",
+          "type": "string"
+        },
+        "aircraft": {
+          "type": "string"
+        },
+        "callsign": {
+          "type": "string"
+        },
+        "local": {
+          "type": "boolean"
+        },
+        "controller": {
+          "$ref": "#/$defs/LeaderboardController"
+        },
+        "downs": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hits": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "shots": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "accuracy": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "hits / shots, 0..1; null without shots"
+        },
+        "rams": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deaths": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "crashes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "alive_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "current survival time (at the time of the reply)"
+        },
+        "best_alive_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "damage": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "alive": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "flying now: alive_s keeps counting"
+        }
+      },
+      "required": [
+        "key",
+        "aircraft",
+        "callsign",
+        "local",
+        "controller",
+        "downs",
+        "hits",
+        "shots",
+        "accuracy",
+        "rams",
+        "deaths",
+        "crashes",
+        "alive_s",
+        "best_alive_s",
+        "damage",
+        "alive"
+      ],
+      "title": "LeaderboardRow",
       "type": "object"
     },
     "Link": {

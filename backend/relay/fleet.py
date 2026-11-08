@@ -85,6 +85,7 @@ from .netinfo import local_networks, on_bridge_ap, scan_hosts
 from .peers.game import Arena
 from .procedures import ProcedureOps
 from .programs.service import ProgramService  # WP-1: onboard programs (06 §2)
+from .scenarios import Dogfights  # WP-B: dogfight scenario (07 §3)
 from .sessions import Session, SessionManager
 from .sim.autopilot import ARDUPILOT, PX4, SimAutopilot
 
@@ -423,6 +424,8 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps):
         self.programs = ProgramService(self)
         # WP-2b challenges and duels (06 §3.2-§3.4): job queue, worker processes, results, ladder, traces
         self.judge = JudgeService(self)
+        # WP-B (07 §3): the dogfight scenario and its supervising worker
+        self.dogfights = Dogfights(self)
         self._build_snapshot(self.clock())
 
     # ====================================================================== lifecycle
@@ -451,6 +454,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps):
         if self.link is not None:
             self.link.close()
         self.arena.close()
+        self.dogfights.close()  # WP-B
         self.judge.close()  # WP-2b: cancel evaluation jobs and wait for their workers
         self.programs.close()  # WP-1
         self.history.close()

@@ -495,6 +495,12 @@ EventKind = Literal[
     "program_gate",
     # WP-2b challenges and duels (06 §3.4)
     "judge_finished",
+    # WP-B dogfight scenario, matches and LAN collisions (07 §2-§4); collision is shared with WP-A
+    "collision",
+    "dogfight_started",
+    "dogfight_finished",
+    "match_started",
+    "match_finished",
 ]
 
 
@@ -622,6 +628,15 @@ class ArenaLocal(_Model):
     score: ArenaScore
 
 
+class ArenaMatch(_Model):
+    """WP-B (07 §4): the current or the last match; times on the backend wall clock."""
+
+    id: str = Field(description="8 hex digits")
+    started_at: float
+    ends_at: float
+    running: bool
+
+
 class ArenaView(_Model):
     t: float
     enabled: bool
@@ -632,6 +647,9 @@ class ArenaView(_Model):
     peers: list[ArenaPeer]
     shots: list[ArenaShot]
     local: ArenaLocal
+    # WP-B (07 §4): refetch GET /arena/leaderboard when board_rev changes
+    match: ArenaMatch | None = None
+    board_rev: int = 0
 
 
 class ArenaMessage(_Model):

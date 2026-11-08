@@ -11,6 +11,11 @@ on its aircraft with HIT packets. Effects of a hit go through ``Quad.impulse`` a
 Bullets are kept in arena coordinates, so a seat change never moves one in flight. Remote aircraft and bullets
 are converted into the local frame only for the view.
 
+WP-B (07 §2-§4): ``board`` keeps the per-aircraft statistics, the match and the merged leaderboard
+(``peers.board``); ``collisions`` the contacts with version 2 peers' aircraft (``peers.collisions``). A
+dogfight scenario off the LAN runs the arena in practice mode (``begin_practice``: no socket, ``network``
+off).
+
 LAN input never sets the fleet thread's pace: a remote shot is accepted only when it is younger than
 ``MAX_SHOT_AGE_S`` and its aircraft keeps under ``REMOTE_FIRE_RATE``; each bullet catches up at most
 ``CATCHUP_STEPS`` per tick, the whole flight work of a tick stops at ``FLY_BUDGET_S`` of wall time (the rest
@@ -35,6 +40,8 @@ from ..errors import err
 from . import arena as frame
 from . import ballistics as bal
 from . import wire
+from .board import Board  # WP-B
+from .collisions import LanCollisions  # WP-B
 from .service import DEFAULT_PORT, STATE_HZ, PeerService, default_interfaces
 
 if TYPE_CHECKING:
@@ -182,10 +189,21 @@ class Arena:
     # WP-2b headless evaluator: wall-time budget of the bullet work per tick (unbounded there, so a run
     # does not depend on how fast the machine is); None keeps FLY_BUDGET_S, as the live fleet does
     fly_budget_s: float | None = None
+    # WP-B (07 §3-§4): leaderboard and match, LAN collisions, local practice mode of a dogfight scenario
+    board: Board = field(init=False)
+    collisions: LanCollisions = field(init=False)
+    practice: bool = False
+    _network: bool = True
+    respawn_hold: set[str] = field(default_factory=set)  # the scenario respawns these itself
+    hold_fire: set[str] = field(default_factory=set)  # rammers: the trigger is ignored
 
     def __post_init__(self) -> None:
         if not self.instance:
             self.instance = load_instance(self.fleet.data_dir)
+        self.board = Board(self)
+        self.collisions = LanCollisions(self)
+        self._network = self.network
+        self.fleet.events.add_listener(self.board.on_event)
         self._build_view(self.fleet.clock())
 
     # ------------------------------------------------------------------ settings
@@ -205,9 +223,11 @@ class Arena:
         s = self.fleet.settings
         now = self.fleet.clock()
         if not s.peer_enabled:
-            if self.enabled:
+            if self.enabled and not self.practice:
                 self._leave()
             return
+        if self.practice:  # WP-B: the operator joined the LAN during a practice dogfight
+            self.end_practice()
         if not self.enabled:
             self._join(now)
         elif self.network and self._port != s.peer_port:
@@ -236,6 +256,8 @@ class Arena:
     def _leave(self) -> None:
         if self.peers is not None:
             self.peers.close()
+        self.board.leave(self.fleet.clock())  # WP-B
+        self.collisions.clear()
         self.enabled = False
         self.seat = None
         self.seat_at = None
@@ -252,6 +274,31 @@ class Arena:
         if self.peers is not None:
             self.peers.close()
             self.peers = None
+
+    # ------------------------------------------------------------------ WP-B: practice mode (07 §3)
+
+    @property
+    def on_lan(self) -> bool:
+        return self.enabled and self.network and not self.practice
+
+    def begin_practice(self) -> None:
+        """Run the arena on this terminal only (no socket) for a dogfight while it is not on the LAN."""
+        if self.enabled:
+            return
+        self.practice = True
+        self.network = False
+        self._join(self.fleet.clock())
+        self._build_view(self.fleet.clock())
+
+    def end_practice(self) -> None:
+        if not self.practice:
+            return
+        self.practice = False
+        self.network = self._network
+        if self.enabled:
+            self._leave()
+        if self.fleet.settings.peer_enabled:
+            self.apply_settings()
 
     # ------------------------------------------------------------------ queries
 
@@ -321,6 +368,9 @@ class Arena:
             self._fly(sims, centres, last, now)
         for vid, gun in self.guns.items():
             gun.centre = centres.get(vid)
+        # WP-B (07 §2, §4): contacts with peers' aircraft, then statistics and the match clock
+        self.collisions.tick(sims, now)
+        self.board.tick(sims, now)
         if self.peers is not None and self.peers.ok and now >= self._next_state:
             self._next_state = max(self._next_state + 1.0 / STATE_HZ, now)
             self._send_state(sims)
@@ -349,6 +399,8 @@ class Arena:
                 "peer_joined", data={"peer": peer.key, "callsign": peer.callsign, "seat": peer.seat}
             )
         for peer, reason in result.left:
+            self.board.forget_peer(peer.instance)  # WP-B
+            self.collisions.forget_peer(peer.instance)
             self.bullets = [b for b in self.bullets if b.owner != peer.instance]
             for table in (self._shot_rate, self._target_hp):
                 for key in [k for k in table if k[0] == peer.instance]:
@@ -372,6 +424,10 @@ class Arena:
             self._remote_shot(peer, shot, age, now)
         for peer, hit in result.hits:
             self._remote_hit(peer, hit)
+        for peer, collide, age in result.collides:  # WP-B (07 §2)
+            self.collisions.on_packet(peer, collide, age, now)
+        for peer, match, age in result.matches:  # WP-B (07 §4)
+            self.board.on_match(peer, match, age, now)
 
     # ------------------------------------------------------------------ guns
 
@@ -383,6 +439,7 @@ class Arena:
             and v.airborne()
             and v.controller(self.fleet.sessions) in ("human", "agent", "program")  # program: WP-1
             and not v.driver.sim.quad.s.crashed
+            and (v.id not in self.hold_fire or v.auth.possession is not None)  # WP-B: rammers do not fire
         )
 
     def _gun_tick(self, v: Vehicle, gun: Gun, centre: Any, now: float) -> None:
@@ -390,7 +447,11 @@ class Arena:
         if gun.down:
             if not sim.quad.s.crashed:  # reset by the operator (Circle held, or the reset action)
                 self._revive(gun)
-            elif self.fleet.settings.arena_auto_respawn and now - (gun.down_at or now) >= RESPAWN_S:
+            elif (
+                self.fleet.settings.arena_auto_respawn
+                and v.id not in self.respawn_hold
+                and now - (gun.down_at or now) >= RESPAWN_S
+            ):
                 self._respawn(v, gun, now)
             return
         if gun.reload_until is not None and now >= gun.reload_until:
@@ -418,6 +479,7 @@ class Arena:
         index = sim_index(v.id) or 0
         bullet = Bullet(self.instance, index, self._bullet_seq, centre, muzzle, now)
         self._add_bullet(bullet)
+        self.board.shot(v.id)  # WP-B
         self._own_shots.append((self._bullet_seq, index))
         if self.peers is not None and self.peers.ok:
             shot = wire.Shot(index, self._bullet_seq, self.peers.mono_ms(now), centre, muzzle)
@@ -535,11 +597,14 @@ class Arena:
             gun.fire_until = 0.0
             sim.shoot_down(SHOT_DOWN)
             self.score.deaths += 1
+            self.board.death(v.id)  # WP-B
         own = b.owner == self.instance
         if own:
             self.score.hits += 1
             if down:
                 self.score.downs += 1
+            if f"sim-{b.shooter}" != v.id:
+                self.board.hit(f"sim-{b.shooter}", bal.DAMAGE, down)  # WP-B
         elif self.peers is not None and self.peers.ok:
             self.peers.send_hit(wire.Hit(b.owner, b.bullet, sim_index(v.id) or 0, bal.DAMAGE, down, point))
         shooter = self._shooter_label(b)
@@ -620,6 +685,7 @@ class Arena:
         if down:
             self.score.downs += 1
         vid = f"sim-{shooter}"
+        self.board.hit(vid, damage, down)  # WP-B
         v = self.fleet.vehicles.get(vid)
         label = v.label if v is not None else f"SIM-{shooter}"
         target = f"{peer.callsign} / SIM-{hit.target}"
@@ -710,6 +776,10 @@ class Arena:
             deaths=self.score.deaths,
             aircraft=tuple(aircraft),
             shots=tuple(shots),
+            # WP-B (07 §4): the leaderboard block once per second (a version 2 STATE)
+            stats=self.board.stats_block(self.fleet.clock())
+            if self.board.next_state_carries_stats()
+            else None,
         )
         self.peers.send_state(state)
 
@@ -799,6 +869,9 @@ class Arena:
                 "max_hp": MAX_HP,
                 "score": self.score.view(),
             },
+            # WP-B (07 §4): the match and the leaderboard revision (refetch the board when it changes)
+            "match": self.board.match_view(now),
+            "board_rev": self.board.rev,
         }
 
 

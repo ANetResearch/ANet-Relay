@@ -39,6 +39,8 @@ export interface RelaySchema {
   Job: Job
   Ladder: Ladder
   Trace: Trace
+  DogfightView: DogfightView
+  Leaderboard: Leaderboard
 }
 /**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
@@ -669,6 +671,11 @@ export interface Event {
     | 'program_host_restarted'
     | 'program_gate'
     | 'judge_finished'
+    | 'collision'
+    | 'dogfight_started'
+    | 'dogfight_finished'
+    | 'match_started'
+    | 'match_finished'
   vehicle: string | null
   session: string | null
   text_en: string
@@ -767,6 +774,8 @@ export interface ArenaView {
   peers: ArenaPeer[]
   shots: ArenaShot[]
   local: ArenaLocal
+  match: ArenaMatch | null
+  board_rev: number
 }
 /**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
@@ -874,6 +883,21 @@ export interface ArenaLocal {
   max_ammo: number
   max_hp: number
   score: ArenaScore
+}
+/**
+ * WP-B (07 §4): the current or the last match; times on the backend wall clock.
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ArenaMatch".
+ */
+export interface ArenaMatch {
+  /**
+   * 8 hex digits
+   */
+  id: string
+  started_at: number
+  ends_at: number
+  running: boolean
 }
 /**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
@@ -1706,4 +1730,125 @@ export interface TraceEvent {
   t: number
   kind: string
   vehicle: string | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "DogfightView".
+ */
+export interface DogfightView {
+  running: boolean
+  /**
+   * idle | booting | arming | deploying | running | ending | done
+   */
+  phase: string
+  /**
+   * backend wall clock
+   */
+  started_at: number | null
+  ends_at: number | null
+  config: DogfightConfig | null
+  aircraft: DogfightAircraft[]
+  match: ArenaMatch | null
+  /**
+   * operator, or the session that started it
+   */
+  by: string | null
+  /**
+   * why it ended: time | stopped | error
+   */
+  reason: string | null
+  error: string | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "DogfightConfig".
+ */
+export interface DogfightConfig {
+  aircraft: number
+  teams: 'ffa' | 2 | 3
+  roles: {
+    [k: string]: number | undefined
+  }
+  programs: {
+    [k: string]: string | undefined
+  }
+  arena: {
+    [k: string]: number | undefined
+  }
+  airframe: string
+  hover_assist: boolean
+  duration_s: number
+  respawn: boolean
+  seed: number
+  /**
+   * on the LAN (the match is shared) or local practice
+   */
+  lan: boolean
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "DogfightAircraft".
+ */
+export interface DogfightAircraft {
+  vid: string
+  role: 'gunner' | 'rammer'
+  program: string
+  team: string
+  /**
+   * booting | arming | deploying | flying | human | down | stopped | failed
+   */
+  state: string
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "Leaderboard".
+ */
+export interface Leaderboard {
+  by: 'downs' | 'survival' | 'accuracy' | 'rams'
+  match: ArenaMatch | null
+  rows: LeaderboardRow[]
+}
+/**
+ * One aircraft. The statistics are null for a 0.4 peer (no statistics block).
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "LeaderboardRow".
+ */
+export interface LeaderboardRow {
+  /**
+   * sim-N here, <peer id>/sim-N for a peer's aircraft
+   */
+  key: string
+  aircraft: string
+  callsign: string
+  local: boolean
+  controller: LeaderboardController
+  downs: number | null
+  hits: number | null
+  shots: number | null
+  /**
+   * hits / shots, 0..1; null without shots
+   */
+  accuracy: number | null
+  rams: number | null
+  deaths: number | null
+  crashes: number | null
+  /**
+   * current survival time (at the time of the reply)
+   */
+  alive_s: number | null
+  best_alive_s: number | null
+  damage: number | null
+  /**
+   * flying now: alive_s keeps counting
+   */
+  alive: boolean | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "LeaderboardController".
+ */
+export interface LeaderboardController {
+  kind: 'program' | 'agent' | 'human' | 'none'
+  name: string
 }

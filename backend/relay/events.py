@@ -174,6 +174,16 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     "program_gate": ("{vehicle}: onboard programs {detail}.", "{vehicle}：机载程序{detail}。"),
     # WP-2b challenges and duels (06 §3.4); {detail} is filled from detail_en / detail_zh
     "judge_finished": ("{detail}.", "{detail}。"),
+    # WP-B dogfight scenario, matches and LAN collisions (07 §2-§4); {detail} from detail_en / detail_zh.
+    # "collision" is shared with WP-A (local contacts); keep one entry when merging.
+    "collision": ("{vehicle} {detail}.", "{vehicle} {detail}。"),
+    "dogfight_started": (
+        "Dogfight started: {aircraft} aircraft for {duration} s ({where}).",
+        "狗斗开始：{aircraft} 架飞机，{duration} s（{where_zh}）。",
+    ),
+    "dogfight_finished": ("Dogfight ended: {detail}.", "狗斗结束：{detail}。"),
+    "match_started": ("Match started for {duration} s.", "对局开始，时长 {duration} s。"),
+    "match_finished": ("Match ended: {detail}.", "对局结束：{detail}。"),
 }
 
 INPUT_LABELS = {"keyboard": ("keyboard", "键盘"), "screen": ("on-screen sticks", "屏幕摇杆")}
