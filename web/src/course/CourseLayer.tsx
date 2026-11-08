@@ -1,9 +1,12 @@
-// Ring course 3D layer (02 §10.2, §10.3), a child of <Stage> inside its scene. Rings are tori whose inner radius is
-// the course radius (tube 1.2 cm, MeshStandard metalness 0.1 / roughness 0.6), each with a 1 px drop line and its
-// number on the ground. States: next (g50, four 3 cm ticks turning once per 20 s), later (g500, 0.7), passed
-// (g700, 0.35); never red. The selected aircraft's run is featured (states, ticks, dashed g400 guide line from the
-// aircraft to the next ring, pass flash and split pop-in); other runs are drawn quietly so neighbouring courses
-// stay readable. A pass flashes the ring to white (80 ms), then a copy grows 1.0 -> 1.18 and fades (350 ms).
+// Ring course 3D layer (02 §10.2, §10.3), a child of <Stage> inside its scene. Rings are solid tori with the
+// collision volume's dimensions (07 §2: major radius = the course radius, tube RING_TUBE 3 cm), drawn as a chain of
+// voxels along the centre line (./voxelRing; MeshStandard metalness 0.1 / roughness 0.6), each with a 1 px drop line
+// and its number on the ground. States (07 §5): next (g300 body with a white voxel outline, four 3 cm ticks turning
+// once per 20 s), later (g300, 0.75), passed (g700, 0.35); never red. The selected aircraft's run is featured
+// (states, outline, ticks, dashed g400 guide line from the aircraft to the next ring, pass flash and split pop-in);
+// other runs are drawn quietly so neighbouring courses stay readable. A pass flashes the ring to white (80 ms), then a
+// copy grows 1.0 -> 1.18 and fades (350 ms). An aircraft grazing the tube (`ring_touch`, ./touch) flashes that ring
+// white for --duration-arena-ring-flash, held still under reduced motion.
 // Contract: web/CONTRACTS.md#courselayer.
 import * as React from 'react'
 import * as THREE from 'three'
@@ -20,12 +23,17 @@ import { easeSmoothOut, enuToScene } from '@/stage/math'
 import { framingExtras } from '@/stage/scene/CameraRig'
 import { useStage } from '@/stage/store'
 import { token } from '@/stage/tokens'
+import { RING_TUBE } from '@/arena/collide'
+import { ARENA_TOKENS, tokenMs } from '@/arena/timing'
 import { PopNumber } from './PopNumber'
+import { ringTouchedAt } from './touch'
+import { voxelRingGeometry } from './voxelRing'
 import { isActive, ringNormal, ringsExtent, ringState, runRings, type CourseView, type Ring, type RingState } from './geometry'
 import { useCourse, watchCourses } from './store'
 import './course.css'
 
-const TUBE = 0.012
+/** backend/relay/sim/collide.py RING_TUBE */
+const TUBE = RING_TUBE
 const TICK = 0.03
 const TICK_PERIOD_S = 20
 const FLASH_MS = 80
@@ -42,14 +50,16 @@ interface Look {
 
 function look(state: RingState, featured: boolean): Look {
   if (featured) {
-    if (state === 'next') return { color: token('g50').color, opacity: 1, emissive: 0.45 }
-    if (state === 'later') return { color: token('g500').color, opacity: 0.7, emissive: 0.25 }
+    if (state === 'next') return { color: token('g300').color, opacity: 1, emissive: 0.35 }
+    if (state === 'later') return { color: token('g300').color, opacity: 0.75, emissive: 0.2 }
     return { color: token('g700').color, opacity: 0.35, emissive: 0.15 }
   }
-  if (state === 'next') return { color: token('g500').color, opacity: 0.6, emissive: 0.2 }
-  if (state === 'later') return { color: token('g600').color, opacity: 0.4, emissive: 0.15 }
+  if (state === 'next') return { color: token('g400').color, opacity: 0.6, emissive: 0.2 }
+  if (state === 'later') return { color: token('g500').color, opacity: 0.45, emissive: 0.15 }
   return { color: token('g700').color, opacity: 0.22, emissive: 0.1 }
 }
+
+const WHITE_LOOK = (): Look => ({ color: token('white').color, opacity: 1, emissive: 0.9 })
 
 function ringMaterial(l: Look): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({
@@ -68,33 +78,46 @@ function applyLook(m: THREE.MeshStandardMaterial, l: Look): void {
   m.needsUpdate = true
 }
 
-/** Imperative ring: torus, pass echo, the four ticks and the drop line. */
+/** Imperative ring: voxel torus, outline hull, pass echo, the four ticks and the drop line. */
 class RingView {
   readonly orient = new THREE.Group()
   readonly drop: THREE.Line
   readonly center: THREE.Vector3
-  private readonly geo: THREE.TorusGeometry
+  private readonly geo: THREE.BufferGeometry
   private readonly mat: THREE.MeshStandardMaterial
   private readonly echo: THREE.Mesh
   private readonly echoMat: THREE.MeshStandardMaterial
+  private readonly outlineGeo: THREE.BufferGeometry
+  private readonly outlineMat = new THREE.MeshBasicMaterial({ color: token('white').color, side: THREE.BackSide, toneMapped: false })
+  private readonly outline: THREE.Mesh
+  private state: RingState
+  private featured: boolean
+  private touchAt: number | null = null
   private readonly ticks = new THREE.Group()
   private readonly tickGeo = new THREE.BoxGeometry(0.004, TICK, 0.004)
   private readonly tickMat = new THREE.MeshBasicMaterial({ color: token('g50').color, toneMapped: false })
   private anim: number | null = null
   private passAt: number | null = null
 
-  constructor(ring: Ring, state: RingState, featured: boolean) {
-    this.geo = new THREE.TorusGeometry(ring.r + TUBE, TUBE, 12, 96)
+  constructor(ring: Ring, state: RingState, featured: boolean, private readonly vehicle: string, private readonly index: number) {
+    this.state = state
+    this.featured = featured
+    this.geo = voxelRingGeometry(ring.r, TUBE)
     this.mat = ringMaterial(look(state, featured))
     const torus = new THREE.Mesh(this.geo, this.mat)
     torus.castShadow = true
     torus.raycast = () => {}
+    // the next ring of the featured run: an inverted hull of slightly larger cubes reads as a white outline
+    this.outlineGeo = voxelRingGeometry(ring.r, TUBE, 1.32)
+    this.outline = new THREE.Mesh(this.outlineGeo, this.outlineMat)
+    this.outline.visible = featured && state === 'next'
+    this.outline.raycast = () => {}
     this.echoMat = ringMaterial({ color: token('white').color, opacity: 0, emissive: 0.6 })
     this.echoMat.transparent = true
     this.echo = new THREE.Mesh(this.geo, this.echoMat)
     this.echo.visible = false
     this.echo.raycast = () => {}
-    const rr = ring.r + 2 * TUBE + 0.006 + TICK / 2
+    const rr = ring.r + 1.5 * TUBE + 0.006 + TICK / 2
     for (let i = 0; i < 4; i++) {
       const a = (i * Math.PI) / 2
       const tick = new THREE.Mesh(this.tickGeo, this.tickMat)
@@ -105,11 +128,11 @@ class RingView {
     }
     const [nx, ny, nz] = ringNormal(ring.yaw_deg)
     this.orient.quaternion.setFromUnitVectors(Z_AXIS, new THREE.Vector3(...enuToScene(nx, ny, nz)).normalize())
-    this.orient.add(torus, this.echo, this.ticks)
+    this.orient.add(this.outline, torus, this.echo, this.ticks)
     const [sx, sy, sz] = enuToScene(ring.c[0], ring.c[1], ring.c[2])
     this.center = new THREE.Vector3(sx, sy, sz)
     this.orient.position.copy(this.center)
-    const bottom = Math.max(0, sy - ring.r - 2 * TUBE)
+    const bottom = Math.max(0, sy - ring.r - TUBE)
     this.drop = new THREE.Line(
       new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(sx, 0, sz), new THREE.Vector3(sx, bottom, sz)]),
       new THREE.LineBasicMaterial({ color: token('g700').color, toneMapped: false }),
@@ -121,17 +144,32 @@ class RingView {
   update(state: RingState, featured: boolean, passAt: number | null): void {
     const fresh = passAt !== null && passAt !== this.passAt && performance.now() - passAt < FLASH_MS + GROW_MS
     this.passAt = passAt
+    this.state = state
+    this.featured = featured
     if (fresh && featured && state === 'passed' && !motionReduced()) this.anim = passAt
-    else if (this.anim === null) applyLook(this.mat, look(state, featured))
+    else if (this.anim === null && this.touchAt === null) applyLook(this.mat, look(state, featured))
     this.ticks.visible = featured && state === 'next'
+    this.outline.visible = featured && state === 'next'
+  }
+
+  /** A graze of the tube (ring_touch): white for the flash token, then back to the state's look. */
+  private touch(): boolean {
+    const at = ringTouchedAt(this.vehicle, this.index)
+    const span = tokenMs(ARENA_TOKENS.ringFlash)
+    const on = at !== null && span > 0 && performance.now() - at < span
+    if (on && this.touchAt !== at) applyLook(this.mat, WHITE_LOOK())
+    else if (!on && this.touchAt !== null) applyLook(this.mat, look(this.state, this.featured))
+    this.touchAt = on ? at : null
+    return on
   }
 
   frame(dt: number): void {
     if (this.ticks.visible && !motionReduced()) this.ticks.rotation.z -= ((2 * Math.PI) / TICK_PERIOD_S) * dt
+    if (this.touch()) return
     if (this.anim === null) return
     const age = performance.now() - this.anim
     if (age < FLASH_MS) {
-      applyLook(this.mat, { color: token('white').color, opacity: 1, emissive: 0.9 })
+      applyLook(this.mat, WHITE_LOOK())
       return
     }
     if (!this.echo.visible) {
@@ -152,6 +190,8 @@ class RingView {
   dispose(): void {
     this.geo.dispose()
     this.mat.dispose()
+    this.outlineGeo.dispose()
+    this.outlineMat.dispose()
     this.echoMat.dispose()
     this.tickGeo.dispose()
     this.tickMat.dispose()
@@ -160,16 +200,18 @@ class RingView {
   }
 }
 
-const RingMesh = React.memo(function RingMesh({ ring, index, state, featured, passAt }: {
+const RingMesh = React.memo(function RingMesh({ ring, index, vehicle, state, featured, passAt }: {
   ring: Ring
   index: number
+  /** the aircraft whose run this ring belongs to (ring touches) */
+  vehicle: string
   state: RingState
   featured: boolean
   /** performance.now() of the pass of this ring, if it was just passed */
   passAt: number | null
 }) {
   // the view is built once per ring placement (the parent keys rings by position); later states are updates
-  const [view] = React.useState(() => new RingView(ring, state, featured))
+  const [view] = React.useState(() => new RingView(ring, state, featured, vehicle, index))
   React.useEffect(() => view.update(state, featured, passAt), [view, state, featured, passAt])
   React.useEffect(() => () => view.dispose(), [view])
   useFrame((_, dt) => view.frame(dt))
@@ -288,6 +330,7 @@ const CourseRun = React.memo(function CourseRun({ id, featured }: { id: string; 
           key={`${view.course_id}-${i}-${r.c.join(',')}`}
           ring={r}
           index={i}
+          vehicle={id}
           state={ringState(i, view)}
           featured={featured}
           passAt={pass && pass.ring === i ? pass.at : null}

@@ -14,6 +14,7 @@ import { rig } from '@/stage/scene/rigState'
 import { useStage } from '@/stage/store'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/ui/components/ui/table'
 import { useTA } from './copy'
+import { LeaderboardPanel } from './LeaderboardPanel'
 import { useArena, watchArenaEvents, type ArenaMark } from './store'
 import { ARENA_TOKENS, markRemainingMs, tokenMs } from './timing'
 import './arena.css'
@@ -189,7 +190,8 @@ export function ArenaHud({ boardTop }: { boardTop: number }) {
     <>
       <Crosshair />
       <HitDirection />
-      <Scoreboard top={boardTop} />
+      {/* WP-C v0.5 (07 §5): the leaderboard; the v0.4 terminal scoreboard when the backend has none */}
+      <LeaderboardPanel top={boardTop} fallback={<Scoreboard top={boardTop} />} />
     </>
   )
 }

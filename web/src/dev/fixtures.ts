@@ -12,8 +12,21 @@ import { startArenaFixture } from './arenaFixture'
 import { startAirframeFixture } from './airframeFixture'
 // WP-3: Lab stand-in (programs, tests, deployment, challenges, duels, traces)
 import { startLabFixture } from './labFixture'
+// WP-C v0.5: six-aircraft dogfight (?fixture=dogfight) and the busy fixture's leaderboard
+import { busyBoard, startDogfightFixture } from './dogfightFixture'
 
 type V = Vehicle
+
+/** WP-C v0.5: the cage loop's rings (ENU m, yaw degrees, radius m) for the course layer. */
+const CAGE_LOOP = {
+  id: 'cage-loop', name_en: 'Cage loop', name_zh: '笼内环线', preset: true,
+  rings: [
+    { c: [0, 1, 1], yaw_deg: 90, r: 0.45 },
+    { c: [1.2, 0, 1.2], yaw_deg: 0, r: 0.45 },
+    { c: [0, -1, 1], yaw_deg: 90, r: 0.45 },
+    { c: [-1.2, 0, 1.2], yaw_deg: 0, r: 0.45 },
+  ],
+}
 
 const sensors = (baro = true): V['sensors'] => [
   { name: 'gyro', present: true, enabled: true, healthy: true },
@@ -142,7 +155,7 @@ function alertsFor(name: FixtureName, now: number): Alert[] {
 }
 
 function history(name: FixtureName, now: number): RelayEvent[] {
-  if (name === 'empty') return []
+  if (name === 'empty' || name === 'dogfight') return []
   let seq = 1000
   const ev = (dt: number, kind: RelayEvent['kind'], vehicle: string | null, data: Record<string, unknown> = {}): RelayEvent => ({
     seq: ++seq, t: now - dt, kind, vehicle, session: (data.name as string | undefined) ?? null, text_en: kind, text_zh: kind, data,
@@ -174,16 +187,16 @@ function history(name: FixtureName, now: number): RelayEvent[] {
 }
 
 function makeFleet(name: FixtureName, now: number): Fleet {
-  const vehicles = name === 'empty' ? [] : busyVehicles(now)
+  const vehicles = name === 'empty' || name === 'dogfight' ? [] : busyVehicles(now)
   return {
     t: now,
     version: '0.1.0',
     listen: name === 'alerts' ? { port: 14550, ok: false, error: 'address in use' } : { port: 14550, ok: true, error: null },
     scan: { running: false, done: 0, total: 0, networks: ['10.7.7.0/24'], found: 0, error: null },
-    sessions: name === 'empty' ? [] : [{ session_id: 's-7f3a', name: 'harness-a', expires_in_s: 12, vehicles: ['q02', 'q04', 'sim-2'] }],
+    sessions: name === 'empty' ? [] : [{ session_id: 's-7f3a', name: 'harness-a', expires_in_s: 12, vehicles: name === 'dogfight' ? ['sim-4'] : ['q02', 'q04', 'sim-2'] }],
     safety_volume: { x: 3, y: 3, z: 2 },
     vehicles,
-    alerts: alertsFor(name, now),
+    alerts: name === 'dogfight' ? [] : alertsFor(name, now),
   }
 }
 
@@ -200,8 +213,19 @@ export function startFixture(name: FixtureName): () => void {
     useRelay.getState().applyFleet({ ...fleet, t: now })
   }
 
-  // WP-D: arena stand-in
-  const arena = startArenaFixture()
+  // WP-D: arena stand-in (WP-C v0.5: the dogfight fixture drives the arena view itself)
+  const arena = name === 'dogfight' ? { settings: () => {}, stop: () => {} } : startArenaFixture()
+  // WP-C v0.5: the dogfight moves the local simulators, the arena view and the event effects
+  const dogfight = name === 'dogfight'
+    ? startDogfightFixture({
+        base,
+        setVehicles: (vs) => {
+          fleet = { ...fleet, vehicles: vs }
+        },
+        emit: (kind, vehicle, data) => emit(kind as RelayEvent['kind'], vehicle, data),
+      })
+    : null
+  if (dogfight) fleet = { ...fleet, vehicles: dogfight.vehicles(now) }
   // WP-2a: airframe stand-in; a change updates the snapshot reference and emits the event
   const airframe = startAirframeFixture((id, preset, seed) => {
     mutate(id, (x) => (x.sim ? { ...x, sim: { ...x.sim, airframe: { preset, seed } } } : x))
@@ -220,6 +244,13 @@ export function startFixture(name: FixtureName): () => void {
     async request(method, path, body) {
       const labbed = lab.handle(method, path, body) // WP-3
       if (labbed !== undefined) return labbed
+      // WP-C v0.5: leaderboard, match and dogfight scenario routes
+      const fought = dogfight?.handle(method, path, body)
+      if (fought !== undefined) return fought
+      if (path.startsWith('/arena/leaderboard')) return busyBoard((new URLSearchParams(path.split('?')[1] ?? '').get('by') ?? 'downs') as Parameters<typeof busyBoard>[0])
+      if (path === '/scenarios/dogfight') return { running: false, started_at: null, ends_at: null, config: null, aircraft: [] }
+      // WP-C v0.5: ring geometry of SIM-2's course, so the voxel rings show in the fixture
+      if (path === '/courses') return { courses: [CAGE_LOOP] }
       // WP-D: the arena toggle and settings
       if (path === '/settings' && method === 'PUT') {
         arena.settings(body)
@@ -292,6 +323,8 @@ export function startFixture(name: FixtureName): () => void {
   const tick = setInterval(() => {
     now = Date.now() / 1000
     k++
+    // WP-C v0.5: SIM-2 grazes the tube of its next ring every 4 s (the ring flashes white)
+    if (name !== 'dogfight' && name !== 'empty' && k % 40 === 0) emit('ring_touch' as RelayEvent['kind'], 'sim-2', { vehicle: 'sim-2', ring: 2, point: [0.4, 1.2, 1.1] })
     const w = Math.sin(k / 9)
     fleet = {
       ...fleet,
@@ -322,6 +355,7 @@ export function startFixture(name: FixtureName): () => void {
     timers.forEach(clearTimeout)
     clearInterval(tick)
     arena.stop() // WP-D
+    dogfight?.stop() // WP-C v0.5
     lab.stop() // WP-3
   }
 }

@@ -4,7 +4,7 @@ import type { Program } from '@/api'
 import { normChallenges, normJob, normLadder, jobFinished } from './api'
 import { LAB_DICTS, reasonKey, type LabKey } from './copy'
 import { diffStats, lineDiff, withContext } from './diff'
-import { impactsAt, parseTrace, recentEvent, sampleAt, sampleIndex, shotsAt, traceImpacts, traceStageId } from './trace'
+import { impactsAt, parseTrace, recentEvent, sampleAt, sampleIndex, shotsAt, traceImpacts, traceStageId, type TraceImpactKind } from './trace'
 import { isDirty, NEW_SOURCE, testsOf } from './store'
 import { intLiteral, paramRange, paramStep } from './ParamsTab'
 import { parseObject } from './TestsTab'
@@ -113,17 +113,41 @@ describe('trace', () => {
   it('finds every impact once: where a round ended on a hit, or where the aircraft was hit or went down', () => {
     const tr = parseTrace({ ...raw, events: [...raw.events, { t: 1.2, kind: 'hit', vehicle: 'b', by: 'a' }, { t: 1.8, kind: 'down', vehicle: 'b', by: 'a' }] })!
     const all = traceImpacts(tr)
-    expect(all.map((m) => [m.t, m.kind, m.key])).toEqual([[0.6, 'hit', 'shot:s1'], [1.2, 'hit', 'event:1'], [1.8, 'down', 'event:2']])
+    // v0.5 (07 §5): a shoot-down is an explosion
+    expect(all.map((m) => [m.t, m.kind, m.key])).toEqual([[0.6, 'hit', 'shot:s1'], [1.2, 'hit', 'event:1'], [1.8, 'explosion', 'event:2']])
     // the round of s1 flew about 3.3 m east (drag) before it hit
     expect(all[0].p[0]).toBeGreaterThan(3.1)
     expect(all[0].p[0]).toBeLessThan(3.6)
     // the unmatched hit and the shoot-down sit on aircraft b
     expect(all[2].p[0]).toBeCloseTo(5)
     expect(traceImpacts(tr)).toBe(all)
-    const life = (k: 'hit' | 'down') => (k === 'down' ? 1 : 0.65)
+    const life = (k: TraceImpactKind) => (k === 'explosion' ? 1 : 0.65)
     expect(impactsAt(tr, 0.5, life)).toEqual([])
     expect(impactsAt(tr, 0.7, life).map((m) => m.key)).toEqual(['shot:s1'])
     expect(impactsAt(tr, 2.5, life).map((m) => m.key)).toEqual(['event:2'])
+  })
+  it('turns v0.5 collision and crash events into sparks, one explosion per destroyed aircraft and dust (07 §5)', () => {
+    const tr = parseTrace({
+      ...raw,
+      events: [
+        { t: 0.4, kind: 'collision', vehicle: 'a', with: 'ring:1', point: [0.4, 0, 1], v_rel: 0.8, crashed: false },
+        { t: 1.0, kind: 'collision', vehicle: 'a', with: 'b', point: [1, 0, 1], v_rel: 3.1, crashed: true },
+        { t: 1.0, kind: 'crash', vehicle: 'a', point: [1, 0, 1], reason: 'collision' },
+        { t: 1.5, kind: 'crash', vehicle: 'b', point: [5, 0, 0.02], reason: 'ground' },
+      ],
+    })!
+    expect(tr.events[1]).toMatchObject({ with: 'b', crashed: ['a', 'b'], v_rel: 3.1 })
+    expect(tr.events[0].crashed).toEqual([])
+    const fx = traceImpacts(tr).filter((m) => !m.key.startsWith('shot:'))
+    expect(fx.map((m) => [m.t, m.kind, m.key])).toEqual([
+      [0.4, 'spark', 'event:0'],
+      [1.0, 'spark', 'event:1'],
+      [1.0, 'explosion', 'event:1:a'],
+      [1.0, 'explosion', 'event:1:b'],
+      [1.5, 'dust', 'event:3'],
+    ])
+    // the replay bar names the collision
+    expect(recentEvent(tr.events, 1.1)?.kind).toBe('crash')
   })
   it('publishes prefixed stage ids so live aircraft never collide', () => {
     const crafts = craftsAt(parseTrace(raw)!, 1)

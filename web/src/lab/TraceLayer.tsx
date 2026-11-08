@@ -1,14 +1,18 @@
-// Scene layer of an evaluation-trace replay (06 §3.4, §7, §11), mounted next to <ArenaLayer/> on the Fly stage.
-// Draws the rounds in flight at the replay cursor as voxel tracers (arena/voxelFx; each shot flown on the arena
-// integrator from its spawn, ./trace shotsAt + arena/ballistics flightAt), a voxel burst at every hit and
-// shoot-down (./trace impactsAt; a pure function of the cursor, so scrubbing back shows the same frame), and the
-// arena boundary ring on the ground. The first aircraft's rounds are r400, the others r500 (who fired is told apart
-// by lightness). Reads the trace store in the frame loop; renders nothing while no trace is open.
+// Scene layer of an evaluation-trace replay (06 §3.4, §7, §11; 07 §5), mounted next to <ArenaLayer/> on the Fly
+// stage. Draws the rounds in flight at the replay cursor as voxel tracers (arena/voxelFx; each shot flown on the
+// arena integrator from its spawn, ./trace shotsAt + arena/ballistics flightAt), a voxel burst at every hit, an
+// explosion at every shoot-down and every aircraft a collision crashed, sparks at every collision point and dust where
+// an aircraft crashed on the ground (./trace impactsAt; a pure function of the cursor, so scrubbing back shows the
+// same frame), the arena boundary ring on the ground and, with the layer on, the collision volumes. The first
+// aircraft's rounds are r400, the others r500 (who fired is told apart by lightness). Reads the trace store in the
+// frame loop; renders nothing while no trace is open.
 import * as React from 'react'
 import * as THREE from 'three'
 import { useFrame } from '@react-three/fiber'
 import { flightAt } from '@/arena/ballistics'
 import { ARENA_TOKENS, tokenMs } from '@/arena/timing'
+import { explosionLifeS } from '@/arena/fx'
+import { Volumes } from '@/arena/Volumes'
 import { burstLife, seedOf, VoxelFx } from '@/arena/voxelFx'
 import { enuToScene } from '@/stage/math'
 import { stageQuality } from '@/stage/scene/gpu'
@@ -27,7 +31,7 @@ function toScene(p: readonly number[], out: THREE.Vector3): THREE.Vector3 {
 }
 
 class TraceFx {
-  readonly vox = new VoxelFx()
+  readonly vox = new VoxelFx(8192)
 
   constructor(private readonly light: boolean) {}
 
@@ -46,12 +50,13 @@ class TraceFx {
         n++
       }
       const coreS = tokenMs(ARENA_TOKENS.core) / 1000
-      const lives = { burst: tokenMs(ARENA_TOKENS.burst) / 1000, down: (2 * tokenMs(ARENA_TOKENS.downDebris)) / 1000 }
+      const bigCoreS = tokenMs(ARENA_TOKENS.explosionCore) / 1000
+      const lives = { burst: tokenMs(ARENA_TOKENS.burst) / 1000, down: (2 * tokenMs(ARENA_TOKENS.downDebris)) / 1000, explosion: explosionLifeS() }
       const still = motionReduced()
       for (const m of impactsAt(trace, t, (k) => burstLife(k, lives))) {
         const [x, y, z] = enuToScene(m.p[0], m.p[1], m.p[2])
-        const kind = still ? 'still' : m.kind
-        this.vox.burst({ p: [x, y, z], t0: m.t, seed: seedOf(m.key), kind }, t - m.t, coreS, burstLife(kind, lives))
+        const life = burstLife(m.kind, lives)
+        this.vox.burst({ p: [x, y, z], t0: m.t, seed: seedOf(m.key), kind: m.kind, still }, t - m.t, m.kind === 'explosion' ? bigCoreS : coreS, life)
       }
     }
     this.vox.end()
@@ -105,6 +110,7 @@ export function TraceLayer() {
     <group name="trace-replay">
       {radius ? <Boundary radius={radius} /> : null}
       <Effects />
+      <Volumes remote={null} />
     </group>
   )
 }

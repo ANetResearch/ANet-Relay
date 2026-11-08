@@ -1,14 +1,20 @@
 // Top-bar Arena toggle (05 §7.1): the network icon with the number of terminals in the arena. Joining asks once
 // for the first-use disclosure (the macOS local-network permission prompt follows from the operating system when
 // the backend first uses the LAN); leaving is immediate. The arena state itself comes from the stream.
+// WP-C v0.5 (07 §5): a chevron beside it opens the Arena menu: "Start dogfight…" (./DogfightDialog) and, while a
+// scenario runs, "End dogfight".
 import * as React from 'react'
 import { notifyError } from '@/shell/notify'
 import { cn } from '@/lib/utils'
 import { Button } from '@/ui/components/ui/button'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/ui/components/ui/dropdown-menu'
 import { Popover, PopoverContent } from '@/ui/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/components/ui/tooltip'
-import { StateIcon } from '@/ui/icons'
+import { Icon, StateIcon } from '@/ui/icons'
+import { arenaApi } from './api'
+import { refetchBoard, refetchScenario, useBoard } from './board'
 import { useTA } from './copy'
+import { DogfightDialog, openDogfightDialog } from './DogfightDialog'
 import { arenaDisclosed, markArenaDisclosed, setArenaEnabled, useArena, useArenaEnabled, useArenaPeerCount } from './store'
 import './arena.css'
 
@@ -73,6 +79,8 @@ export function ArenaToggle() {
           {status}
         </TooltipContent>
       </Tooltip>
+      <ArenaMenu enabled={enabled} onToggle={onClick} />
+      <DogfightDialog />
       <Popover open={ask} onOpenChange={setAsk}>
         <PopoverContent anchor={anchor} align="end" sideOffset={6} className="l3 w-[320px] gap-3 p-3" data-arena-disclosure="">
           <p className="text-[12px] leading-[18px] text-[var(--g100)]">{t('arena.disclosure')}</p>
@@ -96,5 +104,66 @@ export function ArenaToggle() {
         </PopoverContent>
       </Popover>
     </>
+  )
+}
+
+/** The Arena menu (07 §5): start a dogfight, end the running one, join or leave. */
+function ArenaMenu({ enabled, onToggle }: { enabled: boolean; onToggle(): void }) {
+  const t = useTA()
+  const running = useBoard((s) => s.scenario?.running === true)
+  return (
+    <DropdownMenu onOpenChange={(o: boolean) => o && void refetchScenario()}>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={t('arena.menu')}
+                  className="no-drag -ml-1.5 flex h-7 w-5 items-center justify-center rounded-md text-[var(--g500)] outline-none hover:bg-[var(--g900)] hover:text-[var(--g100)] focus-visible:ring-1 focus-visible:ring-ring"
+                  data-arena-menu=""
+                />
+              }
+            />
+          }
+        >
+          <Icon icon="chevron.down" className="size-3" />
+        </TooltipTrigger>
+        <TooltipContent side="bottom" align="end">
+          {t('arena.menu')}
+        </TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="l3 w-52">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>{t('arena.toggle')}</DropdownMenuLabel>
+          <DropdownMenuItem onClick={() => openDogfightDialog()} data-arena-menu-start="">
+            <Icon icon="duel" className="size-3.5" />
+            {t('arena.menu.start')}
+          </DropdownMenuItem>
+          {running ? (
+            <DropdownMenuItem
+              onClick={() =>
+                void arenaApi
+                  .dogfightStop()
+                  .catch((e: unknown) => notifyError(e))
+                  .finally(() => {
+                    void refetchScenario()
+                    void refetchBoard()
+                  })
+              }
+            >
+              <Icon icon="stop" className="size-3.5" />
+              {t('arena.menu.end')}
+            </DropdownMenuItem>
+          ) : null}
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={onToggle}>
+          <StateIcon icon="arena" alt={!enabled} className="size-3.5" />
+          {enabled ? t('arena.leave') : t('arena.join')}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

@@ -61,6 +61,13 @@ function eventText(trace: Trace, t: number, tl: ReturnType<typeof useTL>): strin
   if (e.kind === 'hit') return tl('lab.replay.hit', { by: name(e.by), vehicle: name(e.vehicle) })
   if (e.kind === 'down') return tl('lab.replay.down', { vehicle: name(e.vehicle) })
   if (e.kind === 'finish') return tl('lab.replay.finish')
+  // v0.5 (07 §5)
+  if (e.kind === 'collision') {
+    const ring = e.with?.startsWith('ring:') ? Number(e.with.slice(5)) : null
+    if (ring !== null && Number.isInteger(ring)) return tl('lab.replay.collisionRing', { vehicle: name(e.vehicle), n: ring + 1 })
+    return tl('lab.replay.collision', { vehicle: name(e.vehicle), other: name(e.with ?? null) })
+  }
+  if (e.kind === 'crash') return tl('lab.replay.crash', { vehicle: name(e.vehicle) })
   return null
 }
 

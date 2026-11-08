@@ -18,6 +18,7 @@ import { easeSmoothOut, expAlpha, sceneToEnu, smoothAngle, type Vec3 } from '../
 import { addPoint, emptyBounds, framed, type Bounds } from '../placement'
 import { useStage } from '../store'
 import { rig } from './rigState'
+import { cameraShake } from '@/arena/shake' // WP-C v0.5
 
 const SLOW_MS = 400
 const MEDIUM_MS = 350
@@ -283,6 +284,9 @@ class ViewRig {
       persp.position.copy(chase.pos)
       persp.up.copy(UP)
       persp.lookAt(chase.target)
+      // WP-C v0.5 (07 §5): an explosion or collision nearby jolts the chase camera (none under reduced motion)
+      const [sx, sy, sz] = cameraShake(persp.position)
+      persp.position.set(persp.position.x + sx, persp.position.y + sy, persp.position.z + sz)
       rig.target.copy(chase.target)
     } else if (this.applied === 'top') {
       const half = this.topHalf

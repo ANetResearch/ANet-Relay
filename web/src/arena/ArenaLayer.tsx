@@ -4,8 +4,11 @@
 // (./voxelFx, 06 §11: a white-hot head and a red tail, r400 for this terminal's rounds and r500 for others, with a
 // floor on their size in pixels so they read from far away); every frame lands on the shared 1/240 s integrator
 // lattice (./ballistics). Every hit throws a voxel burst at the hit point; a hit on one of our aircraft also flashes
-// its shell (damageTone, store/red.ts); a shoot-down throws a larger grey and red burst. Software rendering drops
-// the tracer tails. Reduced motion drops the flash and replaces each burst with a still white cube at the hit.
+// its shell (damageTone, store/red.ts). v0.5 (07 §5, WP-C): a shoot-down, a ram or a hard crash explodes, a
+// collision that crashes nobody throws sparks, an ordinary ground crash raises dust (./effects, ./fx); those event
+// effects show whether or not the arena is on, because local simulators collide with each other and with rings too.
+// The collision-volume layer draws each simulator's collision sphere and bullet hit sphere (./Volumes). Software
+// rendering drops the tracer tails. Reduced motion drops the flash and replaces each effect with a still white cube.
 // Hidden while Records replays a flight.
 import * as React from 'react'
 import * as THREE from 'three'
@@ -15,22 +18,28 @@ import { useReplay } from '@/records/replayState'
 import { backendNow } from '@/store/relay'
 import { damageTone, type RedOwner } from '@/store/red'
 import { useRedOwner } from '@/store/selectors'
-import { motionReduced } from '@/ui/motion/tier'
 import { live } from '@/stage/live'
-import { enuToScene, expAlpha, smoothAngle } from '@/stage/math'
+import { enuToScene, expAlpha, sceneToEnu, smoothAngle } from '@/stage/math'
+import { framingExtras } from '@/stage/scene/CameraRig'
 import { stageQuality } from '@/stage/scene/gpu'
 import { fallbackTemplate, instantiate, MODEL_URL, prepareTemplate, PROP_KEY, type AirframeTemplate } from '@/stage/scene/model'
 import { imageTextures } from '@/stage/scene/StageCanvas'
 import { useStage } from '@/stage/store'
 import { token } from '@/stage/tokens'
+import { ringTouch } from '@/course/touch'
+import { useRelay } from '@/store/relay'
 import { flightAt, type Flight } from './ballistics'
 import { useTA } from './copy'
-import { useArena, watchArenaEvents, type ArenaMark, type ArenaRemote } from './store'
+import { effectsOf, type Vec3 } from './effects'
+import { applyEventEffects, applyMarks, explosionLifeS, fx, fxNow, localEnu } from './fx'
+import { useArena, watchArenaEvents, type ArenaRemote } from './store'
 import { ARENA_TOKENS, tokenMs } from './timing'
-import { burstLife, seedOf, VoxelFx, type Burst } from './voxelFx'
+import { Volumes } from './Volumes'
+import { burstLife, seedOf, VoxelFx } from './voxelFx'
+
+export { applyMarks, fx } from './fx'
 
 const MAX_BULLETS = 512
-const MAX_BURSTS = 64
 const MAX_FLASHES = 8
 const SMOOTH_TAU = 0.12
 const LEAD_MAX_S = 0.15
@@ -72,44 +81,6 @@ function useRemoteList(): { key: string; label: string }[] {
     return s.view.peers.flatMap((p) => p.vehicles.map((v) => `${v.key}\u0001${p.callsign} / ${v.label}`)).join('\u0002')
   })
   return React.useMemo(() => (key ? key.split('\u0002').map((x) => { const [k, label] = x.split('\u0001'); return { key: k, label } }) : []), [key])
-}
-
-// ---------------------------------------------------------------- effects pool
-
-interface FlashState {
-  vehicle: string
-  born: number
-  life: number
-}
-
-/** Seconds on the clock the live bursts use. */
-const fxNow = () => performance.now() / 1000
-
-/** Imperative effect queue shared by the remote fleet (shoot-downs) and the mark handler (hits). Under reduced
- * motion a burst becomes a still cube and the shell flash is refused. Exported for tests. */
-export const fx = {
-  bursts: [] as Burst[],
-  flashes: [] as FlashState[],
-  burst(at: THREE.Vector3, kind: 'hit' | 'down', seed: number): void {
-    if (this.bursts.length >= MAX_BURSTS) this.bursts.shift()
-    this.bursts.push({ p: [at.x, at.y, at.z], t0: fxNow(), seed, kind: motionReduced() ? 'still' : kind })
-  },
-  flash(vehicle: string, lifeMs: number): void {
-    if (lifeMs <= 0 || motionReduced()) return
-    if (this.flashes.length >= MAX_FLASHES) this.flashes.shift()
-    this.flashes.push({ vehicle, born: performance.now(), life: lifeMs })
-  },
-}
-
-/** Effects for a batch of hit marks (pure enough to unit-test with a fake fx). */
-export function applyMarks(marks: readonly ArenaMark[], api: { burst: typeof fx.burst; flash: typeof fx.flash }, at = (vid: string | null) => (vid ? live.state.get(vid)?.pos ?? null : null)): void {
-  for (const m of marks) {
-    const where = m.point ? scene(m.point) : at(m.vehicle)?.clone() ?? null
-    if (m.kind === 'taken' && m.vehicle) api.flash(m.vehicle, tokenMs(ARENA_TOKENS.flash))
-    if (where) api.burst(where, 'hit', seedOf(`${m.seq}:${m.kind}`))
-    const body = m.kind === 'taken' && m.down ? at(m.vehicle) : null
-    if (body) api.burst(body.clone(), 'down', seedOf(`${m.seq}:down`))
-  }
 }
 
 // ---------------------------------------------------------------- remote aircraft
@@ -180,7 +151,7 @@ class Craft {
     this.spin += ((flying ? v.throttle : 0) - this.spin) * expAlpha(dt, 0.15)
     const rps = flying ? 8 + 40 * this.spin : 0
     if (rps > 0) for (const p of this.props) p.rotation.y += (p.userData[PROP_KEY] as number) * rps * 2 * Math.PI * dt
-    if (v.down && !this.down) fx.burst(this.root.position, 'down', seedOf(`${v.key}:${v.hp}`))
+    if (v.down && !this.down) fx.explode(v.key, this.root.position, seedOf(`${v.key}:down`))
     this.down = v.down
     const hp = String(v.hp)
     if (this.hpEl && this.hpText !== hp) {
@@ -190,12 +161,26 @@ class Craft {
   }
 }
 
+/** Smoothed scene positions of the remote simulators drawn this frame (collision volumes read them). */
+export const remoteBodies = new Map<string, THREE.Vector3>()
+
+/** Local ENU position of a local aircraft or a remote key (for event effects). */
+function locate(key: string): Vec3 | null {
+  const local = localEnu(key)
+  if (local) return local
+  const body = remoteBodies.get(key)
+  if (body) return sceneToEnu(body.x, body.y, body.z)
+  const v = remoteTargets().get(key)?.v
+  return v ? [v.x, v.y, Math.max(0, v.z)] : null
+}
+
 /** The remote simulators currently in the view, built on demand and shared materials. */
 class RemotePool {
   private readonly crafts = new Map<string, Craft>()
   private readonly body = new THREE.MeshStandardMaterial({ color: token('g400').color, metalness: 0.2, roughness: 0.7 })
   private readonly lamp = new THREE.MeshBasicMaterial({ color: token('g200').color, toneMapped: false })
   private readonly lampGeo = new THREE.SphereGeometry(0.0045, 10, 8)
+  private framed = ''
 
   constructor(private readonly template: AirframeTemplate) {}
 
@@ -218,10 +203,43 @@ class RemotePool {
     const at = useArena.getState().at
     const lead = Math.min(LEAD_MAX_S, Math.max(0, (performance.now() - at) / 1000))
     const targets = remoteTargets()
-    for (const [key, c] of this.crafts) c.update(targets.get(key)?.v, lead, a, dt)
+    remoteBodies.clear()
+    for (const [key, c] of this.crafts) {
+      c.update(targets.get(key)?.v, lead, a, dt)
+      if (c.root.visible) remoteBodies.set(key, c.root.position)
+    }
+    this.frame()
+  }
+
+  /** WP-C v0.5: the overview keeps the remote aircraft in frame too (whole metres, so it only moves on real change). */
+  private frame(): void {
+    if (!remoteBodies.size) {
+      if (this.framed) framingExtras.delete('arena')
+      this.framed = ''
+      return
+    }
+    let minX = Infinity
+    let maxX = -Infinity
+    let minY = Infinity
+    let maxY = -Infinity
+    let maxZ = 0
+    for (const p of remoteBodies.values()) {
+      const [x, y, z] = sceneToEnu(p.x, p.y, p.z)
+      minX = Math.min(minX, Math.floor(x))
+      maxX = Math.max(maxX, Math.ceil(x))
+      minY = Math.min(minY, Math.floor(y))
+      maxY = Math.max(maxY, Math.ceil(y))
+      maxZ = Math.max(maxZ, Math.ceil(z))
+    }
+    const key = `${minX},${maxX},${minY},${maxY},${maxZ}`
+    if (key === this.framed) return
+    this.framed = key
+    framingExtras.set('arena', { minX, maxX, minY, maxY, maxZ })
   }
 
   dispose(): void {
+    remoteBodies.clear()
+    framingExtras.delete('arena')
     this.body.dispose()
     this.lamp.dispose()
     this.lampGeo.dispose()
@@ -291,7 +309,7 @@ class RemoteBoundary extends React.Component<{ children: React.ReactNode }, { fa
 
 /** All rounds in flight as voxel tracers (heads only on software renderers). */
 class BulletView {
-  readonly vox = new VoxelFx()
+  readonly vox = new VoxelFx(8192)
   private readonly flights = new Map<string, Flight>()
 
   constructor(private readonly light: boolean) {}
@@ -333,9 +351,9 @@ function Bullets({ light }: { light: boolean }) {
 
 // ---------------------------------------------------------------- hit flash and bursts
 
-/** Voxel bursts and the hit flash shells of our aircraft. */
+/** Voxel bursts, explosions, sparks and dust, and the hit flash shells of our aircraft. */
 class EffectsView {
-  readonly vox = new VoxelFx(2048)
+  readonly vox = new VoxelFx(4096)
   readonly objects: THREE.Object3D[]
   private readonly shells: THREE.Mesh[]
   private readonly shellGeo = new THREE.SphereGeometry(FLASH_RADIUS, 20, 14)
@@ -353,10 +371,11 @@ class EffectsView {
   update(cam: THREE.Camera, heightPx: number, owner: RedOwner): void {
     const t = fxNow()
     const coreS = tokenMs(ARENA_TOKENS.core) / 1000
-    const lives = { burst: tokenMs(ARENA_TOKENS.burst) / 1000, down: (2 * tokenMs(ARENA_TOKENS.downDebris)) / 1000 }
+    const bigCoreS = tokenMs(ARENA_TOKENS.explosionCore) / 1000
+    const lives = { burst: tokenMs(ARENA_TOKENS.burst) / 1000, down: (2 * tokenMs(ARENA_TOKENS.downDebris)) / 1000, explosion: explosionLifeS() }
     fx.bursts = fx.bursts.filter((b) => t - b.t0 <= burstLife(b.kind, lives))
     this.vox.begin(cam, heightPx)
-    for (const b of fx.bursts) this.vox.burst(b, t - b.t0, coreS, burstLife(b.kind, lives))
+    for (const b of fx.bursts) this.vox.burst(b, t - b.t0, b.kind === 'explosion' ? bigCoreS : coreS, burstLife(b.kind, lives))
     this.vox.end()
 
     const now = performance.now()
@@ -402,6 +421,16 @@ function Effects({ owner }: { owner: RedOwner }) {
       applyMarks(fresh, fx)
     })
   }, [])
+  // v0.5 (07 §5): collisions, crashes, shoot-downs and ring touches arrive as events; history is skipped
+  React.useEffect(() => {
+    let last = useRelay.getState().lastSeq
+    return useRelay.subscribe((s) => {
+      if (s.lastSeq === last) return
+      const fresh = s.events.filter((e) => e.seq > last)
+      last = s.lastSeq
+      if (fresh.length) applyEventEffects(effectsOf(fresh, locate), fx, ringTouch)
+    })
+  }, [])
   useFrame(({ camera, size }) => view.update(camera, size.height, ownerRef.current))
   return (
     <>
@@ -421,16 +450,23 @@ export function ArenaLayer() {
   const owner = useRedOwner()
   const light = React.useMemo(() => stageQuality().light, [])
   React.useEffect(() => watchArenaEvents(), [])
-  if (!enabled || !layer || replaying) return null
+  if (replaying) return null
+  const arena = enabled && layer
   return (
     <group name="arena">
-      <RemoteBoundary>
-        <React.Suspense fallback={null}>
-          <ModelRemoteFleet />
-        </React.Suspense>
-      </RemoteBoundary>
-      <Bullets light={light} />
+      {arena ? (
+        <>
+          <RemoteBoundary>
+            <React.Suspense fallback={null}>
+              <ModelRemoteFleet />
+            </React.Suspense>
+          </RemoteBoundary>
+          <Bullets light={light} />
+        </>
+      ) : null}
+      {/* event effects show without the arena too: local simulators collide with each other and with rings */}
       <Effects owner={owner} />
+      <Volumes remote={arena ? remoteBodies : null} />
     </group>
   )
 }
