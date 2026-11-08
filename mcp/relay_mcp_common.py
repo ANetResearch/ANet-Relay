@@ -211,6 +211,15 @@ class McpServer:
                 return tool.handler(self.relay, args)
             raise
 
+    # ------------------------------------------------------------------ listing hooks
+
+    def list_tools(self) -> list[dict]:
+        """The ``tools/list`` answer; a server may narrow it (the flight server does at the sticks level)."""
+        return self.listing
+
+    def current_instructions(self) -> str:
+        return self.instructions
+
     # ------------------------------------------------------------------ JSON-RPC
 
     def send(self, message: dict) -> None:
@@ -258,13 +267,13 @@ class McpServer:
                     "protocolVersion": version,
                     "capabilities": {"tools": {"listChanged": False}},
                     "serverInfo": {"name": self.server_name, "title": self.title, "version": SERVER_VERSION},
-                    "instructions": self.instructions,
+                    "instructions": self.current_instructions(),
                 },
             )
         elif method == "ping":
             self.reply(rid, {})
         elif method == "tools/list":
-            self.reply(rid, {"tools": self.listing})
+            self.reply(rid, {"tools": self.list_tools()})
         elif method == "tools/call":
             name = params.get("name")
             if name not in self.tools:

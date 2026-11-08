@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from relay_mcp_common import VID, WAIT, McpServer, RelayClient, Tool, run_main
+from relay_mcp_common import VID, WAIT, McpServer, RelayClient, RelayError, Tool, log, run_main
 
 SERVER_NAME = "anet-relay"
 
@@ -31,6 +31,37 @@ INSTRUCTIONS = (
     "the safety volume reported by relay_fleet. Use relay_stop only in an emergency: it cuts the motors. "
     "relay_sticks_for pushes the sticks for a few seconds (a language model cannot fly a 50 Hz loop); "
     "relay_refly repeats an earlier recorded flight."
+)
+# 06 §5 (WP-1): at agent_flight_level "sticks" (the default) agent sessions fly with sticks only.
+# Relay refuses everything else with 403 sticks_only; this server also lists only the tools that still
+# work. The level is read from GET /settings on every tools/list: an operator change shows on the next one.
+STICKS_TOOL_NAMES = frozenset(
+    {
+        "relay_fleet",
+        "relay_vehicle",
+        "relay_topology",
+        "relay_events",
+        "relay_claim",
+        "relay_release_claim",
+        "relay_arm",
+        "relay_disarm",
+        "relay_mode",
+        "relay_land",
+        "relay_stop",
+        "relay_course_start",
+        "relay_sticks_for",
+    }
+)
+STICKS_INSTRUCTIONS = (
+    "ANet Relay controls small quadcopters (real and simulated) on the local network. "
+    "The operator has set the agent flight level to sticks: agents fly like a person with a radio. "
+    "Workflow: relay_fleet to see aircraft, relay_claim one, relay_mode to a manual mode (STABILIZE, ACRO; "
+    "PX4 MANUAL, STABILIZED), relay_arm, then relay_sticks_for to push the sticks for a few seconds. "
+    "Takeoff, hold, move, yaw, goto, plans and re-fly are refused with sticks_only at this level; "
+    "relay_land stays available as a safety action and relay_stop cuts the motors in an emergency. "
+    "For closed-loop flight, deploy an onboard program (POST /vehicles/{id}/program). "
+    "A person can take over (possess) any aircraft at any time; control calls then fail with "
+    "possessed_by_human. Real aircraft need confirm='ARM' to arm and must pass preflight checks."
 )
 
 
@@ -399,6 +430,27 @@ class Server(McpServer):
             operator_token=operator_token,
             out=out,
         )
+        self.level: str | None = None  # last level read from Relay
+
+    def flight_level(self) -> str:
+        """``sticks`` or ``full`` from GET /settings; a Relay without the setting flies everything (``full``);
+        when Relay cannot be reached, the last level read (``sticks``, the default, before the first read)."""
+        try:
+            settings = self.relay.settings()
+        except (RelayError, OSError) as exc:
+            log(SERVER_NAME, f"could not read the agent flight level: {exc}")
+            return self.level or "sticks"
+        level = settings.get("agent_flight_level") if isinstance(settings, dict) else None
+        self.level = level if level in ("sticks", "full") else "full"
+        return self.level
+
+    def list_tools(self) -> list[dict]:
+        if self.flight_level() == "full":
+            return self.listing
+        return [t for t in self.listing if t["name"] in STICKS_TOOL_NAMES]
+
+    def current_instructions(self) -> str:
+        return STICKS_INSTRUCTIONS if self.flight_level() == "sticks" else INSTRUCTIONS
 
 
 def main(argv: list[str] | None = None) -> int:

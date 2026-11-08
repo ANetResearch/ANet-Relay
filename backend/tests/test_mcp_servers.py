@@ -565,3 +565,22 @@ def test_flight_new_tools(stub):
     result = call(server, "relay_refly", {"vehicle": "sim-1", "session_id": 4, "mode": "path", "wait": False})
     assert result["isError"] is False and text(result)["plan"]["id"] == 9
     assert last(stub)["body"] == {"session_id": 4, "mode": "path"}
+
+
+def test_flight_tools_follow_the_agent_flight_level(stub):
+    """06 §5 (WP-1): at ``sticks`` the flight server lists only the tools Relay still accepts."""
+    server = make(flight_mcp, stub)
+    every = [t["name"] for t in flight_mcp.TOOLS]
+    assert [t["name"] for t in rpc(server, "tools/list")["result"]["tools"]] == every  # no setting: full
+    assert last(stub)["path"] == "/settings" and last(stub)["method"] == "GET"
+    stub.responses["/settings"] = {"agent_flight_level": "sticks"}
+    names = [t["name"] for t in rpc(server, "tools/list")["result"]["tools"]]
+    assert set(names) == flight_mcp.STICKS_TOOL_NAMES and names == [n for n in every if n in names]
+    assert not {"relay_takeoff", "relay_goto", "relay_plan", "relay_refly", "relay_hold"} & set(names)
+    assert "sticks" in rpc(server, "initialize", {"protocolVersion": "2025-06-18"})["result"]["instructions"]
+    stub.responses["/settings"] = {"agent_flight_level": "full"}  # read again on every listing
+    assert len(rpc(server, "tools/list")["result"]["tools"]) == len(every)
+    stub.fail["/settings"] = (500, {"code": "internal", "message_en": "down"})
+    assert len(rpc(server, "tools/list")["result"]["tools"]) == len(every)  # the last level read
+    fresh = make(flight_mcp, stub)
+    assert {t["name"] for t in rpc(fresh, "tools/list")["result"]["tools"]} == flight_mcp.STICKS_TOOL_NAMES
