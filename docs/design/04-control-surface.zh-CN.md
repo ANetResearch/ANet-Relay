@@ -130,6 +130,8 @@
 
 工具命名：飞行 `relay_*`，设备 `device_*`，应用 `app_*`。每个服务启动时打开自己的会话（`--name`，缺省 `mcp`、`mcp-device`、`mcp-app`）。
 
+**v0.4.0 智能体控制等级（06 §5）。** 设置 `agent_flight_level` 缺省为 `sticks`：飞行服务每次 `tools/list` 读取当前设置，只列出仍可用的 13 个工具（摇杆、解锁 / 上锁、手动类模式、认领、状态与事件、急停，以及作为安全动作保留的 `relay_land`）；`takeoff`、`hold`、`move`、`yaw`、`goto`、`rtl`、`velocity`、`attitude` 技能、含这些动作的动作序列、再飞以及定高 / 定点 / 自动类模式对会话返回 403 `sticks_only`（`detail.level = "sticks"`）。设备服务的工具列表不变，但后端在该等级下同样拒绝其中的设备级飞行命令与 4 以上的 RC 通道覆盖；其余工具与确认词不变。应用服务新增 19 个程序工具（`program_*`、`challenge_list`、`challenge_submit`、`job_status`、`duel_run`、`ladder`、`airframe_set`，共 61 个工具）。`full` 等级恢复 v0.3 的全部工具。操作员不受此等级影响。
+
 ## 6. Copilot（v0.2.1）
 
 ### 6.1 浮动窗口

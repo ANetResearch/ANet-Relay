@@ -304,7 +304,7 @@ The snapshot carries only `vehicle.sim.airframe = {preset, seed}`: the values ar
 
 ### Onboard programs
 
-An onboard program (design 06 §2) is a restricted Python program with `PARAMS`, `init(ctx)` and `step(obs, ctx) -> Sticks` that Relay runs in an isolated program host at 50 Hz on the aircraft's stick path. It sees only what the aircraft measures (`obs`: attitude, rates, accelerations, barometric height, optional position, battery, motor output, arena state, contacts) and outputs the four sticks and the trigger. [`programs-guide.md`](programs-guide.md) is the compact reference for writing one (the same text is in Copilot's instructions and in the MCP tool `program_guide`); `programs.md` is the full documentation.
+An onboard program (design 06 §2) is a restricted Python program with `PARAMS`, `init(ctx)` and `step(obs, ctx) -> Sticks` that Relay runs in an isolated program host at 50 Hz on the aircraft's stick path. It sees only what the aircraft measures (`obs`: attitude, rates, accelerations, barometric height, optional position, battery, motor output, arena state, contacts) and outputs the four sticks and the trigger. [`programs-guide.md`](programs-guide.md) is the compact reference for writing one (the same text is in Copilot's instructions and in the MCP tool `program_guide`); [`programs.md`](programs.md) is the full documentation.
 
 | Method and path | Who | Purpose |
 |---|---|---|
@@ -323,19 +323,38 @@ An onboard program (design 06 §2) is a restricted Python program with `PARAMS`,
 
 The snapshot carries `vehicle.program` (`{id, name, rev, state, status: running | paused | faulted | stopped, fps, faults, last_error, mode, ...}`) and `programs_allowed`. Rules that always hold: a person who possesses the aircraft pauses a `pilot` program and releasing never resumes it; emergency stop, link loss and a crash stop it; the claim ending, the session's own sticks and any skill or plan supersede it; stale sticks time out after 0.8 s as before. Real aircraft accept a program only while the operator's **Allow programs on this aircraft** switch is on and preflight passes, and their `fire` output is ignored.
 
-### Challenges, duels and the ladder
+### Challenges and duels
 
-Challenges (design 06 §3.2) are fixed scenarios judged in a headless evaluator faster than real time, with visible and hidden seeds whose airframes differ; duels pit programs against each other and keep an Elo ladder.
+Onboard programs (design 06 §2) are judged like exercises on a practice site: a **challenge** is a fixed scenario with a scoring rule, a **duel** sets 2–8 programs against each other in the arena. Both run in a **headless evaluator**: a separate worker process that builds an isolated fleet (no sockets, nothing on disk, an injected clock) and steps the same simulated autopilot, airframe defects, stick path, arena rules and program engine as live flight, as fast as the machine allows (about 12× real time with one aircraft, 5–7× with two). Hover assist is always off. The same scenario, seeds and program revisions always give the same result. At most two jobs run at once; the rest wait in a queue of 16.
 
-| Method and path | Purpose |
-|---|---|
-| `GET /challenges` | The challenges: `liftoff`, `hover`, `heading`, `square`, `rings`, `pursuit`, `duel_easy`, `duel_medium`, `duel_hard` |
-| `POST /challenges/{id}/submit` | `{program, rev?}` → an evaluation job |
-| `GET /jobs/{id}` | `{state, progress, result: {score, passed, metrics, seeds, trace_id}}` |
-| `POST /duels` | `{programs: [2..8 ids], rounds, seed, scenario?}` → an evaluation job |
-| `GET /ladder` · `GET /traces/{id}` | The Elo ladder; one judged round's trace (10 Hz, every aircraft) |
+| Method and path | Auth | Purpose |
+|---|---|---|
+| `GET /challenges` | – | `{challenges: [{id, kind, name_en, name_zh, goal_en, goal_zh, scene_en, scene_zh, duration_s, visible_seeds, hidden_seeds, opponent, best, attempts}]}` |
+| `GET /challenges/{id}` | – | Adds `scoring_*`, `sensors`, `hover_assist`, `info` (corners, rings and other public parameters) and the last 20 submissions in `history` |
+| `POST /challenges/{id}/submit` | session or operator | `{program, rev?, params?, visible_only?}` → `{job}`; every visible and hidden seed, or only the visible ones with `visible_only` (not counted as best) |
+| `POST /duels` | session or operator | `{programs: [id or {program, rev?, params?}, …2–8], rounds? (1–20, default 3), seed? (default 1), scenario?: {duration_s (10–180), arena, airframe (ideal / typical / rough), sensors, turbulence}}` → `{job}` |
+| `GET /jobs`, `GET /jobs/{id}` | – | `{job: {id, kind, state (queued / running / done / failed / cancelled), progress, queue_position, programs, result, error}}` |
+| `DELETE /jobs/{id}` | session or operator | Cancel a queued or running job (its worker is stopped) |
+| `GET /ladder` | – | `{ladder: [{rank, program, name, rating, games, wins, draws, losses}], duels}` (Elo, start 1200) |
+| `GET /traces/{id}` | – | A replay trace (below) |
 
-The SDK, the MCP tools and Copilot report `judge_unavailable` on a Relay that does not serve these paths yet.
+| Challenge | Scenario | Passes when |
+|---|---|---|
+| `liftoff` | Payload: hover throttle about 0.62; barometer, no position | Off the ground within 5 s, then 3 s without a break at 1.0 ± 0.2 m |
+| `hover` | CG forward of the middle and a level error; barometer, no position | From 6 to 26 s: drift ≤ 0.8 m and height 1.0 ± 0.25 m (judged on the truth) |
+| `heading` | Unequal motor efficiencies (yaw drift) | From 5 to 20 s: heading within 10° of the spawn heading, at least 0.4 m up |
+| `square` | UWB-like position (10 Hz, σ 5 cm) | The four corners of `info.corners` (radius 0.4 m) in order within 40 s; faster scores higher |
+| `rings` | The `cage-loop` ring course, UWB-like position | Every ring in order within 60 s; timed |
+| `pursuit` | A scripted target circles the centre (3 m, 0.5 m/s, 1.2 m up); contacts and UWB-like position | Within 2 m of the target for at least half of the 60 s; the score is that share |
+| `duel_easy` / `duel_medium` / `duel_hard` | One against one with `hunter_easy` / `hunter_medium` / `hunter_hard` (arena radius 8 m, ceiling 4 m) | A win: the opponent shot down, crashed or out of the arena while you still fly; time up scores by hit points left |
+
+Scores are 0–100. A submission runs every seed, passes when every seed passes and scores their mean; `result = {score, passed, metrics, seeds: [{seed (null when hidden), hidden, score, passed, metrics, trace_id}], trace_id, best, speed}`. Hidden seeds fly other airframes and leave no trace. Each challenge keeps its best full submission and the last 50 in `<data_dir>/programs/results.json`.
+
+A duel round puts one aircraft per program on a ring of spawn points around the arena centre (shuffled and with airframes seeded by `seed + round − 1`), all facing the centre. An aircraft is out when it is shot down, crashes or leaves the arena box; the round ends when one is left (after one second) or the time is up. Placement: still flying first, then survival time, hit points, hits. The last aircraft flying wins the round; otherwise it is a draw. The ladder (`<data_dir>/programs/ladder.json`) moves by pairwise Elo over each round's placements (K = 32, split over the other entrants). `result = {rounds: [{round, seed, winner, draw, duration_s, aircraft: [{id, program, alive, hp, hits, hits_taken, survived_s, reason, place}], trace_id}], standings, ladder: [{program, rating, delta}], speed}`. Event `judge_finished` (`data.job`, `data.state`, `data.score`, `data.passed`) when a job ends.
+
+A **trace** (`GET /traces/{id}`, gzip on disk, the newest 300 kept) replays every aircraft of one seed or round at 10 Hz: `{id, job, version: 1, kind, challenge?, round?, scenario, seed, hz, duration_s, fields: ["x", "y", "z", "roll", "pitch", "yaw", "throttle", "hp", "flags"], arena, course, markers, t: [...], aircraft: [{id, label, program, rev, name, role, team, spawn, frames: [[…one row per t…]], states: [[t, state]]}], shots: [{id, shooter, t0, p, v}], events: [{t, kind, vehicle, …}], result}`. Positions are world ENU metres with the arena centre at the origin (the snapshot's frame), attitude in radians (yaw is the compass heading 0..2π), `flags` bits 1 armed, 2 airborne, 4 shot down, 8 crashed, 16 out. A shot leaves `p` at `t0` with velocity `v` and follows the arena ballistics (`web/src/arena/ballistics.ts`). Events: `hit`, `down`, `crash`, `out`, `liftoff`, `corner`, `ring`, `course_finished`, `program_faulted`, `program_stopped`. The full contract is in the `relay.judge` module docstring and in `Trace` of `web/src/api/schema.json`.
+
+The SDK, the MCP tools and Copilot report `judge_unavailable` when they talk to a Relay older than 0.4.0, which has none of these routes.
 
 ### Program workflow
 
@@ -346,7 +365,7 @@ with RelayClient() as relay:
     relay.open_session("my-agent")
     # 1. write: start from the built-in hover_trim
     pid = relay.program_create("My hover", copy_of="hover_trim", note="start")["program"]["id"]
-    relay.program_update(pid, patch=[{"start": 5, "end": 5, "text": 'PARAMS = {"target_alt": 1.2, "kp": 0.25, "kd": 0.18, "ki": 0.12, "hover": 0.55, "climb_limit": 0.5}'}], note="higher, heavier")
+    relay.program_update(pid, patch=[{"start": 14, "end": 14, "text": '    "target_alt": 1.2,'}], note="higher")
     # 2. validate: language rules, line and column of each problem
     assert relay.program_validate(pid)["ok"]
     # 3. test: the unit tests in the program host
@@ -377,37 +396,6 @@ The arena (05 §7) lets Relay terminals on the same broadcast domain see each ot
 | `POST /vehicles/{id}/fire` | controller | `{seconds}` (0–3, default 1; 0 releases): hold the trigger of an armed, airborne simulator; 8 rounds/s, 24 per magazine, 1.5 s reload; `arena_off` outside the arena, `arena_down` after a shoot-down, `sim_only` for a real aircraft |
 
 A round deals 20 damage (five bring a simulator down) and pushes the airframe; a shot-down simulator stops its motors, falls, disarms on the ground and returns to its seat's spawn point after 5 s (setting `arena_auto_respawn`) or on a reset. Hits are not safety events: they raise no alert. Settings: `peer_enabled`, `peer_port`, `peer_callsign` (≤ 16 characters; empty uses the computer name), `arena_auto_respawn`. SDK: `arena()`, `fire(id, seconds)`.
-
-### Challenges and duels
-
-Onboard programs (design 06 §2) are judged like exercises on a practice site: a **challenge** is a fixed scenario with a scoring rule, a **duel** sets 2–8 programs against each other in the arena. Both run in a **headless evaluator**: a separate worker process that builds an isolated fleet (no sockets, nothing on disk, an injected clock) and steps the same simulated autopilot, airframe defects, stick path, arena rules and program engine as live flight, as fast as the machine allows (about 12× real time with one aircraft, 5–7× with two). Hover assist is always off. The same scenario, seeds and program revisions always give the same result. At most two jobs run at once; the rest wait in a queue of 16.
-
-| Method and path | Auth | Purpose |
-|---|---|---|
-| `GET /challenges` | – | `{challenges: [{id, kind, name_en, name_zh, goal_en, goal_zh, duration_s, visible_seeds, hidden_seeds, opponent, best, attempts}]}` |
-| `GET /challenges/{id}` | – | Adds `scene_*`, `scoring_*`, `sensors`, `hover_assist`, `info` (corners, rings and other public parameters) and the last 20 submissions in `history` |
-| `POST /challenges/{id}/submit` | session or operator | `{program, rev?, params?, visible_only?}` → `{job}`; every visible and hidden seed, or only the visible ones with `visible_only` (not counted as best) |
-| `POST /duels` | session or operator | `{programs: [id or {program, rev?, params?}, …2–8], rounds? (1–20, default 3), seed? (default 1), scenario?: {duration_s (10–180), arena, airframe (ideal / typical / rough), sensors, turbulence}}` → `{job}` |
-| `GET /jobs`, `GET /jobs/{id}` | – | `{job: {id, kind, state (queued / running / done / failed / cancelled), progress, queue_position, programs, result, error}}` |
-| `DELETE /jobs/{id}` | session or operator | Cancel a queued or running job (its worker is stopped) |
-| `GET /ladder` | – | `{ladder: [{rank, program, name, rating, games, wins, draws, losses}], duels}` (Elo, start 1200) |
-| `GET /traces/{id}` | – | A replay trace (below) |
-
-| Challenge | Scenario | Passes when |
-|---|---|---|
-| `liftoff` | Payload: hover throttle about 0.62; barometer, no position | Off the ground within 5 s, then 3 s without a break at 1.0 ± 0.2 m |
-| `hover` | CG forward of the middle and a level error; barometer, no position | From 6 to 26 s: drift ≤ 0.8 m and height 1.0 ± 0.25 m (judged on the truth) |
-| `heading` | Unequal motor efficiencies (yaw drift) | From 5 to 20 s: heading within 10° of the spawn heading, at least 0.4 m up |
-| `square` | UWB-like position (10 Hz, σ 5 cm) | The four corners of `info.corners` (radius 0.4 m) in order within 40 s; faster scores higher |
-| `rings` | The `cage-loop` ring course, UWB-like position | Every ring in order within 60 s; timed |
-| `pursuit` | A scripted target circles the centre (3 m, 0.5 m/s, 1.2 m up); contacts and UWB-like position | Within 2 m of the target for at least half of the 60 s; the score is that share |
-| `duel_easy` / `duel_medium` / `duel_hard` | One against one with `hunter_easy` / `hunter_medium` / `hunter_hard` (arena radius 8 m, ceiling 4 m) | A win: the opponent shot down, crashed or out of the arena while you still fly; time up scores by hit points left |
-
-Scores are 0–100. A submission runs every seed, passes when every seed passes and scores their mean; `result = {score, passed, metrics, seeds: [{seed (null when hidden), hidden, score, passed, metrics, trace_id}], trace_id, best, speed}`. Hidden seeds fly other airframes and leave no trace. Each challenge keeps its best full submission and the last 50 in `<data_dir>/programs/results.json`.
-
-A duel round puts one aircraft per program on a ring of spawn points around the arena centre (shuffled and with airframes seeded by `seed + round − 1`), all facing the centre. An aircraft is out when it is shot down, crashes or leaves the arena box; the round ends when one is left (after one second) or the time is up. Placement: still flying first, then survival time, hit points, hits. The last aircraft flying wins the round; otherwise it is a draw. The ladder (`<data_dir>/programs/ladder.json`) moves by pairwise Elo over each round's placements (K = 32, split over the other entrants). `result = {rounds: [{round, seed, winner, draw, duration_s, aircraft: [{id, program, alive, hp, hits, hits_taken, survived_s, reason, place}], trace_id}], standings, ladder: [{program, rating, delta}], speed}`. Event `judge_finished` (`data.job`, `data.state`, `data.score`, `data.passed`) when a job ends.
-
-A **trace** (`GET /traces/{id}`, gzip on disk, the newest 300 kept) replays every aircraft of one seed or round at 10 Hz: `{id, job, version: 1, kind, challenge?, round?, scenario, seed, hz, duration_s, fields: ["x", "y", "z", "roll", "pitch", "yaw", "throttle", "hp", "flags"], arena, course, markers, t: [...], aircraft: [{id, label, program, rev, name, role, team, spawn, frames: [[…one row per t…]], states: [[t, state]]}], shots: [{id, shooter, t0, p, v}], events: [{t, kind, vehicle, …}], result}`. Positions are world ENU metres with the arena centre at the origin (the snapshot's frame), attitude in radians (yaw is the compass heading 0..2π), `flags` bits 1 armed, 2 airborne, 4 shot down, 8 crashed, 16 out. A shot leaves `p` at `t0` with velocity `v` and follows the arena ballistics (`web/src/arena/ballistics.ts`). Events: `hit`, `down`, `crash`, `out`, `liftoff`, `corner`, `ring`, `course_finished`, `program_faulted`, `program_stopped`. The full contract is in the `relay.judge` module docstring and in `Trace` of `web/src/api/schema.json`.
 
 ## 6. WebSocket `/api/v1/stream`
 

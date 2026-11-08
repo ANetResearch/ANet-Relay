@@ -38,9 +38,13 @@ ANet Relay is the desktop ground control station for small drone fleets on a loc
 | Relay to agents | Possession always wins and suspends the agent's claim; on release the claim resumes and the agent receives `relay_handback` | Available |
 | Flight actions and sequences | Take off, hover, move forward, back, sideways and vertically, turn and land from the inspector, or as an editable sequence flown step by step; works in altitude hold without a position source (moves are then open-loop estimates) | Available |
 | Agent API | Local REST and WebSocket API with sessions, claims, sticks, skills (take off, land, hold, move, yaw, return, go to, attitude, velocity), sequences, re-fly from past flights and events; Python SDK; three MCP servers for flight, device-level and application control | Available |
+| Sticks-only agents | Agent flight level `sticks` by default: sessions fly with sticks, arming, manual modes, fire and onboard programs only; high-level skills come back at level `full`, which only the operator can set | Available |
+| Onboard programs | Restricted Python state machines that run at 50 Hz on this computer, read only what the aircraft senses and output sticks; written, tested and tuned live by people or agents in the Lab, the API, MCP and Copilot | Available |
+| Challenges and duels | Nine judged challenges with hidden seeds, duels of 2 to 8 programs with an Elo ladder, a headless evaluator faster than real time and multi-aircraft replay | Available |
+| Airframe defects | Simulators fly with payload, centre of gravity offset, level error, unequal motors, propeller damage and IMU noise (presets ideal, typical, rough) | Available |
 | Device-level interface | Down to single motors and output channels: device overview, any MAVLink message, parameter reads and writes, raw command catalogue, single-motor tests, actuators, RC channel override, message rates, reboot, calibration, home, flight termination; hazardous operations need a confirm word | Available |
 | Application control | Agents operate Relay itself: controllers and app status, language and workspace, selection, network scan, fleet and simulators, settings, screenshots; can be switched off in Settings | Available |
-| Copilot | Built-in chat agent on [pi](https://github.com/earendil-works/pi) in a floating, always-on-top window that can be placed anywhere and never blocks other windows; flight, device-level and application operations in plain language, with any OpenAI- or Anthropic-compatible endpoint and key; every motion and device write on a real aircraft waits for the operator's approval | Available |
+| Copilot | Built-in chat agent on [pi](https://github.com/earendil-works/pi) in a floating, always-on-top window that can be placed anywhere and never blocks other windows; flight, device-level and application operations in plain language, writes, tests, judges and deploys onboard programs, with any OpenAI- or Anthropic-compatible endpoint and key; every motion and device write on a real aircraft waits for the operator's approval; the key stays in the app data folder, never in the system keychain unless chosen | Available |
 | Flight health | Rolling diagnostics while flying: attitude oscillation, hands-off lean, yaw drift, altitude hold, hover throttle, motor balance, vibration, battery sag, link and stick stream, each with its likely cause and fix | Available |
 | Simulator | Up to 8 simulated aircraft that behave like ArduPilot or PX4 vehicles, with dynamics and a battery model; identical to real aircraft through the API | Available |
 | Physical simulator | Per-simulator hover assist: off, a simulator flies like a racing quad without barometer or position source (throttle is thrust, ground effect, motor lag, turbulence); switchable in flight | Available |
@@ -121,12 +125,12 @@ from anet_relay_client import RelayClient          # sdk/python, standard librar
 with RelayClient() as relay:                         # http://127.0.0.1:8765
     relay.open_session("my-agent")
     relay.claim("sim-1")
-    relay.takeoff("sim-1", alt=1.2)
+    relay.takeoff("sim-1", alt=1.2)                  # agent flight level "full" (Settings → Safety); see below
     relay.course_start("sim-1", "cage-loop")
     relay.land("sim-1")
 ```
 
-**Copilot.** The desktop app has a built-in agent: open it with the **Copilot** button or `⌘J` / `Ctrl+J`, set the endpoint, model and API key in **Settings → Copilot**, and ask, for example, "take off to 1 m, hover, go forward 1 m and back, turn 45° and land". Copilot is a separate floating window: it stays above other applications, can be dragged anywhere on screen, and the main window and other applications stay usable while it is shown. It works through the same session, claim and API as any agent, with flight, device-level and application tool sets chosen in Settings, and on a real aircraft shows an approval card before every motion command and device write. The key is stored encrypted in the app data folder, readable only by your user account; the system keychain is an opt-in setting, and Relay never asks for your login password.
+**Copilot.** The desktop app has a built-in agent: open it with the **Copilot** button or `⌘J` / `Ctrl+J`, set the endpoint, model and API key in **Settings → Copilot**, and ask, for example, "take off to 1 m, hover, go forward 1 m and back, turn 45° and land" (at the agent flight level Full) or "write a program that holds 1 m on SIM-1 and pass the hover challenge" (at the default Sticks only level, where Copilot flies through programs). Copilot is a separate floating window: it stays above other applications, can be dragged anywhere on screen, and the main window and other applications stay usable while it is shown. It works through the same session, claim and API as any agent, with flight, device-level and application tool sets chosen in Settings, and on a real aircraft shows an approval card before every motion command and device write. The key is stored encrypted in the app data folder, readable only by your user account; the system keychain is an opt-in setting, and Relay never asks for your login password.
 
 Language models connect through MCP:
 
@@ -141,10 +145,40 @@ claude mcp add anet-relay-app -- python3 /path/to/ANet-Relay/mcp/anet_relay_app_
 | REST | `http://127.0.0.1:8765/api/v1` (first free port from 8765 to 8775) |
 | WebSocket | `ws://127.0.0.1:8765/api/v1/stream` |
 | OpenAPI | `http://127.0.0.1:8765/openapi.json`, interactive at `/docs` |
-| MCP | over stdio: `mcp/anet_relay_mcp.py` (flight, 20 tools), `mcp/anet_relay_device_mcp.py` (device level, 36), `mcp/anet_relay_app_mcp.py` (application control, 42) |
+| MCP | over stdio: `mcp/anet_relay_mcp.py` (flight, 20 tools; 13 at the agent flight level `sticks`), `mcp/anet_relay_device_mcp.py` (device level, 36), `mcp/anet_relay_app_mcp.py` (application control and onboard programs, 61) |
 | Python SDK | `sdk/python/anet_relay_client.py` and six examples |
 
 The API listens on the loopback interface only. Agents control simulators and real aircraft through the same calls; real aircraft additionally require the operator's preflight steps and `confirm: "ARM"`.
+
+## Onboard programs and duels
+
+A language model decides in hundreds of milliseconds to tens of seconds; a quadcopter needs its sticks corrected fifty times a second. ANet Relay puts the fast loop on the aircraft's stick path: an **onboard program** is restricted Python with `PARAMS`, `init(ctx)` and `step(obs, ctx) -> Sticks` that runs at 50 Hz in an isolated program host on this computer. It reads only what the aircraft can sense (attitude, rates, accelerations, barometric height, a position only where a source exists, battery, motor output, arena state and contacts) and outputs the four sticks and the trigger. People and agents write the program; the program flies; the agent watches its state, log and scores at its own pace, changes the code or moves its parameters live.
+
+- **Write and test.** Built-in examples `hover_trim`, `liftoff`, `patrol` and `hunter_easy` / `hunter_medium` / `hunter_hard` are read-only and can be duplicated. Every save is a revision with its author (the operator or the agent's session) and a note. Unit tests feed fixed observations and check the sticks, like the sample cases of a programming exercise.
+- **Challenges.** Nine scenarios, `liftoff`, `hover`, `heading`, `square`, `rings`, `pursuit` and `duel_easy` / `duel_medium` / `duel_hard`, are judged in a headless evaluator faster than real time on visible and hidden seeds whose airframes differ, so a program tuned to one airframe does not pass. Scores run from 0 to 100 with the best result and the history of each challenge.
+- **Duels.** Two to eight programs fly free-for-all rounds in the arena; the results move an Elo ladder. Every judged seed and round leaves a 10 Hz trace that replays every aircraft and its rounds on the Fly stage. Programs deployed on local simulators also fly live in the LAN arena against programs on other terminals; the network carries flight state only, never code.
+- **Real airframes.** With hover assist off, simulators carry assembly defects: payload, centre of gravity offset, level calibration error, unequal motors, a damaged propeller and IMU noise, as the presets ideal, typical (the default) and rough or as custom values, deterministic by seed. The values never appear in a program's observation: they show in flight.
+- **Safety.** A person who possesses the aircraft pauses the program at once, and releasing never resumes it. Emergency stop, link loss and a crash stop it; the 0.8 s stick timeout applies. A real aircraft accepts programs only after the operator turns on **Allow programs on this aircraft** in the inspector (confirm word `PROGRAM`, reset on every connection) and preflight passes, and its `fire` output is ignored. Programs come only from this computer.
+
+```python
+with RelayClient() as relay:
+    relay.open_session("my-agent")
+    pid = relay.program_create("My hover", copy_of="hover_trim")["program"]["id"]
+    assert relay.program_validate(pid)["ok"]
+    print(relay.program_test(pid)["passed"])                    # unit tests in the program host
+    print(relay.challenge_submit("hover", pid)["result"])       # headless, hidden seeds
+    relay.claim("sim-1")
+    relay.mode("sim-1", "STABILIZE")
+    relay.arm("sim-1")
+    relay.program_deploy("sim-1", pid, airframe={"preset": "rough", "seed": 7})
+    relay.program_params("sim-1", ki=0.2)                       # tune while it flies
+```
+
+Programs are written in the [Lab](#lab-and-onboard-programs) or through the API, the SDK, the application MCP server and Copilot. The [onboard programs guide](docs/programs.md) covers the language, the observation, the `relay` library, the challenges and duels; the [agent API](docs/agent-api.md#onboard-programs) lists the routes.
+
+## Sticks-only agents
+
+At the default agent flight level **Sticks only** (`sticks`) an agent flies the way a person does: sticks (the 50 Hz WebSocket stream, single frames and the `sticks` skill), arming and disarming, the manual modes STABILIZE, MANUAL and ACRO, fire, onboard programs and the safety actions (emergency stop, and `land` as a safety action, tagged `safety` in its event). Take-off, hold, move, turn, go-to, return, velocity and attitude skills, sequences that contain them, re-fly and the altitude, position and automatic modes return 403 `sticks_only` to every session, REST, WebSocket and MCP alike. The flight MCP server then lists only the 13 tools that still work, and Copilot drops the high-level tools and tells its model that stable flight needs a program. Agents face what a pilot faces: a hover that drifts, a throttle that is too low, a battery that sags. Only the operator can change the level, in **Settings → Safety → Agent flight level**; **Full** (`full`) restores every v0.3 tool. The operator's own controls in the window are never limited by it.
 
 ## Feature tour
 
