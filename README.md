@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/media/readme/banner.gif" alt="ANet Relay: ground control for agent swarms. A formation of open-frame quadcopters in a dark voxel hall" width="100%" />
+<img src="docs/media/readme/banner.webp" alt="ANet Relay: ground control for agent swarms. A formation of open-frame quadcopters in a dark voxel hall" width="100%" />
 
 <h1>ANet Relay</h1>
 
