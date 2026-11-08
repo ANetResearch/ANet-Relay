@@ -1,5 +1,7 @@
 """Airframe defects through the fleet service and the API (06 §4, WP-2a)."""
 
+import time
+
 import pytest
 from conftest import open_agent
 from fastapi.testclient import TestClient
@@ -154,5 +156,11 @@ def test_api_airframe_routes(client):
     assert client.put(f"/api/v1/sims/{vid}/airframe", json={"seed": -1}, headers=op).status_code == 400
     assert client.get("/api/v1/sims/sim-9/airframe", headers=op).status_code == 404
     assert client.get(f"/api/v1/sims/{vid}/airframe").status_code == 401  # never anonymous
-    fleet = client.get("/api/v1/fleet").json()
-    assert fleet["vehicles"][0]["sim"]["airframe"] == {"preset": "custom", "seed": 21}
+    # the snapshot is rebuilt on the fleet loop's tick: wait for the one after the change
+    deadline = time.monotonic() + 3.0
+    while True:
+        airframe = client.get("/api/v1/fleet").json()["vehicles"][0]["sim"]["airframe"]
+        if airframe == {"preset": "custom", "seed": 21} or time.monotonic() > deadline:
+            break
+        time.sleep(0.05)
+    assert airframe == {"preset": "custom", "seed": 21}
