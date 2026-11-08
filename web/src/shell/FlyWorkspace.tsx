@@ -18,6 +18,8 @@ import { CourseLayer } from '@/course/CourseLayer'
 import { ArenaLayer } from '@/arena/ArenaLayer'
 import { CourseFinishCard, CourseHud } from '@/course/CourseHud'
 import { VideoPip } from '@/video/VideoPip'
+import { TraceLayer } from '@/lab/TraceLayer' // WP-3
+import { TraceReplayBar } from '@/lab/TraceReplayBar' // WP-3
 import { useLayoutMode, type LayoutMode } from './layout'
 
 const SIZES: Record<LayoutMode, { fleet: number; inspector: number }> = {
@@ -49,6 +51,7 @@ function StageFrame() {
       <Stage>
         <CourseLayer />
         <ArenaLayer />
+        <TraceLayer /> {/* WP-3: evaluation trace replay (06 §7) */}
       </Stage>
       <div className="pointer-events-none absolute inset-0">
         <div className="pointer-events-auto absolute top-4 left-1/2 -translate-x-1/2">
@@ -59,6 +62,10 @@ function StageFrame() {
         </div>
         <div className="pointer-events-auto absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
           <CourseFinishCard />
+        </div>
+        {/* WP-3: evaluation trace replay controls, bottom centre (the HUD strip is hidden while replaying) */}
+        <div className="absolute inset-x-0 bottom-4 flex justify-center">
+          <TraceReplayBar />
         </div>
       </div>
     </div>

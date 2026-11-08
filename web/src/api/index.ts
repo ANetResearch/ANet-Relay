@@ -10,6 +10,8 @@ export type { ArenaView } from './types'
 // WP-2a: simulator airframe defects (06 §4)
 export type { SimAirframe, AirframeParams, AirframeRef } from './types'
 export type { AirframeBody } from './rest'
+// WP-1 / WP-3: onboard programs (06 §2, §3.1)
+export type { Program, ProgramSummary, ProgramRevision, Validation as ProgramValidation, ValidationProblem, TestResults as ProgramTestResults, TestResult as ProgramTestResult, ProgramLog, ProgramLogLine, ProgramRunView } from './types'
 export { api, request, setTransport, httpTransport, RelayApiError, toApiError } from './rest'
 export type { RestTransport, Method, Auth, StickFrame, PossessInput, Ok, SkillName, PlanAction, PlanStep } from './rest'
 export { env, readEnv, setEnv, normalizeApiBase, streamUrlFor } from './env'

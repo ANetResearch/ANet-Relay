@@ -34,7 +34,7 @@ const fail = (code: string, message: string): never => {
   throw new ActionError(code, message)
 }
 
-const WORKSPACES: readonly Workspace[] = ['fly', 'agents', 'records']
+const WORKSPACES: readonly Workspace[] = ['fly', 'agents', 'records', 'lab'] // WP-3: lab
 const VIEWS = ['overview', 'chase', 'top'] as const
 const SETTINGS_SECTIONS: readonly SettingsSection[] = ['general', 'safety', 'controllers', 'copilot', 'network', 'data', 'about']
 const CONNECT_TABS: readonly ConnectTab[] = ['scan', 'address', 'bridge']

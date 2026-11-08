@@ -20,6 +20,19 @@ export interface ReplayFrame {
   controller: 'none' | 'human' | 'agent' | 'program' | null
 }
 
+/** WP-3: one aircraft of a multi-aircraft replay (a Lab evaluation trace, 06 §3.4 / §7). */
+export interface ReplayCraft {
+  /** stage id (lab/trace.ts traceStageId), never a live aircraft id */
+  id: string
+  label: string
+  sim: boolean
+  frame: ReplayFrame
+  /** program name and state for the PROGRAM · name · state label */
+  program: string | null
+  state: string | null
+  hp: number | null
+}
+
 export interface ReplayState {
   active: boolean
   recordId: number | null
@@ -30,9 +43,11 @@ export interface ReplayState {
   t: number | null
   frame: ReplayFrame | null
   playing: boolean
+  /** WP-3: several aircraft at once (an evaluation trace); null while one record replays */
+  crafts: ReplayCraft[] | null
 }
 
-const IDLE: ReplayState = { active: false, recordId: null, vehicleId: null, label: '', kind: 'real', t: null, frame: null, playing: false }
+const IDLE: ReplayState = { active: false, recordId: null, vehicleId: null, label: '', kind: 'real', t: null, frame: null, playing: false, crafts: null }
 
 export const useReplay = create<ReplayState>()(() => ({ ...IDLE }))
 

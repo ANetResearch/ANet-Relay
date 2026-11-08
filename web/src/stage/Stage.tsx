@@ -91,6 +91,16 @@ function usePipClearance(ref: React.RefObject<HTMLDivElement | null>, stripWidth
 function ReplayBadge() {
   const t = useT6()
   const ts = useReplay((r) => (r.active ? (r.frame?.t ?? r.t) : null))
+  // WP-3: a multi-aircraft trace names itself; its time runs from zero and is shown by the trace replay bar
+  const trace = useReplay((r) => (r.active && r.crafts ? r.label : null))
+  if (trace !== null) {
+    return (
+      <div className="stage-hud stage-replay" data-stage-replay="trace">
+        <Icon icon="tl.play" className="size-3.5 text-[var(--g400)]" />
+        <span className="text-[12px] text-[var(--g100)]">{trace}</span>
+      </div>
+    )
+  }
   if (ts === null) return null
   return (
     <div className="stage-hud stage-replay" data-stage-replay="">

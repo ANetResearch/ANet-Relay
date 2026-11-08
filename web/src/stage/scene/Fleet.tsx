@@ -88,10 +88,13 @@ function declutter(camera: THREE.Camera, size: { width: number; height: number }
 function useIds(): { id: string; label: string; sim: boolean }[] {
   const liveIds = useRelay(useShallow((s) => (s.fleet?.vehicles ?? []).map((v) => v.id)))
   const replay = useReplay(useShallow((r) => (r.active && r.vehicleId ? [r.vehicleId, r.label, r.kind] : null)))
+  // WP-3: the aircraft of a multi-aircraft trace, keyed by id and label only (frames change every tick)
+  const crafts = useReplay(useShallow((r) => (r.active && r.crafts ? r.crafts.map((c) => `${c.id}\u0000${c.label}`) : null)))
   return React.useMemo(() => {
+    if (crafts) return crafts.map((k) => { const [id, label] = k.split('\u0000'); return { id, label, sim: true } })
     if (replay) return [{ id: replay[0], label: replay[1], sim: replay[2] === 'sim' }]
     return liveIds.map((id) => ({ id, label: id, sim: id.startsWith('sim-') }))
-  }, [replay, liveIds])
+  }, [replay, crafts, liveIds])
 }
 
 export function Fleet({ template }: { template: AirframeTemplate }) {

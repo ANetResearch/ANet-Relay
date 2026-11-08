@@ -40,7 +40,7 @@ export function toApiError(status: number, body: unknown, statusText = ''): Rela
   return new RelayApiError(status, code, msg, typeof detail === 'string' ? detail : zh, detail)
 }
 
-export type Method = 'GET' | 'POST' | 'PUT' | 'DELETE'
+export type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' // PATCH: WP-3 live program parameters
 export type Auth = 'none' | 'operator'
 
 export interface RestTransport {

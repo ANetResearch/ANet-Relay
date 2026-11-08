@@ -1,4 +1,4 @@
-// Window composition (02 §3): top bar, alert bar, workspace (Fly / Agents / Records), relay timeline, overlays.
+// Window composition (02 §3): top bar, alert bar, workspace (Fly / Agents / Records / Lab), relay timeline, overlays.
 import * as React from 'react'
 import { useBoot } from './boot'
 import { useUi } from '@/store/ui'
@@ -21,7 +21,10 @@ import { InputLayer } from '@/control/InputLayer'
 import { AppNotices } from '@/appctl'
 import { useCopilotShell } from '@/copilot/CopilotPanel'
 import { VoxelWipe } from '@/ui/voxel/VoxelWipe'
+import { VoxelLoader } from '@/ui/voxel/VoxelLoader' // WP-3: Lab loading frame
 
+// WP-3: the Lab (CodeMirror and the editor tabs) loads on first use
+const LabWorkspace = React.lazy(() => import('@/lab/LabWorkspace').then((m) => ({ default: m.LabWorkspace })))
 const Gallery = React.lazy(() => import('@/dev/Gallery').then((m) => ({ default: m.Gallery })))
 const SHOW_GALLERY = typeof location !== 'undefined' && new URLSearchParams(location.search).has('gallery')
 
@@ -65,6 +68,13 @@ function Workspace() {
   }
   if (ws === 'agents') return <AgentsWorkspace />
   if (ws === 'records') return <RecordsWorkspace focus={focus} />
+  if (ws === 'lab') {
+    return (
+      <React.Suspense fallback={<div className="flex h-full items-center justify-center"><VoxelLoader size={24} /></div>}>
+        <LabWorkspace />
+      </React.Suspense>
+    )
+  }
   return <FlyWorkspace />
 }
 

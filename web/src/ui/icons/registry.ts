@@ -13,6 +13,7 @@ import {
   VideoOff, Wifi, WifiOff, X, BatteryFull, BatteryMedium, BatteryLow, BatteryWarning, Drone, ArrowDownUp, Ellipsis,
   Plane, PlaneTakeoff, PlaneLanding, Crosshair, Network, Link2Off, Power, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
   ArrowUpToLine, ArrowDownToLine, RotateCw, ListOrdered, Sparkles, SendHorizontal, Hourglass, KeyRound, Stethoscope,
+  FlaskConical, Code, Save, ListChecks, Swords, Trophy, GitCompare, CopyPlus,
 } from 'lucide'
 import type { IconNode } from './types'
 
@@ -110,6 +111,15 @@ export const ICONS = {
   'square': Square,
   // LAN arena (05 §7.1, WP-D): in the arena / not in the arena
   'arena': Network,
+  // Lab (06 §7, WP-3)
+  'ws.lab': FlaskConical,
+  'code': Code,
+  'save': Save,
+  'tests': ListChecks,
+  'duel': Swords,
+  'judge': Trophy,
+  'diff': GitCompare,
+  'duplicate': CopyPlus,
 } as const satisfies Record<string, IconNode>
 
 export type IconKey = keyof typeof ICONS

@@ -93,6 +93,20 @@ function spawnDetail(id: string): void {
 
 function replayTargets(r: ReplayState, now: number): Map<string, Target> {
   const out = new Map<string, Target>()
+  // WP-3: a multi-aircraft trace (06 §3.4) places every aircraft by its recorded arena position
+  if (r.crafts) {
+    for (const c of r.crafts) {
+      const f = c.frame
+      out.set(c.id, {
+        id: c.id, kind: 'position', sim: c.sim,
+        x: f.x ?? 0, y: f.y ?? 0, z: Math.max(0, f.z ?? 0), vx: 0, vy: 0, vz: 0,
+        roll: f.roll, pitch: f.pitch, yaw: f.yaw,
+        throttle: f.armed ? Math.min(1, Math.max(0, (f.throttle ?? 50) / 100)) : 0,
+        armed: f.armed, at: now,
+      })
+    }
+    return out
+  }
   const f = r.frame
   if (!r.vehicleId || !f) return out
   const has = f.x !== null && f.y !== null && f.z !== null
@@ -192,7 +206,7 @@ export function startLive(): () => void {
     })
     let lastReplay: ReplayState = useReplay.getState()
     const b = useReplay.subscribe((r) => {
-      if (r.frame === lastReplay.frame && r.active === lastReplay.active && r.vehicleId === lastReplay.vehicleId) return
+      if (r.frame === lastReplay.frame && r.active === lastReplay.active && r.vehicleId === lastReplay.vehicleId && r.crafts === lastReplay.crafts) return
       lastReplay = r
       rebuild()
     })

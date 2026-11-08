@@ -57,6 +57,7 @@ export const en = {
   'ws.fly': 'Fly',
   'ws.agents': 'Agents',
   'ws.records': 'Records',
+  'ws.lab': 'Lab', // WP-3
   'ws.label': 'Workspace',
   'relay.handback': '{aircraft} handed back to {agent}',
 
@@ -473,6 +474,7 @@ export const en = {
   'cmd.goFly': 'Go to Fly',
   'cmd.goAgents': 'Go to Agents',
   'cmd.goRecords': 'Go to Records',
+  'cmd.goLab': 'Go to Lab', // WP-3
   'cmd.stopAll': 'Stop all aircraft',
   'cmd.select': 'Select {aircraft}',
   'cmd.possess': 'Possess {aircraft}',

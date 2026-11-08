@@ -2,7 +2,7 @@
 // timeline window) go to localStorage under relay.ui; everything else resets per launch.
 import { create } from 'zustand'
 
-export type Workspace = 'fly' | 'agents' | 'records'
+export type Workspace = 'fly' | 'agents' | 'records' | 'lab' // WP-3: Lab (06 §7)
 export type ConnectTab = 'scan' | 'address' | 'bridge'
 export type SettingsSection = 'general' | 'safety' | 'controllers' | 'copilot' | 'network' | 'data' | 'about'
 export type TimelineWindow = 1 | 5 | 15

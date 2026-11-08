@@ -23,6 +23,7 @@ import { MotorTest } from './MotorTest'
 import { PreflightList } from './PreflightList'
 import { Sticks } from './Sticks'
 import { BenchEntry } from '@/bench/BenchEntry' // WP-B
+import { ProgramGroup } from '@/lab/ProgramGroup' // WP-3
 import { useAwaiting, useHold, useInputPaused, usePadDisconnected } from './store'
 import { useCT, h5Key } from './strings'
 import './control.css'
@@ -246,6 +247,7 @@ export function ControlTab({ vehicleId }: ControlTabProps) {
       <ActionsBlock v={v} />
       <PlanBlock v={v} />
       <CourseGroup vehicleId={v.id} />
+      <ProgramGroup vehicleId={v.id} /> {/* WP-3: onboard program (06 §2.6, §7) */}
       <Calibration vehicle={v} focus={calibFocus} onFocused={clearFocus} />
       {v.kind === 'real' ? <MotorTest vehicle={v} /> : null}
     </div>
