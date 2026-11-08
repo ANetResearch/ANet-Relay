@@ -124,6 +124,8 @@ All paths are under `/api/v1`. Bodies are JSON.
 | `POST /vehicles/{id}/course/stop` | controller | Abort the course |
 | `POST /vehicles/{id}/stop` | controller | Emergency stop |
 | `POST /sims/{id}/assist` | controller or operator | `{on}`: hover assist of a simulated aircraft (below); `sim_only` for a real aircraft |
+| `PUT /sims/{id}/airframe` | controller or operator | `{preset \| params, seed?}`: airframe defects of a simulated aircraft (below) |
+| `GET /sims/{id}/airframe` | controller or operator | The full airframe values, their limits and the hover throttle |
 
 ### Skills
 
@@ -268,6 +270,25 @@ Every simulated aircraft has `hover_assist` (default: setting `sim_hover_assist`
 
 `POST /sims {count, autopilot, position, hover_assist}` sets it at creation; `POST /sims/{id}/assist {on}` switches it (the operator, the controlling session, or any session while nobody controls the aircraft and the operator allows app control). The snapshot carries `vehicle.sim = {hover_assist, turbulence}` (null on real aircraft); event `sim_assist_changed` reports a change. MCP: `app_sim_assist`; SDK: `sim_assist(id, on)` and `add_sims(count, autopilot, hover_assist)`.
 
+### Simulator airframe defects
+
+With hover assist off a simulated aircraft also flies with the assembly defects of a real one (design 06 §4). With hover assist on they wait; the assisted model is unchanged.
+
+| Value | Range | Effect |
+|---|---|---|
+| `mass_kg`, `payload_kg` | 0.08–0.30, 0–0.20 kg | Take-off weight: the hover throttle rises (0.12 kg hovers at 0.50, 0.16 kg at about 0.63); above the thrust limit (0.288 kg) the aircraft cannot lift |
+| `cg_offset_cm` | [forward, right], ±3 cm | The angle loop leans toward the CG (2.5° per cm); airborne, its integrator removes 70 % of that with a 2 s time constant, the remaining 30 % is a steady tilt, so the aircraft drifts toward the CG. The integrator resets on the ground. A large offset saturates motors and the uncorrected remainder grows |
+| `level_trim_deg` | [roll, pitch], ±5° | Level calibration error: with centred sticks the aircraft flies this much tilted while ATTITUDE reads level, so it drifts. The accelerometer (SCALED_IMU) still feels the push before drag builds up |
+| `motor_gain` | 4 × ±0.08 | Efficiency deviation of motors 1–4 (ArduPilot X order): yaw drift (same 70 % / 2 s correction) and a small tilt disturbance; the motor outputs in SERVO_OUTPUT_RAW differ |
+| `prop_damage`, `damaged_prop` | 0–1, motor 1–4 | That propeller loses up to 30 % thrust; VIBRATION rises by up to 50 m/s² at full throttle, accelerometer and gyro noise rise, the attitude jitters |
+| `imu_noise` | 0–5 | Noise multiplier on ATTITUDE (0.08° roll and pitch, 0.15° yaw, 0.6°/s rates at 1) and SCALED_IMU (0.06 m/s²) |
+
+Presets, generated deterministically from a seed (0 – 2^31−1): `ideal` (all zero: exactly the hover-assist-off model), `typical` (default: CG within 0.25 cm, level error within 0.4°, motors within 2 %, noise ×1), `rough` (CG 0.7–1.4 cm, level error 1–2°, motors within 8 %, one propeller 20–50 % damaged, 5–20 g payload, noise ×2: a naive hover drifts several metres in 20 s) and `custom` (explicit values).
+
+`PUT /sims/{id}/airframe` takes `{preset}` (a fresh seed), `{preset, seed}`, `{seed}` (re-roll the current preset; a custom airframe keeps its values) or `{params: {...}}` (any subset, overlaid on the named preset or on the current values, which makes it `custom`). Allowed armed and in flight; the integrator starts again from zero. It returns, like `GET`, `{id, preset, seed, params, active, hover_throttle, limits}`; `hover_throttle` is the level hover throttle out of ground effect at full battery, null when the aircraft cannot lift. Who: the operator, the controlling session, or any session while nobody controls the aircraft and the operator allows app control; `sim_only` for a real aircraft, `invalid_request` names the bad field. `POST /sims` takes the same body as `airframe` (every new aircraft of the call gets it); without it each new simulator takes the setting `sim_airframe_default` (`ideal` | `typical` | `rough`, default `typical`) with a fresh random seed.
+
+The snapshot carries only `vehicle.sim.airframe = {preset, seed}`: the values are never in the snapshot or in a program's observation; they show in flight. Event `sim_airframe_changed` (`data.preset`, `data.seed`, `data.by`). Simulators answer `SCALED_IMU` (board FRD specific force in mG, rates in mrad/s) when asked with `SET_MESSAGE_INTERVAL` or `REQUEST_MESSAGE`; it is in no stream group.
+
 ### LAN arena
 
 The arena (05 §7) lets Relay terminals on the same broadcast domain see each other's simulated aircraft, fire virtual rounds at them, and score hits. It is joined from the window (top bar **Arena**, setting `peer_enabled`) and uses one UDP socket of its own (setting `peer_port`, default 47114, multicast `239.255.71.14` with TTL 1 plus subnet broadcast). Nothing received from the network reaches a control path: no stick, arm, claim, parameter, skill, plan or device call is ever driven by a peer packet. **Real aircraft never join the arena and are never affected by virtual rounds**: only simulators are shared, can fire and can be hit.
@@ -311,6 +332,7 @@ Each event is `{seq, t, kind, vehicle, session, text_en, text_zh, data}`. The ki
 | `stop` / `stop_all` | Emergency stops |
 | `refly_started` / `refly_finished` / `refly_failed` | Re-fly |
 | `sim_assist_changed` | Hover assist of a simulated aircraft switched (`data.hover_assist`) |
+| `sim_airframe_changed` | Airframe defects of a simulated aircraft set (`data.preset`, `data.seed`, `data.by`) |
 | `peer_joined` / `peer_left` / `arena_hit` / `arena_down` | LAN arena: a terminal joined or left, a hit scored or taken, a simulator shot down |
 | `device_command` / `motor_test` / `motor_test_stopped` / `actuator_set` / `rc_override` / `message_interval` / `home_set` / `rebooting` / `calibration_started` / `terminated` | Device-level operations |
 | `app_command` | An interface action run by a session or the operator (`data.action`, `data.by`) |
