@@ -24,9 +24,10 @@ Program source::
   ``ax ay az`` (m/s², specific force in the body frame forward / right / up: about +9.81 on ``az`` at rest)
   ``alt vz`` (m, m/s, barometric, relative to the take-off point) ``pos vel`` (ENU tuples, m and m/s)
   ``battery`` (``v_cell``, ``pct``) ``throttle_out`` (0-1) ``hp ammo reloading`` (arena) ``contacts``
-  (tuple of ``{id, team, dist, bearing, elevation, rel, vrel, hp}``; ``rel``/``vrel`` are (forward, right, up)
-  in the heading frame, bearing positive to the right, 30 m range, at most 16, noisy) ``arena``
-  (``radius floor ceiling``) ``sticks_in`` (the person's sticks in copilot mode).
+  (tuple of ``{id, team, dist, bearing, elevation, rel, vrel, hp, closing}``; ``rel``/``vrel`` are (forward,
+  right, up) in the heading frame, bearing positive to the right, ``closing`` the approach speed in m/s, 30 m
+  range, at most 16, noisy) ``arena`` (``radius floor ceiling``) ``sticks_in`` (the person's sticks in
+  copilot mode) ``collision`` (the last contact within 1 s: ``{t_ago, with, v_rel, normal}``, or ``None``).
 * Library (no import needed; also as ``relay.<name>``): ``clamp(x, lo, hi)``, ``wrap180(deg)``,
   ``lerp(a, b, t)``, ``deadband(x, d)``, ``lowpass(prev, x, alpha)``, ``PID(kp, ki, kd, i_limit, out_limit)``
   with ``step(error, dt)`` / ``reset()``, ``StateMachine(initial)`` with ``add(name, fn)`` /

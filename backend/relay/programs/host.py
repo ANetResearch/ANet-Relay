@@ -92,6 +92,7 @@ TEST_DEFAULTS: dict[str, Any] = {
     "contacts": [],
     "arena": None,
     "sticks_in": None,
+    "collision": None,  # WP-A (07 §2)
 }
 
 

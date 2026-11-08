@@ -1526,18 +1526,29 @@ class SimAutopilot:
             if now >= self.reboot_until:
                 self._boot(now)
             return data
-        steps = int((now - self.t) / DT)
-        if steps > MAX_STEPS:
-            self.t = now - MAX_STEPS * DT
-            steps = MAX_STEPS
-        for _ in range(max(0, steps)):
-            self.t += DT
-            self._inner(self.t)
+        for _ in range(self.pending_steps(now)):
+            self.physics_step()
         self._supervise(now)
         self._emit_due(now)
         data = b"".join(self.out)
         self.out.clear()
         return data
+
+    def pending_steps(self, now: float) -> int:
+        """Physics steps due to reach ``now`` (at most ``MAX_STEPS``; none before the first step() or while
+        rebooting). ``sim.world`` advances several simulators together with it, one ``physics_step`` each."""
+        if self.t is None or self.reboot_until is not None:
+            return 0
+        steps = int((now - self.t) / DT)
+        if steps > MAX_STEPS:
+            self.t = now - MAX_STEPS * DT
+            steps = MAX_STEPS
+        return max(0, steps)
+
+    def physics_step(self) -> None:
+        """One 250 Hz step of the flight controller and the flight model."""
+        self.t = (self.t or 0.0) + DT
+        self._inner(self.t)
 
     def _pilot(self, now: float) -> tuple[float, float, float, float] | None:
         if self.pilot is None or self.pilot_t is None:

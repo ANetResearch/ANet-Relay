@@ -669,6 +669,8 @@ export interface Event {
     | 'program_host_restarted'
     | 'program_gate'
     | 'judge_finished'
+    | 'collision'
+    | 'ring_touch'
   vehicle: string | null
   session: string | null
   text_en: string

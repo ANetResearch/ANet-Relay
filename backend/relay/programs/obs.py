@@ -12,6 +12,12 @@ aircraft. ``rel`` / ``vrel`` are (forward, right, up) in the observer's heading 
 right of the nose, ``elevation`` degrees above the horizon. ``team`` is the contact's id unless the service
 assigns teams (``ProgramService.teams``).
 
+Collisions (07 §2, WP-A): ``collision`` is the aircraft's latest contact within the last second (``None``
+otherwise): ``{t_ago, with, v_rel, normal}`` with ``with`` the other aircraft's id, a remote key or
+``ring:<n>``, ``v_rel`` the closing speed at the contact (m/s) and ``normal`` the unit contact normal toward
+the aircraft in (forward, right, up). Every contact carries ``closing``: its approach speed along the line of
+sight (m/s, positive while closing in), from the same noisy ``rel`` / ``vrel`` the program sees.
+
 Body accelerations come from ``SCALED_IMU`` (mG) or ``HIGHRES_IMU`` (m/s²) when the aircraft streams one, as
 specific force in (forward, right, up): about +9.81 on ``az`` at rest.
 
@@ -168,6 +174,7 @@ class ObsBuilder:
         obs["throttle_out"] = self._throttle_out(v)
         obs.update(self._arena_state(fleet, v))
         obs["contacts"] = self._contacts(fleet, v, sim, teams or {}) if self.sensors.contacts else None
+        obs["collision"] = self._collision(fleet, v, now)  # WP-A (07 §2)
         obs["arena"] = dict(self.arena) if self.arena is not None else None
         obs["sticks_in"] = sticks_in
         return obs
@@ -266,6 +273,21 @@ class ObsBuilder:
             return {"hp": None, "ammo": None, "reloading": None}
         return {"hp": gun.hp, "ammo": gun.ammo, "reloading": gun.reload_until is not None}
 
+    @staticmethod
+    def _collision(fleet: FleetService, v: Vehicle, now: float) -> dict[str, Any] | None:
+        world = getattr(fleet, "world", None)
+        contact = world.last_contact(v.id, now) if world is not None else None
+        att = v.state["attitude"]
+        if contact is None or att is None:
+            return None
+        n = _heading_frame(contact.normal, float(att["yaw"]))
+        return {
+            "t_ago": _r(max(0.0, now - contact.t), 3),
+            "with": contact.other,
+            "v_rel": _r(contact.v_rel, 3),
+            "normal": [_r(x, 3) for x in n],
+        }
+
     def _contacts(
         self, fleet: FleetService, v: Vehicle, sim: bool, teams: dict[str, str]
     ) -> list[dict] | None:
@@ -316,6 +338,8 @@ class ObsBuilder:
                 rel = tuple(x + self._noise(sigma) for x in rel)  # type: ignore[assignment]
                 vrel = tuple(x + self._noise(0.1) for x in vrel)  # type: ignore[assignment]
             horiz = math.hypot(rel[0], rel[1])
+            rng = math.sqrt(horiz**2 + rel[2] ** 2)
+            closing = -(rel[0] * vrel[0] + rel[1] * vrel[1] + rel[2] * vrel[2]) / rng if rng > 1e-9 else 0.0
             out.append(
                 {
                     "id": cid,
@@ -326,6 +350,7 @@ class ObsBuilder:
                     "rel": [_r(x, 3) for x in rel],
                     "vrel": [_r(x, 3) for x in vrel],
                     "hp": hp,
+                    "closing": _r(closing, 3),  # WP-A (07 §2)
                 }
             )
         return out

@@ -58,7 +58,7 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     "stop_all": ("Stop on all aircraft.", "全部飞机急停。"),
     "battery_warn": ("{vehicle} battery low: {voltage} V.", "{vehicle} 电压偏低：{voltage} V。"),
     "battery_critical": ("{vehicle} battery critical: {voltage} V.", "{vehicle} 电压严重不足：{voltage} V。"),
-    "crashed": ("{vehicle} crashed.", "{vehicle} 坠毁。"),
+    "crashed": ("{vehicle} crashed{detail}.", "{vehicle} 坠毁{detail}。"),  # WP-A: reason_code, point (07 §2)
     "airborne_no_controller": ("{vehicle} is airborne with no controller.", "{vehicle} 在空中且无人控制。"),
     "param_set": ("{vehicle} parameter {name} set to {value}.", "{vehicle} 参数 {name} 已设为 {value}。"),
     "sim_added": ("Simulated aircraft {vehicle} added.", "已添加模拟机 {vehicle}。"),
@@ -174,6 +174,15 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     "program_gate": ("{vehicle}: onboard programs {detail}.", "{vehicle}：机载程序{detail}。"),
     # WP-2b challenges and duels (06 §3.4); {detail} is filled from detail_en / detail_zh
     "judge_finished": ("{detail}.", "{detail}。"),
+    # WP-A collisions (07 §2); {detail} is filled from detail_en / detail_zh
+    "collision": (
+        "{vehicle} collided with {other} at {v_rel} m/s.{detail}",
+        "{vehicle} 与{other_zh}相撞，接近速度 {v_rel} m/s。{detail}",
+    ),
+    "ring_touch": (
+        "{vehicle} touched ring {ring} while passing it.",
+        "{vehicle} 穿过第 {ring} 个环时擦碰环体。",
+    ),
 }
 
 INPUT_LABELS = {"keyboard": ("keyboard", "键盘"), "screen": ("on-screen sticks", "屏幕摇杆")}

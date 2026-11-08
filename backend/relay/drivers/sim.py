@@ -22,6 +22,11 @@ class SimDriver(MavCommands):
         self.parser = Parser()
         self._now = 0.0
 
+    def prepare(self, now: float) -> None:
+        """Deliver this tick's paced frames before ``sim.world`` steps the physics (WP-A, 07 §2)."""
+        self._now = now
+        self.pace(now)
+
     def tick(self, now: float) -> list[Any]:
         self._now = now
         self.pace(now)

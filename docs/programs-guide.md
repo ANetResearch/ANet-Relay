@@ -52,7 +52,8 @@ def step(obs, ctx):             # every 20 ms; must return Sticks
 | `battery` | | `v_cell` (volts per cell), `pct` |
 | `throttle_out` | 0-1 | Mean motor output the controller actually sends |
 | `hp`, `ammo`, `reloading` | | Arena state; `None` outside the arena |
-| `contacts` | list | Other aircraft within 30 m, nearest first: `id`, `team`, `dist`, `bearing` (deg right of the nose), `elevation`, `rel` and `vrel` as (forward, right, up), `hp` |
+| `contacts` | list | Other aircraft within 30 m, nearest first: `id`, `team`, `dist`, `bearing` (deg right of the nose), `elevation`, `rel` and `vrel` as (forward, right, up), `hp`, `closing` (approach speed, m/s) |
+| `collision` | | Last contact within 1 s, else `None`: `t_ago`, `with` (aircraft id, remote key or `ring:<n>`), `v_rel` (closing speed, m/s), `normal` (toward the aircraft, forward / right / up). Use it to switch into a recovery state |
 | `arena` | | `radius`, `floor`, `ceiling` of the field, when there is one |
 | `sticks_in` | Sticks | The person's sticks, in `copilot` deployment mode |
 

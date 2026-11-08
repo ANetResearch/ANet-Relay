@@ -79,7 +79,8 @@ Python 3 语法的子集，部署前由 AST 白名单校验：
 | `battery` | `{v_cell, pct}` | 每节电压与估计电量 |
 | `throttle_out` | 0–1 | 飞控实际输出的平均电机量 |
 | `hp`、`ammo`、`reloading` | — | 对抗场中的生命值、弹药、装填中 |
-| `contacts` | 列表 | 传感器看到的其他飞机：`id, team, dist, bearing, elevation, rel, vrel, hp`（机体航向坐标系，30 m 内，最多 16 个） |
+| `contacts` | 列表 | 传感器看到的其他飞机：`id, team, dist, bearing, elevation, rel, vrel, hp, closing`（机体航向坐标系，30 m 内，最多 16 个；`closing` 为接近速度，m/s） |
+| `collision` | `{t_ago, with, v_rel, normal}` 或 `None` | 最近 1 s 内的碰撞：撞到的对象（飞机 id、远端键或 `ring:<n>`）、接近速度（m/s）与指向本机的接触法向（前、右、上） |
 | `arena` | `{radius, floor, ceiling}` | 场地边界（对抗场与题目中） |
 | `sticks_in` | Sticks | 人的手柄当前量（副驾模式） |
 

@@ -72,6 +72,7 @@ from .events import EventBus
 from .fleet_airframe import AirframeOps  # WP-2a airframe defects (06 §4)
 from .fleet_device import DeviceOps
 from .fleet_sim import SimOps
+from .fleet_world import WorldOps  # WP-A collisions (07 §2)
 from .flighthealth import FlightHealth
 from .history import History
 from .judge.service import JudgeService  # WP-2b: challenges, duels and the headless evaluator (06 §3)
@@ -87,6 +88,7 @@ from .procedures import ProcedureOps
 from .programs.service import ProgramService  # WP-1: onboard programs (06 §2)
 from .sessions import Session, SessionManager
 from .sim.autopilot import ARDUPILOT, PX4, SimAutopilot
+from .sim.world import World  # WP-A (07 §2)
 
 log = logging.getLogger("relay.fleet")
 T = TypeVar("T")
@@ -352,7 +354,7 @@ class Vehicle:
         return auth.controller(self.auth, claim is not None and sessions.alive(claim.session_id))
 
 
-class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps):
+class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps, WorldOps):
     def __init__(
         self,
         settings: Settings | None = None,
@@ -418,6 +420,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps):
         self._labels = self.history.labels()
         # LAN arena (05 §7, WP-D): its own UDP socket and rules; peers never enter self.vehicles
         self.arena = Arena(self, network=listen)
+        self.world = World()  # WP-A: the local simulators' collision world (07 §2)
         self.arena.apply_settings()
         # WP-1 onboard programs (06 §2): store, program host and the 50 Hz program tick
         self.programs = ProgramService(self)
@@ -532,6 +535,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps):
             for data, addr in self.link.recv_all():
                 self._on_datagram(data, addr, now)
         self._run_commands()
+        self._world_step(now)  # WP-A (07 §2): the simulators' physics in lockstep, with collisions
         for v in list(self.vehicles.values()):
             try:
                 msgs = v.driver.tick(now)
@@ -744,7 +748,8 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps):
         if v.crash_event:
             return
         v.crash_event = True
-        self.events.emit("crashed", v.id, data={"text": text}, labels={"vehicle": v.label})
+        data = {"text": text, **self._crash_details(v)}  # WP-A: reason_code and point (07 §2)
+        self.events.emit("crashed", v.id, data=data, labels={"vehicle": v.label})
         self.programs.on_vehicle_stop(v, "crashed")  # WP-1
         self._abort_course(v, "crashed", now)
         if v.skill is not None and v.skill.active:
@@ -2394,6 +2399,8 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps):
         assert run is not None
         course_name = run.course.get("name_en", run.course["id"])
         payload = {"course_id": run.course["id"], **data}
+        if kind == "ring_touch":  # WP-A (07 §2)
+            payload["vehicle"] = v.id
         self.events.emit(kind, v.id, data=payload, labels={"vehicle": v.label, "course": course_name})
         if kind in ("course_finished", "course_aborted"):
             v.course_clear_at = now + COURSE_RESULT_HOLD_S

@@ -370,6 +370,11 @@ def make_obs(data: Mapping[str, Any]) -> Record:
             c["vrel"] = _vec(c.get("vrel"))
             out.append(Record(c))
         d["contacts"] = tuple(out)
+    collision = d.get("collision")  # WP-A (07 §2)
+    if isinstance(collision, Mapping):
+        collision = dict(collision)
+        collision["normal"] = _vec(collision.get("normal"))
+        d["collision"] = Record(collision)
     sticks = d.get("sticks_in")
     if isinstance(sticks, Mapping):
         d["sticks_in"] = Sticks(

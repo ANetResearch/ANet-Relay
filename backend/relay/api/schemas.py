@@ -495,6 +495,9 @@ EventKind = Literal[
     "program_gate",
     # WP-2b challenges and duels (06 §3.4)
     "judge_finished",
+    # WP-A collisions (07 §2)
+    "collision",
+    "ring_touch",
 ]
 
 

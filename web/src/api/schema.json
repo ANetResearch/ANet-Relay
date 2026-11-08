@@ -1525,7 +1525,9 @@
             "program_faulted",
             "program_host_restarted",
             "program_gate",
-            "judge_finished"
+            "judge_finished",
+            "collision",
+            "ring_touch"
           ],
           "type": "string"
         },

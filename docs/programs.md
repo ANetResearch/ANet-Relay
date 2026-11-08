@@ -108,7 +108,8 @@ Only what the aircraft itself can know; attribute access; missing values are `No
 | `battery` | `{v_cell, pct}` | Cell voltage and estimated charge |
 | `throttle_out` | 0–1 | Mean motor output of the flight controller |
 | `hp`, `ammo`, `reloading` | — | Arena hit points, rounds, reloading |
-| `contacts` | list | Other aircraft the sensors see: `id, team, dist, bearing, elevation, rel, vrel, hp` (heading frame, within 30 m, at most 16) |
+| `contacts` | list | Other aircraft the sensors see: `id, team, dist, bearing, elevation, rel, vrel, hp, closing` (heading frame, within 30 m, at most 16; `closing` is the approach speed in m/s) |
+| `collision` | `{t_ago, with, v_rel, normal}` or `None` | The aircraft's last contact within 1 s: what it hit (an aircraft id, a remote key or `ring:<n>`), the closing speed in m/s and the contact normal toward the aircraft as (forward, right, up) |
 | `arena` | `{radius, floor, ceiling}` | Arena bounds (arena and challenges) |
 | `sticks_in` | Sticks | The person's sticks (copilot mode) |
 
