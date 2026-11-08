@@ -47,6 +47,8 @@
 
 `relay/device.py` 中的常量表，每项 `{id, name, label_en, label_zh, params: [{index, name, unit, min?, max?}], danger: null | "motor" | "reboot" | "calibrate" | "terminate" | "arm", needs_disarmed: bool, autopilots: ["PX4","ArduPilot"]}`。至少包含：`COMPONENT_ARM_DISARM`、`DO_SET_MODE`、`NAV_TAKEOFF`、`NAV_LAND`、`NAV_RETURN_TO_LAUNCH`、`NAV_LOITER_UNLIM`、`DO_CHANGE_SPEED`、`CONDITION_YAW`、`DO_REPOSITION`、`DO_SET_HOME`、`DO_SET_SERVO`、`DO_REPEAT_SERVO`、`DO_SET_RELAY`、`DO_MOTOR_TEST`、`ACTUATOR_TEST`、`DO_FLIGHTTERMINATION`、`PREFLIGHT_CALIBRATION`、`PREFLIGHT_REBOOT_SHUTDOWN`、`SET_MESSAGE_INTERVAL`、`REQUEST_MESSAGE`、`DO_SET_ROI_LOCATION`、`DO_SET_ROI_NONE`、`MISSION_START`、`DO_PAUSE_CONTINUE`、`DO_GRIPPER`、`DO_DIGICAM_CONTROL`、`IMAGE_START_CAPTURE`、`VIDEO_START_CAPTURE`、`VIDEO_STOP_CAPTURE`。
 
+> v0.4.0 起：会话（智能体）的飞行控制缺省为"只用摇杆"等级，高层技能对会话关闭，见 `06-v040.zh-CN.md` §5。
+
 ### 2.2 新技能（`skills.py`，复用技能执行器、接管、事件与动作序列）
 
 | 技能 | 参数 | 要求 | 实现 |
