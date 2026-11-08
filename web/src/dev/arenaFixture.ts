@@ -39,6 +39,9 @@ export function arenaFixtureView(t: number, enabled: boolean, k: number): ArenaV
       reloading: { 'sim-1': k % 25 === 24, 'sim-2': false }, reload: k % 25 === 24 ? { 'sim-1': 0.5 } : {}, down: { 'sim-1': false, 'sim-2': false },
       max_ammo: 24, max_hp: 100, score: { hits: 1, downs: 0, deaths: 1 },
     },
+    // WP-B (07 §4): a three-minute match while the arena is on; the board changes with the score
+    match: enabled ? { id: '0a0b0c0d', started_at: t - 30, ends_at: t + 150, running: true } : null,
+    board_rev: 1 + Math.floor(k / 25),
   }
 }
 

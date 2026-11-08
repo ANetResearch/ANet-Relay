@@ -308,7 +308,7 @@ POST /api/v1/vehicles/sim-1/plan
 
 | 方法与路径 | 权限 | 用途 |
 |---|---|---|
-| `GET /programs` | – | 内置示例（`hover_trim`、`liftoff`、`patrol`、`hunter_easy`、`hunter_medium`、`hunter_hard`，只读）与已保存的程序 |
+| `GET /programs` | – | 内置示例（`hover_trim`、`liftoff`、`patrol`、`hunter_easy`、`hunter_medium`、`hunter_hard`、`rammer`，只读）与已保存的程序 |
 | `POST /programs` | 会话或操作员 | `{name, source?, description?, params?, tests?, note?, copy_of?}` → `{program, validation}` |
 | `GET /programs/{pid}` · `GET /programs/{pid}/revisions` | – | 单个程序（`source`、`params`、`tests`、`rev`）；最近 50 个版本，最新在前，含作者与说明 |
 | `PUT /programs/{pid}` | 会话或操作员 | `{source}` 或 `{patch: [{start, end, text}]}`（行号从 1 起、含首尾，均按当前版本计；`end = start - 1` 表示在 `start` 前插入），另可带 `name`、`description`、`params`、`tests`、`note`：产生新版本，返回 `{program, validation}` |
@@ -347,6 +347,7 @@ POST /api/v1/vehicles/sim-1/plan
 | `rings` | `cage-loop` 穿环航线，UWB 式定位 | 60 s 内按序穿过全部圆环，计时 |
 | `pursuit` | 脚本目标机绕中心飞行（半径 3 m、0.5 m/s、高 1.2 m）；有接触传感器与 UWB 式定位 | 60 s 内至少一半时间与目标相距 2 m 以内；分数即该比例 |
 | `duel_easy` / `duel_medium` / `duel_hard` | 与 `hunter_easy` / `hunter_medium` / `hunter_hard` 一对一（场地半径 8 m、天花板 4 m） | 胜利：对手被击落、坠毁或出界而自身仍在飞行；到时按剩余生命值计分 |
+| `ram_easy` | 靶机悬停在出生环上（`judge_hover_target`）；不开火；有接触与类 UWB 定位 | 60 s 内撞击靶机使其坠毁；越快、撞击越重得分越高，未撞上时按最近距离计分 |
 
 分数 0–100。一次提交运行全部种子，全部通过才算通过，分数为各种子平均；`result = {score, passed, metrics, seeds: [{seed（隐藏种子为 null）, hidden, score, passed, metrics, trace_id}], trace_id, best, speed}`。隐藏种子的机体缺陷不同，不保存轨迹。每题的最好成绩与最近 50 次提交保存在 `<data_dir>/programs/results.json`。
 
@@ -397,6 +398,25 @@ with RelayClient() as relay:
 
 每发伤害 20（5 发击落），并对机体施加冲量；被击落的模拟机电机停转、坠落、触地后上锁，5 s 后回到座位出生点（设置 `arena_auto_respawn`）或在复位时恢复。命中不是安全事件，不产生告警。设置：`peer_enabled`、`peer_port`、`peer_callsign`（≤ 16 字符，留空使用计算机名）、`arena_auto_respawn`。SDK：`arena()`、`fire(id, seconds)`。
 
+### 狗斗、对局与排行榜
+
+**狗斗**（07 §3）是场地内 2–8 架模拟机的限时对战，每架由一段机载程序以 `sticks` 级控制：**射手**开火，**撞击手**冲向目标、从不开火。一次调用即可布置：Relay 选取空闲模拟机（不足时自动添加），放到距场地边缘 3 m 的出生环上、机头朝向中心，设置悬停辅助与机体，开启名为 `dogfight` 的会话认领这些飞机，为每种角色部署程序（缺省 `hunter_medium` 与 `rammer`），解锁后由程序自行起飞。操作员可随时附身任意一架：其程序暂停（状态 `human`），松开后继续。开启 `respawn` 时，被击落或坠毁的飞机（状态 `down`）5 s 后回到出生点重新起飞。结束时（到时、`DELETE` 或全部飞机失败）程序停止、空中飞机降落；20 s 后仍在空中、或已落地但着陆检测未触发的模拟机跳过检查强制上锁；随后释放认领，最终成绩保留在排行榜上。局域网中狗斗加入正在进行的对局，或在所有协议版本 2 的终端上开启新对局；未加入场地时以**练习模式**运行（场地规则照常，但不开套接字、不发送任何数据），结束时退出练习模式。**真机一律拒绝**（`dogfight_real_aircraft`），真机从不参与对局、碰撞与场景。
+
+| 方法与路径 | 权限 | 用途 |
+|---|---|---|
+| `POST /scenarios/dogfight` | 应用控制（开启 `agents_app_control` 的会话，或操作员） | `{aircraft（2–12，缺省 6；超过 8 返回 dogfight_no_aircraft），teams（"ffa" / 2 / 3），roles: {gunner, rammer}（之和等于 aircraft；缺省射手与撞击手 2 : 1），programs: {gunner, rammer}，arena: {radius（3–30，缺省 8），ceiling（2–10，缺省 4）}，airframe（ideal / typical / rough），hover_assist（缺省 false），duration_s（30–1800，缺省 180），respawn（缺省 true），seed，vehicles}` → 狗斗视图；已有狗斗时 `dogfight_running` |
+| `GET /scenarios/dogfight` | – | `{running, phase（idle / booting / arming / deploying / running / ending / done）, started_at, ends_at, config, aircraft: [{vid, role, program, team, state（booting / arming / deploying / flying / human / down / stopped / failed）}], match, by, reason（time / stopped / error）, error}` |
+| `DELETE /scenarios/dogfight` | 应用控制 | 提前结束；没有狗斗时 `dogfight_not_running` |
+| `POST /arena/match` | 应用控制 | `{duration_s}`（30–1800，缺省 180）：在本机与所有版本 2 对端开启对局；`arena_off`、`match_running` |
+| `DELETE /arena/match` | 应用控制 | 在所有终端结束当前对局（`ended: true`）；没有对局时清零统计（`ended: false`） |
+| `GET /arena/leaderboard?by=` | – | `{by, match, rows: [{key, aircraft, callsign, local, controller: {kind（program / agent / human / none）, name}, downs, hits, shots, accuracy, rams, deaths, crashes, damage, alive, alive_s, best_alive_s}]}`，按 `downs`（缺省）、`survival`、`accuracy` 或 `rams` 排序 |
+
+**统计。** 场地内每架模拟机一行：击落数（其子弹击落了另一架）、命中、射击、撞落数（其造成的碰撞使对方坠毁）、被击落、坠毁（碰撞或触地）、造成伤害、当前存活时间与最长存活时间。对局（`{id, origin, started_at, duration_s, running, ended_at, reason（time / stopped / conflict）}`）开始时清零、结束时冻结；场地快照携带 `match` 与 `board_rev`。对端飞机的行来自该终端自己的统计（以其所见为准）；Relay 0.4 对端的行统计为空。
+
+**协议版本 2。** Relay 0.5 使用场地协议版本 2，并与 0.4 保持兼容：0.4 认识的每种报文仍以版本字节 1 逐字节不变地发送；只有 `COLLIDE`、`MATCH` 以及约每秒一次携带统计块的 `STATE` 使用版本 2（0.4 终端将其视为畸形报文丢弃，其余状态照常接收）。对端在收到其第一个合法的版本 2 报文后视为版本 2；对局与碰撞只涉及版本 2 对端。`MATCH` 在所有终端开启或结束对局（冲突时最早开始者优先；运行期间每 2 s 重发）。**局域网碰撞**：每个终端用对端最近一次上报的状态（最多外推 0.15 s）与本机飞机做扫掠检测；发现接触时只对本机飞机施加响应，并向另一架飞机的所属终端发送 `COLLIDE`。所属终端重新核验后才施加：报文不超过 0.3 s（时钟差加半个往返）、按其自身视图在接触时刻两机相距不超过 0.6 m、每个对端飞机每秒最多 4 个、同一对飞机 0.5 s 内只施加一次；并回复一次（回复不再被回复），使发送方得知自己造成的坠毁。被拒绝的 `COLLIDE` 不产生任何影响。事件 `collision`（`data.a`、`data.b`、`data.b_label`、`data.point`、`data.v_rel`、`data.crashed`、`data.kind`、`data.remote`）。
+
+SDK：`dogfight_start(...)`、`dogfight_stop()`、`dogfight_status()`、`leaderboard(by)`、`match_start(duration_s)`、`match_end()`。MCP（应用服务器）与 Copilot：`dogfight_start`、`dogfight_stop`、`dogfight_status`、`leaderboard`。例如"开一场 6 机混战，4 架开火 2 架撞击"对应 `dogfight_start {aircraft: 6, teams: "ffa", roles: {gunner: 4, rammer: 2}}`。
+
 ## 6. WebSocket `/api/v1/stream`
 
 服务端 → 客户端：
@@ -432,6 +452,8 @@ with RelayClient() as relay:
 | `sim_airframe_changed` | 模拟机机体缺陷已设置（`data.preset`、`data.seed`、`data.by`） |
 | `judge_finished` | 题目或对抗评测任务结束（`data.job`、`data.kind`、`data.state`、`data.score`、`data.passed`） |
 | `peer_joined` / `peer_left` / `arena_hit` / `arena_down` | 局域网联机：终端加入或离开、我方命中或被命中、模拟机被击落 |
+| `collision` | 两架飞机，或飞机与环、地面发生接触（`data.a`、`data.b`、`data.crashed`、`data.kind`；局域网接触带 `data.remote`） |
+| `dogfight_started` / `dogfight_finished` / `match_started` / `match_finished` | 狗斗场景与场地对局（`data.reason`；结束文本中给出领先者） |
 | `device_command` / `motor_test` / `motor_test_stopped` / `actuator_set` / `rc_override` / `message_interval` / `home_set` / `rebooting` / `calibration_started` / `terminated` | 设备级操作 |
 | `app_command` | 会话或操作员执行的界面动作（`data.action`、`data.by`） |
 | `procedure_started` / `procedure_step` / `procedure_waiting` / `procedure_finished` / `procedure_aborted` | 标定流程，带 `data.run_id`、`data.step`、`data.verdict` 或 `data.reason` |
@@ -454,7 +476,7 @@ with RelayClient() as relay:
 | 503 | `link_not_ready`、`backend_busy`、`ui_unavailable`、`judge_unavailable` |
 | 504 | `ui_timeout` |
 
-机载程序与控制等级新增：403 `sticks_only`；400 `program_invalid`、`program_param_invalid`；404 `program_not_found`、`revision_not_found`；409 `program_readonly`、`program_load_failed`、`no_program`、`program_not_paused`、`programs_not_allowed`；503 `program_host_unavailable`。客户端在没有评测接口的 Relay 上另报 `judge_unavailable`（404）。
+机载程序与控制等级新增：403 `sticks_only`；400 `program_invalid`、`program_param_invalid`；404 `program_not_found`、`revision_not_found`；409 `program_readonly`、`program_load_failed`、`no_program`、`program_not_paused`、`programs_not_allowed`；503 `program_host_unavailable`。狗斗与对局新增 400 `dogfight_real_aircraft`；409 `dogfight_running`、`dogfight_not_running`、`dogfight_no_aircraft`、`match_running`。客户端在没有评测接口的 Relay 上另报 `judge_unavailable`（404）。
 
 ## 8. MCP 服务
 
@@ -464,7 +486,7 @@ Relay 提供三套基于 stdio 的 Model Context Protocol 服务（JSON-RPC 2.0�
 |---|---|---|---|
 | `anet-relay` | `mcp/anet_relay_mcp.py` | 20 个 `relay_*`（`sticks` 等级下 13 个） | 飞行：机群、认领、解锁、模式、技能、动作序列、短时杆量、再飞、穿环航线、急停 |
 | `anet-relay-device` | `mcp/anet_relay_device_mcp.py` | 36 个 `device_*` | 设备级：设备总览、MAVLink 消息、参数读写、原始指令、单电机测试、执行器、遥控覆盖、消息频率、重启、校准、home、姿态与速度控制、飞行终止、标定流程与报告 |
-| `anet-relay-app` | `mcp/anet_relay_app_mcp.py` | 42 个 `app_*` 与 19 个程序工具 | 应用控制：应用与窗口状态、手柄、语言、工作区、选择飞机、检查器、对话框、截图、扫描网络、连接与移除飞机、模拟机、设置、告警、记录与导出、再飞来源、附身、Copilot 窗口、全部急停；机载程序：`program_guide`、`program_*`、`challenge_list`、`challenge_submit`、`job_status`、`duel_run`、`ladder`、`airframe_set` |
+| `anet-relay-app` | `mcp/anet_relay_app_mcp.py` | 42 个 `app_*`、19 个程序工具与 4 个狗斗工具 | 应用控制：应用与窗口状态、手柄、语言、工作区、选择飞机、检查器、对话框、截图、扫描网络、连接与移除飞机、模拟机、设置、告警、记录与导出、再飞来源、附身、Copilot 窗口、全部急停；机载程序：`program_guide`、`program_*`、`challenge_list`、`challenge_submit`、`job_status`、`duel_run`、`ladder`、`airframe_set`；狗斗：`dogfight_start`、`dogfight_stop`、`dogfight_status`、`leaderboard` |
 
 每套服务在启动时打开一个智能体会话，名称取 `--name`（缺省分别为 `mcp`、`mcp-device`、`mcp-app`），自动续租，并在客户端断开时关闭会话；Relay 重启后，服务在下一次调用时重新打开会话，此时需要重新认领。认领属于会话：用某一套服务控制飞机时，请用同一套服务的认领工具（`relay_claim` 或 `device_claim`）。工具参数在发往 Relay 之前校验，缺少或多余的参数以 `invalid arguments` 返回。失败以 `isError: true` 的工具结果返回，并附错误码，模型可据此应对（例如遇到 `possessed_by_human` 时等待）。
 
@@ -539,6 +561,7 @@ Relay 不在 8765 端口运行时，追加 `"--base", "http://127.0.0.1:<port>"`
 | `message_interval(id, message, hz)` · `request_message(id, message)` · `reboot(id, confirm)` · `calibrate(id, sensor, confirm)` · `set_home(id, here, lat, lon, alt)` · `terminate(id, confirm)` | 消息频率、重启、校准、home、飞行终止 |
 | `procedures()` · `procedure_start(id, procedure, hover_s, skip, auto_answer)` · `procedure(id)` · `procedure_answer(id, step, answer, confirm)` · `procedure_abort(id)` · `wait_procedure(id, timeout, waiting=True)` · `test_runs(id)` · `test_run(run_id)` · `test_run_export(run_id, fmt)` | 标定流程与报告 |
 | `arena()` · `fire(id, seconds)` | 联机场地视图与模拟机扳机 |
+| `dogfight_start(aircraft, teams, roles, programs, arena, airframe, hover_assist, duration_s, respawn, seed, vehicles)` · `dogfight_stop()` · `dogfight_status()` · `leaderboard(by)` · `match_start(duration_s)` · `match_end()` | 狗斗场景、对局与排行榜（应用操作） |
 | `program_list()` · `program_get(pid)` · `program_revisions(pid)` · `program_create(name, source, description, params, tests, note, copy_of)` · `program_update(pid, source, patch, note, ...)` · `program_delete(pid)` · `program_validate(pid, source)` · `program_test(pid, rev, source, tests, seed)` | 机载程序：存储、版本、校验与单元测试 |
 | `program_deploy(id, pid, rev, params, mode, sensors, arena, seed, airframe)` · `program_stop(id)` · `program_resume(id)` · `program_params(id, **values)` · `program_status(id)` · `program_log(id, after, limit)` · `program_allow(id, allow, confirm)` | 运行中的程序（`program_allow` 需要操作员令牌） |
 | `challenge_list()` · `challenge_submit(challenge, pid, rev, wait=True)` · `job_status(job)` · `wait_job(job)` · `duel_run(pids, rounds, seed, scenario, wait=True)` · `ladder()` · `trace(id)` | 评测、对抗与排名；没有评测接口时报 `judge_unavailable` |

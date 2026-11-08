@@ -87,7 +87,7 @@ test("every scope has well-formed, uniquely named tools with a display label", (
     assert.equal(new Set(tools.map((t) => t.name)).size, tools.length, `${scope}: duplicate names`);
     for (const t of tools) {
       assert.ok(t.name && t.label && t.description && t.parameters && t.execute, t.name);
-      assert.match(t.name, /^((relay|device|app|program|challenge|job|duel|airframe)_[a-z_]+|ladder)$/);
+      assert.match(t.name, /^((relay|device|app|program|challenge|job|duel|airframe|dogfight)_[a-z_]+|ladder|leaderboard)$/);
       assert.ok(labels.includes(`${t.name}:`), `${t.name} has no entry in web/src/copilot/toolLabels.ts`);
     }
   }

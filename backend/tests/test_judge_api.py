@@ -53,7 +53,7 @@ def finish(client, job_id, timeout=120.0):
 
 def test_challenges_are_listed_and_described(client):
     listed = client.get(f"{API}/challenges").json()["challenges"]
-    assert [c["id"] for c in listed][:3] == ["liftoff", "hover", "heading"] and len(listed) == 9
+    assert [c["id"] for c in listed][:3] == ["liftoff", "hover", "heading"] and len(listed) == 10
     for c in listed:
         sj.ChallengeSummary.model_validate(c)
         assert c["best"] is None and c["attempts"] == 0

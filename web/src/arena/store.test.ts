@@ -14,6 +14,8 @@ export function arenaView(over: Partial<ArenaView> = {}): ArenaView {
     peers: [],
     shots: [],
     local: { ammo: { 'sim-1': 20 }, hp: { 'sim-1': 80 }, reloading: { 'sim-1': false }, reload: {}, down: { 'sim-1': false }, max_ammo: 24, max_hp: 100, score: { hits: 1, downs: 0, deaths: 0 } },
+    match: null,
+    board_rev: 0,
     ...over,
   }
 }

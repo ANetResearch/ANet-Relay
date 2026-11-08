@@ -183,6 +183,14 @@ TEMPLATES: dict[str, tuple[str, str]] = {
         "{vehicle} touched ring {ring} while passing it.",
         "{vehicle} 穿过第 {ring} 个环时擦碰环体。",
     ),
+    # WP-B dogfight scenario and matches (07 §3-§4); {detail} from detail_en / detail_zh
+    "dogfight_started": (
+        "Dogfight started: {aircraft} aircraft for {duration} s ({where}).",
+        "狗斗开始：{aircraft} 架飞机，{duration} s（{where_zh}）。",
+    ),
+    "dogfight_finished": ("Dogfight ended: {detail}.", "狗斗结束：{detail}。"),
+    "match_started": ("Match started for {duration} s.", "对局开始，时长 {duration} s。"),
+    "match_finished": ("Match ended: {detail}.", "对局结束：{detail}。"),
 }
 
 INPUT_LABELS = {"keyboard": ("keyboard", "键盘"), "screen": ("on-screen sticks", "屏幕摇杆")}

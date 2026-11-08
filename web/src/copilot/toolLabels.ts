@@ -40,6 +40,11 @@ export const TOOL_LABELS: Record<string, readonly [en: string, zh: string]> = {
   duel_run: ['Run duels', '运行对抗'],
   ladder: ['Ladder', '排名表'],
   airframe_set: ['Set airframe', '设置机体'],
+  // dogfight scenario and leaderboard (WP-B, 07 §3-§4)
+  dogfight_start: ['Start dogfight', '开始狗斗'],
+  dogfight_stop: ['Stop dogfight', '结束狗斗'],
+  dogfight_status: ['Dogfight status', '狗斗状态'],
+  leaderboard: ['Leaderboard', '排行榜'],
   // device
   device_overview: ['Device overview', '设备概览'],
   device_preflight: ['Preflight checks', '起飞前检查'],

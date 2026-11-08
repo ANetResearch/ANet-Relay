@@ -252,6 +252,20 @@ CATALOGUE: dict[str, tuple[int, str, str]] = {
     "judge_failed": (500, "The evaluation failed: {reason}.", "评测失败：{reason}。"),
     "judge_timeout": (504, "The evaluation took too long and was stopped.", "评测耗时过长，已停止。"),
     "judge_setup_failed": (500, "The scenario could not be set up: {reason}.", "场景无法建立：{reason}。"),
+    # WP-B dogfight scenario and matches (07 §3-§4)
+    "dogfight_real_aircraft": (
+        400,
+        "Real aircraft never take part in a dogfight: {vehicle}.",
+        "真机永不参与狗斗：{vehicle}。",
+    ),
+    "dogfight_running": (409, "A dogfight is already running.", "已有一场狗斗在进行。"),
+    "dogfight_not_running": (409, "No dogfight is running.", "当前没有进行中的狗斗。"),
+    "dogfight_no_aircraft": (
+        409,
+        "Not enough free simulators: {needed} needed, {free} free, at most {limit} in all.",
+        "可用模拟机不足：需要 {needed} 架，空闲 {free} 架，最多 {limit} 架。",
+    ),
+    "match_running": (409, "A match is already running.", "已有一局对局在进行。"),
 }
 
 

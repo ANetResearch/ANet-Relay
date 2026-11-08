@@ -24,6 +24,7 @@ from . import (
     routes_device,
     routes_fleet,
     routes_judge,
+    routes_match,  # WP-B
     routes_procedures,
     routes_programs,
     routes_records,
@@ -126,5 +127,6 @@ def create_app(
     app.include_router(routes_arena.router, prefix=API_PREFIX)  # WP-D: LAN arena
     app.include_router(routes_programs.router, prefix=API_PREFIX)  # WP-1: onboard programs
     app.include_router(routes_judge.router, prefix=API_PREFIX)  # WP-2b: challenges, duels, jobs, traces
+    app.include_router(routes_match.router, prefix=API_PREFIX)  # WP-B: dogfight, match, leaderboard
     app.include_router(stream.router, prefix=API_PREFIX)
     return app

@@ -1,7 +1,7 @@
-# Arena hunter, medium level: search -> approach -> shoot -> evade, as a state machine over the contacts.
+# Arena hunter, medium level: search -> approach -> shoot -> evade / dodge, a state machine over contacts.
 # Height is held on the barometer and matched to the target's; the gun points along the nose, so the
 # hunter levels out and lines up the heading before it fires.
-# Medium: quicker, leads half the target's motion, evades briefly after a hit.
+# Medium: quicker, leads half the target's motion, evades briefly after a hit and side-steps a head-on run.
 
 import math
 
@@ -18,6 +18,10 @@ PARAMS = {
     "fire_dist": 7.0,
     "aim_deg": 4.0,
     "lead": 0.5,
+    "dodge_s": 0.7,
+    "threat_dist": 3.0,
+    "threat_closing": 2.0,
+    "team": "",
     "evade_s": 0.8,
 }
 
@@ -26,6 +30,8 @@ def init(ctx):
     ctx.mem["trim"] = 0.5
     ctx.mem["hp"] = None
     ctx.mem["seen"] = None
+    ctx.mem["dodge_side"] = 1.0
+    ctx.mem["dodge_end"] = -10.0
     ctx.state = "search"
 
 
@@ -34,6 +40,8 @@ def target(obs, ctx):
     best = None
     for c in obs.contacts or ():
         if c.hp == 0 or c.dist is None:
+            continue
+        if ctx.params["team"] and c.team == ctx.params["team"]:
             continue
         if best is None or c.dist < best.dist:
             best = c
@@ -57,6 +65,46 @@ def aim_error(c, ctx):
     return math.degrees(math.atan2(right, max(0.1, c.rel[0])))
 
 
+def threat(obs, ctx):
+    """A contact coming straight at this aircraft (close, closing fast, on a near-collision line), or None."""
+    p = ctx.params
+    if p["dodge_s"] <= 0 or ctx.t - ctx.mem["dodge_end"] < 1.0:
+        return None
+    for c in obs.contacts or ():
+        if c.hp == 0 or c.dist is None or c.rel is None or c.vrel is None or c.dist > p["threat_dist"]:
+            continue
+        if p["team"] and c.team == p["team"]:
+            continue
+        closing = c.get("closing")
+        if closing is None:
+            closing = -(c.rel[0] * c.vrel[0] + c.rel[1] * c.vrel[1] + c.rel[2] * c.vrel[2]) / max(0.1, c.dist)
+        speed = math.hypot(c.vrel[0], c.vrel[1])
+        if closing < p["threat_closing"] or speed < 0.1:
+            continue
+        cross = c.rel[0] * c.vrel[1] - c.rel[1] * c.vrel[0]
+        if abs(cross) / speed < 0.8:
+            # step away from the way the line of sight turns (either way when it does not turn)
+            ctx.mem["dodge_side"] = -1.0 if cross > 0.05 else 1.0 if cross < -0.05 else ctx.mem["dodge_side"]
+            return c
+    return None
+
+
+def dodge(obs, ctx):
+    thr = altitude(obs, ctx, obs.alt)
+    if Timer.done(ctx, "dodge", ctx.params["dodge_s"]):
+        ctx.mem["dodge_end"] = ctx.t
+        return Sticks(throttle=thr), "approach"
+    return Sticks(roll=0.7 * ctx.mem["dodge_side"], throttle=thr), None
+
+
+def dodging(obs, ctx):
+    """Side-step when targeted: (Sticks, "dodge") or None."""
+    if threat(obs, ctx) is None:
+        return None
+    Timer.start(ctx, "dodge")
+    return Sticks(roll=0.7 * ctx.mem["dodge_side"], throttle=altitude(obs, ctx, obs.alt)), "dodge"
+
+
 def hit_taken(obs, ctx):
     hp = obs.hp
     before = ctx.mem["hp"]
@@ -65,6 +113,9 @@ def hit_taken(obs, ctx):
 
 
 def search(obs, ctx):
+    side = dodging(obs, ctx)
+    if side is not None:
+        return side
     thr = altitude(obs, ctx, ctx.params["target_alt"])
     c = target(obs, ctx)
     if c is not None:
@@ -78,6 +129,9 @@ def search(obs, ctx):
 
 
 def approach(obs, ctx):
+    side = dodging(obs, ctx)
+    if side is not None:
+        return side
     c = target(obs, ctx)
     if c is None:
         return Sticks(throttle=altitude(obs, ctx, ctx.params["target_alt"])), "search"
@@ -97,6 +151,9 @@ def approach(obs, ctx):
 
 
 def shoot(obs, ctx):
+    side = dodging(obs, ctx)
+    if side is not None:
+        return side
     c = target(obs, ctx)
     if c is None:
         return Sticks(throttle=altitude(obs, ctx, ctx.params["target_alt"])), "search"
@@ -122,7 +179,7 @@ def evade(obs, ctx):
 
 
 sm = StateMachine("search")
-sm.add("search", search).add("approach", approach).add("shoot", shoot).add("evade", evade)
+sm.add("search", search).add("approach", approach).add("shoot", shoot).add("evade", evade).add("dodge", dodge)
 
 
 def step(obs, ctx):
