@@ -1,8 +1,7 @@
-"""Collisions with peers' aircraft (07 §2, WP-B): remote spheres in the local frame, the swept test without
-WP-A's collision world, COLLIDE out and in with its checks (forged, stale, far, rate), the reply and ram
-credit, and 0.4 peers that never collide."""
+"""Collisions with peers' aircraft (07 §2, WP-B): remote spheres in the local frame, swept by WP-A's collision
+world, COLLIDE out and in with its checks (forged, stale, far, rate), the reply and ram credit, and 0.4 peers
+that never collide."""
 
-import math
 from typing import ClassVar
 
 import pytest
@@ -103,7 +102,7 @@ def test_a_fast_remote_aircraft_crashes_ours_and_the_peer_hears_about_it(svc, st
         q = (start[0] + 0.15 * k, start[1], start[2])
         feed(svc, peers, state(1 + k, 1000 + 50 * k, [peer_aircraft(q, (3.0, 0.0, 0.0))]))
     stepper.run(0.05, [session])
-    assert v.driver.sim.quad.s.crashed and v.driver.sim.quad.s.crash_reason == "collision"
+    assert v.driver.sim.quad.s.crashed and v.driver.sim.quad.s.crash_code == "collision"
     (c,) = sent["collide"]
     assert c.to_instance == PEER and c.target == 1 and c.own == 1 and c.crashed and not c.reply
     assert c.closing >= 2.0
@@ -153,7 +152,7 @@ def _peer_near(svc, stepper, peers, session, offset=(0.3, 0.0, 0.0), velocity=(-
 
 def test_received_collides_are_checked_before_they_touch_our_aircraft(svc, stepper, lan, monkeypatch):
     peers, sent, session = lan
-    monkeypatch.setattr(svc.arena.collisions, "_sweep", lambda sims, now: None)  # only COLLIDE in this test
+    monkeypatch.setattr(svc.world, "_externals", lambda *a: None)  # only COLLIDE in this test
     _peer_near(svc, stepper, peers, session, offset=(2.0, 0.0, 0.0))  # 2 m away: not a contact
     counters = svc.arena.collisions.counters
     feed(svc, peers, wire.encode_collide(2, PEER, 1000, collide(svc, own=4)))  # Bravo does not fly SIM-4
@@ -166,7 +165,7 @@ def test_received_collides_are_checked_before_they_touch_our_aircraft(svc, stepp
 
 def test_an_accepted_collide_applies_the_rule_replies_and_credits_the_ram(svc, stepper, lan, monkeypatch):
     peers, sent, session = lan
-    monkeypatch.setattr(svc.arena.collisions, "_sweep", lambda sims, now: None)
+    monkeypatch.setattr(svc.world, "_externals", lambda *a: None)
     _peer_near(svc, stepper, peers, session)
     v = svc.vehicles["sim-1"]
     seat_v = frame.vec_to_arena(0, (-2.5, 0.0, 0.0))
@@ -178,7 +177,8 @@ def test_an_accepted_collide_applies_the_rule_replies_and_credits_the_ram(svc, s
     )
     stepper.run(0.02, [session])
     s = v.driver.sim.quad.s
-    assert s.crashed and s.crash_reason == "collision"  # 2.5 m/s closing: at the crash threshold or above
+    assert s.crashed and s.crash_code == "collision"  # 2.5 m/s closing: at the crash threshold or above
+    assert s.crash_reason == "collision with Bravo / SIM-1"
     (reply,) = sent["collide"]
     assert (
         reply.reply and reply.crashed and reply.to_instance == PEER and reply.own == 1 and reply.target == 1
@@ -206,8 +206,8 @@ def test_an_accepted_collide_applies_the_rule_replies_and_credits_the_ram(svc, s
 
 def test_collides_are_rate_limited_per_peer_aircraft(svc, stepper, lan, monkeypatch):
     peers, _sent, session = lan
-    monkeypatch.setattr(svc.arena.collisions, "_sweep", lambda sims, now: None)
-    monkeypatch.setattr(col, "apply_contact", lambda *a: None)  # keep our aircraft flying through the burst
+    monkeypatch.setattr(svc.world, "_externals", lambda *a: None)
+    monkeypatch.setattr(svc.world, "apply_contact", lambda *a: None)  # our aircraft flies through the burst
     _peer_near(svc, stepper, peers, session)
     for k in range(8):
         feed(svc, peers, wire.encode_collide(10 + k, PEER, 1000, collide(svc, contact=100 + k)))
@@ -256,31 +256,15 @@ def test_wp_a_world_takes_the_bodies_and_reports_contacts(svc, stepper, lan):
         del svc.world
 
 
-def test_fallback_functions_follow_the_seam():
-    collide = col.collide
+def test_the_shared_collision_rules_are_used():
+    from relay.sim import collide, world
+
+    assert col.collide is collide and col.ExternalBody is world.ExternalBody
     assert (collide.CRAFT_RADIUS, collide.RING_TUBE, collide.RAM_CRASH_V, collide.RESTITUTION) == (
         0.15,
         0.03,
         2.0,
         0.4,
     )
-    t = collide.sweep_spheres((-1.0, 0, 0), (1.0, 0, 0), (0, 0, 0), (0, 0, 0), 0.3)
-    assert t == pytest.approx(0.35)
-    assert collide.sweep_spheres((-1.0, 1.0, 0), (1.0, 1.0, 0), (0, 0, 0), (0, 0, 0), 0.3) is None
-    assert collide.sweep_spheres((0.1, 0, 0), (0.2, 0, 0), (0, 0, 0), (0, 0, 0), 0.3) == 0.0
-    # a sphere crossing the tube of a vertical ring facing north
-    hit = collide.sweep_torus(
-        (0.5, -1.0, 1.0), (0.5, 1.0, 1.0), (0.0, 0.0, 1.0), (0.0, 1.0, 0.0), 0.5, 0.03, 0.15
-    )
-    assert hit is not None and 0.0 < hit[0] < 0.5 and hit[2][1] == pytest.approx(-1.0, abs=0.05)
-    assert (
-        collide.sweep_torus(
-            (0.0, -1.0, 1.0), (0.0, 1.0, 1.0), (0.0, 0.0, 1.0), (0.0, 1.0, 0.0), 0.5, 0.03, 0.15
-        )
-        is None
-    )
-    dva, dvb, closing = collide.response((2.0, 0, 0), (0, 0, 0), (-1.0, 0, 0), 1.0, 1.0)
-    assert closing == pytest.approx(2.0) and dva[0] == pytest.approx(-1.4) and dvb[0] == pytest.approx(1.4)
-    assert collide.response((-2.0, 0, 0), (0, 0, 0), (-1.0, 0, 0), 1.0, 1.0)[2] == 0.0
-    kick = col.rate_kick((0.0, 0.15, 0.0), (1.0, 0.0, 0.0), 0.0)
-    assert all(math.isfinite(k) and abs(k) <= col.KICK_MAX for k in kick) and any(abs(k) > 0 for k in kick)
+    with pytest.raises(ImportError):
+        __import__("relay.peers.collide_fallback")

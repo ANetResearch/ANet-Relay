@@ -63,11 +63,13 @@ class WorldOps:
 
     def _emit_collision(self, report: dict[str, Any]) -> None:
         data = {k: report[k] for k in ("a", "b", "b_label", "point", "v_rel", "crashed", "kind")}
+        if report.get("remote"):
+            data["remote"] = True  # a peer's aircraft (WP-B); its ram is credited through COLLIDE
         crashed_en = " Both aircraft crashed." if len(report["crashed"]) > 1 else ""
         crashed_zh = "两机均坠毁。" if len(report["crashed"]) > 1 else ""
         if len(report["crashed"]) == 1:
             crashed_en, crashed_zh = " The aircraft crashed.", "飞机坠毁。"
-        other_zh = report["b_label"]
+        other_zh = f" {report['b_label']} "  # a Latin label is set off by spaces in Chinese text
         if report["kind"] == "ring":
             other_zh = f"第 {report['b'].split(':', 1)[-1]} 个环"
         self.events.emit(  # type: ignore[attr-defined]
@@ -91,6 +93,6 @@ class WorldOps:
         reason = s.crash_reason or ""
         if s.crash_code == "collision" and reason.startswith(COLLISION_PREFIX):
             other = reason[len(COLLISION_PREFIX) :]
-            other_zh = f"第 {other[5:]} 个环" if other.startswith("ring ") else other
+            other_zh = f"第 {other[5:]} 个环" if other.startswith("ring ") else f" {other} "
             detail_en, detail_zh = f": collided with {other}", f"：与{other_zh}相撞"
         return {"reason_code": s.crash_code, "point": point, "detail_en": detail_en, "detail_zh": detail_zh}

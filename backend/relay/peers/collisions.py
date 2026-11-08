@@ -5,12 +5,10 @@ version 2 peers become moving spheres in this terminal's local frame: from the p
 latest STATE position carried forward by its age (at most ``LEAD_MAX_S``, the 0.15 s lead of the view). A
 0.4 peer's aircraft never collide: it would not hear about it.
 
-Detection: when WP-A's collision world is on the fleet (``fleet.world`` with ``external`` and
-``on_external_contact``), the arena fills ``world.external`` every tick and the world sweeps them at 250 Hz
-with the local aircraft, applies the contact to the local aircraft and calls ``on_contact``. Without it this
-module sweeps once per fleet tick itself (``relay.sim.collide`` functions, or the stand-in
-``collide_fallback`` on a tree without WP-A's module) and applies the same rule through ``Quad.collide`` (or
-``Quad.impulse`` and ``SimAutopilot.shoot_down`` on the pre-v0.5 flight model).
+Detection is WP-A's collision world (``fleet.world``): the arena replaces ``world.external`` every tick and
+the world sweeps the remote spheres at 250 Hz with the local aircraft, applies the contact to the local
+aircraft (``World.apply_contact``), reports it as a ``collision`` event and calls ``on_contact``, which sends
+the COLLIDE. All volumes and rules are ``relay.sim.collide``.
 
 The rule (07 §2): equal masses, restitution ``RESTITUTION``; a closing speed of ``RAM_CRASH_V`` or more
 crashes the aircraft (``crash_reason = "collision"``), below it the aircraft bounces and its attitude is
@@ -31,31 +29,13 @@ from __future__ import annotations
 
 import math
 from collections import OrderedDict
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from ..sim import collide
+from ..sim.physics import MASS
+from ..sim.world import Body, ExternalBody
 from . import arena as frame
 from . import wire
-
-try:  # WP-A (07 §2): the shared collision functions
-    from ..sim import collide
-except ImportError:  # a tree without WP-A's module: the stand-in with the same seam
-    from . import collide_fallback as collide  # type: ignore[no-redef]
-
-try:  # WP-A: the fleet thread's collision world and its external body record
-    from ..sim.world import ExternalBody  # type: ignore[import-not-found]
-except ImportError:
-
-    @dataclass
-    class ExternalBody:  # type: ignore[no-redef]
-        """A peer's aircraft as a moving sphere in the local frame across one fleet tick."""
-
-        key: str
-        p0: tuple[float, float, float]
-        p1: tuple[float, float, float]
-        v: tuple[float, float, float]
-        label: str
-
 
 if TYPE_CHECKING:
     from .game import Arena
@@ -68,9 +48,6 @@ COLLIDE_RATE = 4.0  # COLLIDE packets per peer aircraft and second (burst of the
 PAIR_COOLDOWN_S = 0.5
 STATE_REACH_S = 0.5  # how far a peer's last STATE is carried forward for the check
 CONTACTS_SEEN = 512
-KICK_GAIN = 0.3
-KICK_MAX = 8.0  # rad/s
-CRASH_REASON = "collision"
 
 Vec3 = tuple[float, float, float]
 
@@ -86,49 +63,11 @@ def _unit(d: Vec3) -> Vec3 | None:
     return (d[0] / n, d[1] / n, d[2] / n)
 
 
-def rate_kick(offset: Vec3, dv: Vec3, heading: float) -> Vec3:
-    """Body-rate disturbance (roll, pitch, yaw rate in rad/s) of a push ``dv`` at ``offset`` from centre."""
-    w = (
-        offset[1] * dv[2] - offset[2] * dv[1],
-        offset[2] * dv[0] - offset[0] * dv[2],
-        offset[0] * dv[1] - offset[1] * dv[0],
-    )
-    scale = KICK_GAIN / (collide.CRAFT_RADIUS * collide.CRAFT_RADIUS)
-    fx, fy = math.sin(heading), math.cos(heading)  # nose (ENU)
-    rx, ry = math.cos(heading), -math.sin(heading)  # right wing
-    out = (
-        (w[0] * fx + w[1] * fy) * scale,
-        (w[0] * rx + w[1] * ry) * scale,
-        -w[2] * scale,
-    )
-    return tuple(max(-KICK_MAX, min(KICK_MAX, c)) for c in out)  # type: ignore[return-value]
-
-
-def apply_contact(sim: Any, dv: Vec3, kick: Vec3, crash: bool) -> None:
-    """Hand a contact to the flight model: ``Quad.collide`` (WP-A), else impulse and shoot-down (v0.4)."""
-    quad = sim.quad
-    fn = getattr(quad, "collide", None)
-    if fn is not None:
-        fn(dv, kick, CRASH_REASON if crash else None)
-        return
-    quad.impulse(dv, (kick[0] * 0.05, kick[1] * 0.05))
-    if crash:
-        sim.shoot_down(CRASH_REASON)
-
-
-@dataclass
-class _Pending:
-    vid: str
-    key: str
-    at: float
-
-
 class LanCollisions:
     def __init__(self, arena: Arena) -> None:
         self.arena = arena
         self.external: dict[str, ExternalBody] = {}
         self._last: dict[str, Vec3] = {}  # key -> previous tick's local position
-        self._prev_local: dict[str, Vec3] = {}  # local vid -> previous tick's position (own sweep)
         self._pairs: dict[tuple[str, str], float] = {}  # (local vid, remote key) -> applied at
         self._seen: OrderedDict[tuple[int, int], bool] = OrderedDict()  # (peer, contact) -> credited
         self._rate: dict[tuple[int, int], tuple[float, float]] = {}
@@ -167,17 +106,17 @@ class LanCollisions:
     # ------------------------------------------------------------------ the tick
 
     def tick(self, sims: dict[str, Any], now: float) -> None:
+        """Hand this tick's remote spheres to the world, which sweeps them during the next fleet step."""
         self.external = self._bodies(now)
         for pair in [p for p, t in self._pairs.items() if now - t > PAIR_COOLDOWN_S]:
             del self._pairs[pair]
         world = self._world()
-        if world is not None:
-            world.external = self.external
-            if self._hooked is not world:
-                world.on_external_contact = self.on_contact
-                self._hooked = world
+        if world is None:
             return
-        self._sweep(sims, now)
+        world.external = self.external
+        if self._hooked is not world:
+            world.on_external_contact = self.on_contact
+            self._hooked = world
 
     def _bodies(self, now: float) -> dict[str, ExternalBody]:
         arena, peers = self.arena, self.arena.peers
@@ -201,49 +140,11 @@ class LanCollisions:
         self._last = {k: b.p1 for k, b in out.items()}
         return out
 
-    def _sweep(self, sims: dict[str, Any], now: float) -> None:
-        """Without WP-A's world: one swept test per fleet tick between local aircraft and remote spheres."""
-        positions: dict[str, Vec3] = {}
-        for vid, v in sims.items():
-            s = v.driver.sim.quad.s
-            ox, oy, oz = v.frame_offset
-            positions[vid] = (s.p[0] + ox, s.p[1] + oy, s.p[2] + oz)
-        if self.external:
-            reach = 2.0 * collide.CRAFT_RADIUS
-            for vid, a1 in positions.items():
-                v = sims[vid]
-                s = v.driver.sim.quad.s
-                if s.crashed and s.on_ground:
-                    continue
-                a0 = self._prev_local.get(vid, a1)
-                for key, body in self.external.items():
-                    if (vid, key) in self._pairs:
-                        continue
-                    if math.dist(a1, body.p1) > reach + math.dist(a0, a1) + math.dist(body.p0, body.p1) + 0.5:
-                        continue
-                    t = collide.sweep_spheres(a0, a1, body.p0, body.p1, reach)
-                    if t is None:
-                        continue
-                    ca = tuple(a0[i] + (a1[i] - a0[i]) * t for i in range(3))
-                    cb = tuple(body.p0[i] + (body.p1[i] - body.p0[i]) * t for i in range(3))
-                    n = _unit(_sub(ca, cb))
-                    if n is None:
-                        continue
-                    dv, _dvb, closing = collide.response(tuple(s.v), body.v, n, 1.0, 1.0)
-                    if closing <= 0.0:
-                        continue
-                    crash = closing >= collide.RAM_CRASH_V
-                    point = tuple(cb[i] + n[i] * collide.CRAFT_RADIUS for i in range(3))
-                    offset = _sub(point, ca)
-                    apply_contact(v.driver.sim, dv, rate_kick(offset, dv, s.yaw), crash)
-                    self.on_contact(key, vid, point, closing, crash)
-        self._prev_local = positions
-
     # ------------------------------------------------------------------ contacts
 
     def on_contact(self, key: str, local_vid: str, point: Any, v_rel: float, crashed: bool) -> None:
-        """A contact between a local aircraft and a peer's, already applied to the local one (WP-A's hook
-        ``World.on_external_contact`` or this module's own sweep): tell the peer and the event log."""
+        """A contact between a local aircraft and a peer's, already applied to the local one and reported as a
+        ``collision`` event by the collision world (``World.on_external_contact``): tell the peer."""
         now = self.fleet.clock()
         pair = (local_vid, key)
         if pair in self._pairs:
@@ -255,7 +156,6 @@ class LanCollisions:
             return
         self.counters["applied"] += 1
         self._send(peer, index, v, point, v_rel, crashed, reply=False, now=now)
-        self._emit(local_vid, v, key, point, v_rel, crashed)
 
     def _peer_of(self, key: str) -> tuple[Peer | None, int | None]:
         peers = self.arena.peers
@@ -303,25 +203,20 @@ class LanCollisions:
         )
         self.counters["sent"] += 1
 
-    def _emit(self, vid: str, v: Any, key: str, point: Any, v_rel: float, crashed: bool) -> None:
-        body = self.external.get(key)
-        label = body.label if body is not None else key
-        self.fleet.events.emit(
-            "collision",
-            vid,
-            data={
+    def _emit(self, vid: str, v: Any, key: str, label: str, point: Any, v_rel: float, crashed: bool) -> None:
+        """A verified COLLIDE applied here: the same ``collision`` event as a contact the world found."""
+        self.fleet._emit_collision(
+            {
                 "a": vid,
+                "a_label": v.label,
                 "b": key,
                 "b_label": label,
                 "point": [round(float(c), 3) for c in point],
-                "v_rel": round(float(v_rel), 2),
+                "v_rel": round(float(v_rel), 3),
                 "crashed": [vid] if crashed else [],
                 "kind": "craft",
                 "remote": True,
-                "detail_en": f"collided with {label} at {v_rel:.1f} m/s",
-                "detail_zh": f"与 {label} 相撞，相对速度 {v_rel:.1f} m/s",
-            },
-            labels={"vehicle": v.label},
+            }
         )
 
     # ------------------------------------------------------------------ COLLIDE from a peer
@@ -373,17 +268,24 @@ class LanCollisions:
         self._pairs[(vid, key)] = now
         if s.crashed and s.on_ground:
             return
+        world = self._world()
+        if world is None:
+            return
         v_theirs = frame.vec_from_arena(arena.seat, c.v)
         n = _unit(_sub(mine, theirs)) or _unit(_sub(tuple(s.v), v_theirs)) or (0.0, 0.0, 1.0)
-        dv, _dvb, closing = collide.response(tuple(s.v), v_theirs, n, 1.0, 1.0)
-        crash = closing >= collide.RAM_CRASH_V
+        mass = world._mass(v.driver.sim)
+        dv, _dvb, closing = collide.response(tuple(s.v), v_theirs, n, mass, MASS)  # as the world does
+        crash = collide.crashes(closing)
+        crashed = crash and not s.crashed
         point = frame.from_arena(arena.seat, c.point)
-        here = (s.p[0] + ox, s.p[1] + oy, s.p[2] + oz)
-        apply_contact(v.driver.sim, dv, rate_kick(_sub(point, here), dv, s.yaw), crash)
+        body = self.external.get(key)
+        label = body.label if body is not None else f"{peer.callsign} / SIM-{c.own}"
+        here = Body(vid, v.label, v.driver.sim, tuple(v.frame_offset))
+        world.apply_contact(here, dv, n, point, closing, key, label, crash, now)
         self.counters["applied"] += 1
         if not c.reply:
-            self._send(peer, c.own, v, point, closing, crash, reply=True, now=now, at=tc)
-        self._emit(vid, v, key, point, closing, crash)
+            self._send(peer, c.own, v, point, closing, crashed, reply=True, now=now, at=tc)
+        self._emit(vid, v, key, label, point, closing, crashed)
 
 
 def _sim_index(vid: str) -> int | None:
@@ -396,4 +298,4 @@ def _sim_index(vid: str) -> int | None:
     return n if 1 <= n <= wire.MAX_AIRCRAFT else None
 
 
-__all__ = ["ExternalBody", "LanCollisions", "apply_contact", "rate_kick"]
+__all__ = ["ExternalBody", "LanCollisions"]

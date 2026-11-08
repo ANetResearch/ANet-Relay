@@ -169,7 +169,7 @@ def test_fleet_collision_events_crash_details_and_obs(svc, stepper):
     assert crashed and crashed[0]["data"]["reason_code"] == "collision"
     point = crashed[0]["data"]["point"]
     assert math.hypot(point[0] - v1.frame_offset[0], point[1]) < 0.2 and point[2] < 0.5
-    assert "collided with SIM-2" in crashed[0]["text_en"] and "与SIM-2相撞" in crashed[0]["text_zh"]
+    assert "collided with SIM-2" in crashed[0]["text_en"] and "与 SIM-2 相撞" in crashed[0]["text_zh"]
     obs = ObsBuilder(1).build(svc, v1, svc.clock())
     assert obs["collision"] is not None and obs["collision"]["with"] == v2.id
     assert obs["collision"]["normal"][2] < -0.5  # pushed down, from above

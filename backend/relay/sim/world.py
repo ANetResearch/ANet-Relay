@@ -179,6 +179,7 @@ class World:
         crashed: list[str],
         kind: str,
         t: float,
+        remote: bool = False,
     ) -> None:
         if closing < REPORT_V and not crashed:
             return
@@ -197,6 +198,7 @@ class World:
                 "v_rel": round(closing, 3),
                 "crashed": crashed,
                 "kind": kind,
+                **({"remote": True} if remote else {}),
             }
         )
 
@@ -292,9 +294,9 @@ class World:
                 point = tuple(cb[c] + n[c] * collide.CRAFT_RADIUS for c in range(3))
                 crashed = [body.id] if crash and not s.crashed else []
                 self.apply_contact(body, dv, n, point, closing, e.key, e.label, crash, t)  # type: ignore[arg-type]
-                self._report(reports, body, e.key, e.label, point, closing, crashed, "craft", t)  # type: ignore[arg-type]
-                if self.on_external_contact is not None:
-                    self.on_external_contact(e.key, body.id, point, closing, crash)  # type: ignore[arg-type]
+                self._report(reports, body, e.key, e.label, point, closing, crashed, "craft", t, remote=True)  # type: ignore[arg-type]
+                if self.on_external_contact is not None:  # crashed: this contact wrecked ours (ram credit)
+                    self.on_external_contact(e.key, body.id, point, closing, bool(crashed))  # type: ignore[arg-type]
 
 
 def _unit(v: Vec3) -> Vec3 | None:
