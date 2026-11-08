@@ -38,6 +38,27 @@ class DogfightArena(_Body):
     ceiling: float = Field(default=4.0, ge=2.0, le=10.0, description="m above the ground")
 
 
+class DogfightEntrant(_Body):
+    """One aircraft of a custom fight (08 §5)."""
+
+    role: Literal["gunner", "rammer", "pilot"] = Field(
+        default="gunner",
+        description="gunner fires, rammer rams, pilot flies its own program; only gunners fire",
+    )
+    program: str | None = Field(
+        default=None, description="program id; required for a pilot, else the role's default"
+    )
+    team: str | None = Field(
+        default=None, max_length=16, description="team name; default the aircraft's own id"
+    )
+    position: Literal["none", "uwb", "gps"] = Field(
+        default="none",
+        description="position source of the program (obs.pos, obs.vel); gps is the global status",
+    )
+    params: dict[str, object] | None = Field(default=None, description="program parameters")
+    label: str | None = Field(default=None, max_length=16, description="a name for this aircraft, e.g. A")
+
+
 class DogfightBody(_Body):
     """``POST /scenarios/dogfight`` (07 §3). Simulators only; real aircraft never take part."""
 
@@ -58,6 +79,15 @@ class DogfightBody(_Body):
     vehicles: list[str] | None = Field(
         default=None, description="simulators to use first (sim-N); a real aircraft id is refused with 400"
     )
+    entrants: list[DogfightEntrant] | None = Field(
+        default=None,
+        min_length=2,
+        max_length=12,
+        description=(
+            "08 §5: one entry per aircraft (role, program, team, position, params, label); "
+            "replaces aircraft, roles and teams"
+        ),
+    )
 
 
 class MatchBody(_Body):
@@ -69,15 +99,17 @@ class MatchBody(_Body):
 
 class DogfightAircraft(_Model):
     vid: str
-    role: Literal["gunner", "rammer"]
+    role: Literal["gunner", "rammer", "pilot"]
     program: str
     team: str
+    position: Literal["none", "uwb", "gps"] = "none"
+    label: str = ""
     state: str = Field(description="booting | arming | deploying | flying | human | down | stopped | failed")
 
 
 class DogfightConfig(_Model):
     aircraft: int
-    teams: Literal["ffa", 2, 3]
+    teams: Literal["ffa", 2, 3, "custom"]
     roles: dict[str, int]
     programs: dict[str, str]
     arena: dict[str, float]
@@ -87,6 +119,9 @@ class DogfightConfig(_Model):
     respawn: bool
     seed: int
     lan: bool = Field(description="on the LAN (the match is shared) or local practice")
+    entrants: list[dict[str, object]] | None = Field(
+        default=None, description="08 §5: the custom entries, filled in"
+    )
 
 
 class DogfightView(_Model):

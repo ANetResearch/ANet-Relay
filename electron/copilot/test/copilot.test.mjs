@@ -8,7 +8,7 @@ import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@ear
 
 import fs from "node:fs";
 
-import { createCopilot, RelayHttp, relayTools, systemPrompt, toolsFor } from "../agent.mjs";
+import { buildModels, createCopilot, createTracer, RelayHttp, relayTools, systemPrompt, toolsFor } from "../agent.mjs";
 import { confirmFor, dangerResolver } from "../tools-device.mjs";
 import { DEFAULT_HEIGHT, DEFAULT_WIDTH, defaultBounds, fitBounds, MIN_HEIGHT, MIN_WIDTH } from "../window-bounds.mjs";
 
@@ -386,4 +386,67 @@ test("possession blocks copilot and it reports why", { skip: !OPERATOR }, async 
     await operator("POST", "/vehicles/sim-1/release");
     await relay.close();
   }
+});
+
+/** Manual timers for the tracer: flush() runs the pending thinking batch. */
+function manualTimers() {
+  let fn = null;
+  return { timers: { setTimeout: (f) => ((fn = f), 1), clearTimeout: () => (fn = null) }, flush: () => fn?.() };
+}
+
+test("run trace (08 §3): runs, turns, batched thinking, drafts, usage and outcome", () => {
+  const out = [];
+  let clock = 1000;
+  const mt = manualTimers();
+  const tr = createTracer((e) => out.push(e), { model: "deepseek-flash", thinking: "auto", now: () => clock, timers: mt.timers });
+  const assistant = (content, stopReason, usage) => ({ role: "assistant", content, stopReason, usage });
+  tr.handle({ type: "agent_start" });
+  tr.handle({ type: "message_start", message: { role: "user" } });
+  tr.handle({ type: "message_start", message: { role: "assistant" } });
+  tr.handle({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "Pilot " } });
+  tr.handle({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "needs gps." } });
+  mt.flush();
+  const call = { type: "toolCall", id: "c1", name: "dogfight_start", arguments: {}, partialArgs: '{"entr' };
+  tr.handle({ type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 0, partial: { content: [call] } } });
+  clock += 4000;
+  const usage = { input: 1200, output: 300, cacheRead: 100, cacheWrite: 0, reasoning: 250, totalTokens: 1600 };
+  tr.handle({ type: "message_end", message: assistant([{ type: "thinking", thinking: "Pilot needs gps." }, { ...call, arguments: { entrants: [] } }], "toolUse", usage) });
+  tr.handle({ type: "tool_execution_start", toolCallId: "c1", toolName: "dogfight_start", args: { entrants: [] } });
+  clock += 900;
+  tr.handle({ type: "tool_execution_end", toolCallId: "c1", toolName: "dogfight_start", result: { content: [{ type: "text", text: "x".repeat(20000) }] }, isError: false });
+  tr.handle({ type: "message_start", message: { role: "assistant" } });
+  tr.handle({ type: "message_end", message: assistant([], "length", usage) });
+  tr.handle({ type: "agent_end" });
+
+  const types = out.map((e) => e.type);
+  assert.deepEqual(types, ["run_start", "busy", "assistant_start", "turn_start", "thinking", "draft", "assistant_end", "tool_start", "tool_end", "assistant_start", "turn_start", "assistant_end", "run_end", "busy"]);
+  const [start] = out;
+  assert.deepEqual([start.model, start.thinking, start.at], ["deepseek-flash", "auto", 1000]);
+  assert.equal(out.find((e) => e.type === "thinking").delta, "Pilot needs gps.");
+  assert.deepEqual(out.find((e) => e.type === "draft"), { type: "draft", run: start.run, turn: 1, tool: "dogfight_start", chars: 6 });
+  const end1 = out.find((e) => e.type === "assistant_end");
+  assert.equal(end1.stopReason, "toolUse");
+  assert.equal(end1.ms, 4000);
+  assert.equal(end1.usage.reasoning, 250);
+  assert.equal(end1.toolCalls[0].name, "dogfight_start");
+  assert.equal(end1.empty, false);
+  const toolEnd = out.find((e) => e.type === "tool_end");
+  assert.equal(toolEnd.ms, 900);
+  assert.equal(toolEnd.text.length, 600);
+  assert.ok(toolEnd.full.length <= 12001);
+  const end2 = out.filter((e) => e.type === "assistant_end")[1];
+  assert.deepEqual([end2.turn, end2.stopReason, end2.empty], [2, "length", true]);
+  const runEnd = out.find((e) => e.type === "run_end");
+  assert.deepEqual([runEnd.turns, runEnd.tools, runEnd.outcome], [2, 1, "length"]);
+  assert.equal(runEnd.usage.output, 600);
+  assert.equal(out.at(-1).busy, false);
+});
+
+test("thinking setting (08 §2): auto leaves the model non-reasoning, any level declares it", () => {
+  const cfg = { api: "openai-completions", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-flash" };
+  const auto = buildModels(cfg, "k");
+  assert.deepEqual([auto.thinking, auto.model.reasoning, auto.model.maxTokens], ["auto", false, 16384]);
+  const off = buildModels({ ...cfg, thinking: "off", maxTokens: 999999 }, "k");
+  assert.deepEqual([off.thinking, off.model.reasoning, off.model.maxTokens], ["off", true, 131072]);
+  assert.equal(buildModels({ ...cfg, thinking: "bogus" }, "k").thinking, "auto");
 });

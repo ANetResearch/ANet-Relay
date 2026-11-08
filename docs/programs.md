@@ -164,6 +164,7 @@ Observation fields left out hover level at 1 m. Optional: `mem`, `state` (the st
 | `liftoff` | Take-off by throttle search |
 | `patrol` | Timed-turn patrol without a position source |
 | `hunter_easy` / `hunter_medium` / `hunter_hard` | Arena hunters at three levels: search → approach → fire → evade, with a dodge when a contact closes fast (`dodge_s`, `threat_dist`, `threat_closing`) |
+| `figure8_evader` | Fly a figure eight around the arena centre on a position source (lemniscate of Gerono, velocity feed-forward plus position correction), hold and weave the height on the barometer, and evade first: a contact of another team closing faster than `threat_closing` inside `threat_dist` triggers a sideways dodge toward the centre with a height change; never fires |
 | `rammer` | Ram an opponent, never fire: climb → search → pursue (proportional navigation on the nearest contact, weaving across the line of sight so that a gunner without lead misses) → ram (full push inside `ram_dist`) → recover after `obs.collision` reports the contact |
 
 Examples are read only; duplicate one to change it.
@@ -200,7 +201,8 @@ other terminals on the LAN fly in the same arena.
 **Dogfight**: `POST /scenarios/dogfight` (Copilot and MCP `dogfight_start`, SDK `dogfight_start`) sets up a timed
 fight of 2 to 8 simulators in one call: a spawn ring facing the centre, a program per role (gunners fire with
 `hunter_medium` by default, rammers fly `rammer` and never fire), free-for-all or 2 / 3 teams (the `team` parameter
-of each program), respawn after 5 s, then landing and the final standings on the leaderboard
+of each program), or `entrants` for one aircraft at a time (role `gunner`, `rammer` or `pilot`, program, team,
+position source, params, label), respawn after 5 s, then landing and the final standings on the leaderboard
 (`GET /arena/leaderboard`: downs, survival, accuracy, rams). Programs fly with sticks only; a person can possess any
 aircraft at any time. On the LAN it joins the shared match; otherwise the arena runs as local practice. Simulators
 only; see `agent-api.md` (Dogfights, matches and the leaderboard).
@@ -222,7 +224,7 @@ anonymous; changes need the operator or an agent session (revision authors are `
 | `GET /programs/{id}/revisions` | The last 50 revisions `[{rev, source, params, author, note, t}]` |
 | `POST /programs/{id}/validate` | AST check only `{source?}` → `{ok, errors: [{line, col, end_line, end_col, code, message_en, message_zh}], params, param_ranges}` |
 | `POST /programs/{id}/test` | Unit tests `{source?, tests?, rev?, seed?}` |
-| `POST /vehicles/{id}/program` | Deploy `{program, rev?, params?, mode: pilot | copilot}` |
+| `POST /vehicles/{id}/program` | Deploy `{program, rev?, params?, mode: pilot | copilot, team?}` |
 | `POST /vehicles/{id}/program/stop` · `.../resume` | Stop / resume |
 | `PATCH /vehicles/{id}/program/params` | Live parameters `{name: value}` |
 | `GET /vehicles/{id}/program/log?after=` | Log (ring of 500) `{lines: [{seq, t, level, text}], last_seq}` |

@@ -210,3 +210,14 @@ test("validation is unchanged", () => {
   assert.equal(store.save({ opacity: 10 }).cfg.opacity, 60);
   assert.equal(store.save({ toolScope: "nope" }).cfg.toolScope, "all");
 });
+
+test("thinking and max output tokens (08 §2): defaults, validation and clamping", () => {
+  const { store } = setup();
+  assert.deepEqual([store.view().thinking, store.view().maxTokens], ["auto", 16384]);
+  assert.equal(store.save({ thinking: "high" }).cfg.thinking, "high");
+  assert.equal(store.save({ thinking: "loud" }).cfg.thinking, "high");
+  assert.equal(store.save({ maxTokens: 10 }).cfg.maxTokens, 1024);
+  assert.equal(store.save({ maxTokens: 10_000_000 }).cfg.maxTokens, 131072);
+  assert.equal(store.save({ maxTokens: 32000.4 }).cfg.maxTokens, 32000);
+  assert.equal(store.view().maxTokens, 32000);
+});

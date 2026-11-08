@@ -60,7 +60,13 @@ export interface CopilotConfig {
   toolScope: CopilotToolScope;
   /** floating window opacity in percent, 60..100 (04 §6.1) */
   opacity: number;
+  /** 08 §2: auto leaves thinking to the endpoint; off switches a reasoning model off; low / high set its effort */
+  thinking: CopilotThinking;
+  /** 08 §2: output tokens per model call, thinking included, 1024..131072 */
+  maxTokens: number;
 }
+
+export type CopilotThinking = "auto" | "off" | "low" | "high";
 
 export type CopilotKeyStorage = "file" | "keychain";
 
@@ -68,16 +74,45 @@ export type CopilotKeyStorage = "file" | "keychain";
  * apiKey: a string sets it, null or "" clears it, absent keeps the stored key. keyStorage switches the storage
  * and moves a stored key across ("keychain" with a pending migration keeps the earlier key: Keep using keychain).
  */
-export type CopilotConfigInput = Partial<Pick<CopilotConfig, "api" | "baseUrl" | "model" | "toolScope" | "opacity" | "keyStorage">> & { apiKey?: string | null };
+export type CopilotConfigInput = Partial<Pick<CopilotConfig, "api" | "baseUrl" | "model" | "toolScope" | "opacity" | "keyStorage" | "thinking" | "maxTokens">> & { apiKey?: string | null };
+
+/** Token usage of a model call or a whole run (08 §3); reasoning is null when the endpoint does not report it. */
+export interface CopilotUsage {
+  input: number;
+  output: number;
+  reasoning: number | null;
+  cacheRead: number;
+  total: number;
+}
+
+export type CopilotRunOutcome = "done" | "error" | "aborted" | "empty" | "length";
 
 export type CopilotEvent =
   | { type: "busy"; busy: boolean }
-  | { type: "assistant_start" }
-  | { type: "text"; delta: string }
-  | { type: "assistant_end"; error: string | null; aborted: boolean }
-  | { type: "tool_start"; id: string; tool: string; args: Record<string, unknown> }
+  | { type: "run_start"; run: number; at: number; model: string; thinking: CopilotThinking }
+  | { type: "turn_start"; run: number; turn: number; at: number }
+  | { type: "assistant_start"; run?: number; turn?: number }
+  | { type: "text"; delta: string; run?: number; turn?: number }
+  | { type: "thinking"; run: number; turn: number; delta: string }
+  | { type: "draft"; run: number; turn: number; tool: string; chars: number }
+  | {
+      type: "assistant_end";
+      error: string | null;
+      aborted: boolean;
+      run?: number;
+      turn?: number;
+      stopReason?: string | null;
+      usage?: CopilotUsage | null;
+      ms?: number;
+      toolCalls?: { id: string; name: string; args: string }[];
+      textChars?: number;
+      thinkingChars?: number;
+      empty?: boolean;
+    }
+  | { type: "tool_start"; id: string; tool: string; args: Record<string, unknown>; run?: number; turn?: number; at?: number }
   | { type: "tool_update"; id: string; text: string }
-  | { type: "tool_end"; id: string; tool: string; error: boolean; text: string }
+  | { type: "tool_end"; id: string; tool: string; error: boolean; text: string; full?: string; ms?: number | null }
+  | { type: "run_end"; run: number; at: number; ms: number; turns: number; tools: number; usage: CopilotUsage; outcome: CopilotRunOutcome }
   | { type: "approval"; id: string; toolCallId: string; tool: string; vehicle: string; label: string; request: Record<string, unknown> }
   | { type: "approval_closed"; id: string; approved: boolean; reason?: string }
   | { type: "error"; error: string };

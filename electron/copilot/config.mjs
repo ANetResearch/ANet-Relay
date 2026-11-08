@@ -18,7 +18,15 @@ export const APIS = ["openai-completions", "anthropic-messages", "openai-respons
 export const TOOL_SCOPES = ["flight", "flight+device", "all"];
 export const KEY_STORAGES = ["file", "keychain"];
 export const OPACITY_RANGE = [60, 100];
-export const DEFAULTS = { api: "openai-completions", baseUrl: "", model: "", toolScope: "all", opacity: 100 };
+export const THINKING = ["auto", "off", "low", "high"]; // 08 §2
+export const MAX_TOKENS_RANGE = [1024, 131072];
+export const DEFAULTS = { api: "openai-completions", baseUrl: "", model: "", toolScope: "all", opacity: 100, thinking: "auto", maxTokens: 16384 };
+
+export function clampMaxTokens(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return DEFAULTS.maxTokens;
+  return Math.min(MAX_TOKENS_RANGE[1], Math.max(MAX_TOKENS_RANGE[0], Math.round(n)));
+}
 
 export const CONFIG_FILE = "copilot.json";
 export const SECRETS_FILE = "copilot-secrets.json";
@@ -222,6 +230,8 @@ export function createCopilotConfig({ dir, keychain, platform = process.platform
       configured: Boolean(cfg.baseUrl && cfg.model),
       toolScope: TOOL_SCOPES.includes(cfg.toolScope) ? cfg.toolScope : DEFAULTS.toolScope,
       opacity: clampOpacity(cfg.opacity),
+      thinking: THINKING.includes(cfg.thinking) ? cfg.thinking : DEFAULTS.thinking,
+      maxTokens: clampMaxTokens(cfg.maxTokens),
     };
   };
 
@@ -233,7 +243,9 @@ export function createCopilotConfig({ dir, keychain, platform = process.platform
     if (baseUrl.length > 512 || model.length > 200) throw new Error("The endpoint or model name is too long.");
     const toolScope = TOOL_SCOPES.includes(input?.toolScope) ? input.toolScope : TOOL_SCOPES.includes(current.toolScope) ? current.toolScope : DEFAULTS.toolScope;
     const opacity = input?.opacity === undefined ? clampOpacity(current.opacity) : clampOpacity(input.opacity);
-    return { api, baseUrl, model, toolScope, opacity };
+    const thinking = THINKING.includes(input?.thinking) ? input.thinking : THINKING.includes(current.thinking) ? current.thinking : DEFAULTS.thinking;
+    const maxTokens = input?.maxTokens === undefined ? clampMaxTokens(current.maxTokens) : clampMaxTokens(input.maxTokens);
+    return { api, baseUrl, model, toolScope, opacity, thinking, maxTokens };
   };
 
   /**

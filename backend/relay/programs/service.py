@@ -346,13 +346,22 @@ class ProgramService:
         if rev is not None and (isinstance(rev, bool) or not isinstance(rev, int)):
             raise err("invalid_request", reason="rev must be an integer")
         program, revision = self._resolve(program_id, rev)
-        return self.deploy_source(
+        params = dict(body.get("params") or {})
+        team = body.get("team")
+        if team is not None:
+            # 08 §5: the aircraft's team in every contact list, and the program's own team parameter
+            if not isinstance(team, str) or not 0 < len(team.strip()) <= 16:
+                raise err("invalid_request", reason="team must be a string of 1 to 16 characters")
+            team = team.strip()
+            if "team" in validator.validate(revision["source"]).params:
+                params.setdefault("team", team)
+        deployed = self.deploy_source(
             vid,
             actor,
             program,
             revision["rev"],
             revision["source"],
-            body.get("params") or {},
+            params,
             stored=revision.get("params") or {},
             mode=body.get("mode") or "pilot",
             sensors=body.get("sensors"),
@@ -360,6 +369,9 @@ class ProgramService:
             seed=body.get("seed"),
             airframe=body.get("airframe"),  # WP-2a seam (06 §3.3)
         )
+        if team is not None:
+            self.teams[vid] = team
+        return deployed
 
     def deploy_source(
         self,

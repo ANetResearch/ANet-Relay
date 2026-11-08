@@ -5,6 +5,53 @@ All notable changes to ANet Relay are documented in this file. The format follow
 [Semantic Versioning](https://semver.org/). Each release section is published as the
 GitHub Release notes for its tag.
 
+## [0.5.1] - 2026-11-08
+
+Copilot shows what it is doing, reasoning models such as DeepSeek V4 no longer
+end a turn in silence, custom dogfights describe each aircraft on its own, and
+the README opens with a flatter animated banner.
+
+### Added
+
+- Copilot run trace: every message gets a small red pixel aircraft that flies
+  while Copilot works and names the phase (waiting for the model, thinking,
+  writing, preparing a tool call, a tool running, waiting for approval) with
+  the elapsed time; while it is out of view the same chip sits above the input.
+  A click opens the trace: each model call with its time, input, output and
+  thinking tokens and stop reason, expandable to the full thinking, the reply
+  and the tool calls it asked for, and each tool with its arguments and full
+  result. The main process now forwards thinking, tool-argument drafting, usage
+  and stop reasons (`run_start`, `turn_start`, `thinking`, `draft`, `run_end`
+  and extended `assistant_end`, `tool_start`, `tool_end`).
+- Settings → Copilot: **Thinking** (`auto`, `off`, `low`, `high`) and **Max
+  output tokens** (1024–131072, default 16384, thinking included).
+- Custom dogfights: `POST /scenarios/dogfight` takes `entrants` (2–8), one entry
+  per aircraft with `role` (`gunner`, `rammer`, or `pilot`, which never fires),
+  `program`, `team`, `position` (`none`, `uwb`, `gps`), `params` and `label`.
+  Copilot, the application MCP server and the SDK pass it through; Copilot maps
+  requests such as "A flies a figure eight and evades with global position, one
+  aircraft rams A, one shoots A" onto it in one call.
+- `POST /vehicles/{id}/program` takes `team`: the aircraft's team in every
+  contact list, also written into a program's `team` parameter.
+- Built-in program `figure8_evader`: a figure eight around the arena centre on
+  a position source with a weaving height, and a sideways dodge with a height
+  change when a contact of another team closes in; it never fires.
+
+### Fixed
+
+- Copilot with reasoning endpoints: the model was declared non-reasoning with a
+  4096-token output limit, so DeepSeek V4 could spend the whole turn thinking
+  and stop with `length`, and the empty turn disappeared from the chat. The
+  limit is now configurable with a higher default, and a turn that runs out of
+  output or says nothing leaves a notice and its trace.
+- The Copilot setup text said the key is kept in the system keychain; it is
+  stored encrypted in the app data folder unless the keychain option is on.
+
+### Changed
+
+- README banner: 960 × 300 animation with the ANet logo, the app icon and the
+  name over the formation shot; the loop fades back to its first frame.
+
 ## [0.5.0] - 2026-11-08
 
 A rigid-body flight model with four rotors after Gazebo's motor model, collision
@@ -575,6 +622,7 @@ xattr -dr com.apple.quarantine "/Applications/ANet Relay.app"
 - Stick timing has been verified on simulators and fake aircraft; check stick
   directions with the propellers removed before the first flight of each aircraft.
 
+[0.5.1]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.5.1
 [0.5.0]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.5.0
 [0.4.1]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.4.1
 [0.4.0]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.4.0

@@ -180,6 +180,7 @@ def _deploy(r: RelayClient, a: dict) -> dict:
         arena=a.get("arena"),
         seed=a.get("seed"),
         airframe=a.get("airframe"),
+        team=a.get("team"),
     )
 
 
@@ -316,7 +317,8 @@ def program_tools() -> list[Tool]:
             "and "
             "arms (a real aircraft needs confirm ARM, the operator's Allow programs switch and passed "
             "preflight). mode pilot or copilot. Simulators: sensors {baro, position none|uwb|gps, contacts}, "
-            "arena {radius, floor, ceiling}, seed, airframe.",
+            "arena {radius, floor, ceiling}, seed, airframe. team sets the aircraft's team in every contact "
+            "list (and the program's team parameter when it declares one).",
             {
                 "vehicle": VID,
                 "program": PROGRAM,
@@ -327,6 +329,7 @@ def program_tools() -> list[Tool]:
                 "arena": OBJ,
                 "seed": {"type": "integer", "minimum": 0},
                 "airframe": AIRFRAME,
+                "team": {"type": "string", "minLength": 1, "maxLength": 16},
                 "arm": {"type": "boolean", "default": False},
                 "confirm": {"type": "string", "description": "ARM to arm a real aircraft"},
             },

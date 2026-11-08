@@ -24,14 +24,18 @@ function fakeLlm(): Promise<{ url: string; requests: Msg[][]; close(): Promise<v
       const vehicle = /\[Selected aircraft: ([^\]]+)\]/.exec(text)?.[1] ?? 'sim-1'
       let delta: Record<string, unknown>
       let finish: string
-      if (last?.role === 'user' && /ready/.test(text)) {
+      // 08 §1: a reasoning endpoint that spends the whole output on thinking (DeepSeek V4 with a low max_tokens)
+      if (last?.role === 'user' && /overthink/.test(text)) {
+        delta = { role: 'assistant', content: null, reasoning_content: 'Three aircraft, two teams, the pilot needs gps.' }
+        finish = 'length'
+      } else if (last?.role === 'user' && /ready/.test(text)) {
         delta = { role: 'assistant', content: 'ready' }
         finish = 'stop'
       } else if (last?.role === 'user') {
         const call = /plan|sequence|序列|起飞/i.test(text)
           ? { name: 'relay_plan', arguments: JSON.stringify({ vehicle, steps: [{ action: 'takeoff', alt: 1 }, { action: 'hover', seconds: 1 }, { action: 'move', forward: 1 }, { action: 'yaw', deg: 45 }, { action: 'land' }] }) }
           : { name: 'relay_takeoff', arguments: JSON.stringify({ vehicle, alt: 1 }) }
-        delta = { role: 'assistant', content: null, tool_calls: [{ index: 0, id: `call_${requests.length}`, type: 'function', function: call }] }
+        delta = { role: 'assistant', content: null, reasoning_content: 'One sequence on the selected simulator.', tool_calls: [{ index: 0, id: `call_${requests.length}`, type: 'function', function: call }] }
         finish = 'tool_calls'
       } else {
         delta = { role: 'assistant', content: 'Finished. The sequence was flown and the aircraft has landed.' }
@@ -148,6 +152,30 @@ test('copilot: settings, a sequence on a simulator, approval for a real aircraft
   expect(events.events.some((e) => e.kind === 'plan_finished')).toBe(true)
   expect(events.events.some((e) => e.kind === 'claim_started' && e.data?.name === 'copilot')).toBe(true)
   await page.screenshot({ path: path.join(shots, '03-done.png') })
+
+  // 08 §4: the run chip under the prompt; a click opens the trace (two model calls, one tool, the thinking)
+  const chip = cp.locator('[data-run-chip]').first()
+  await expect(chip).toHaveAttribute('data-phase', 'done')
+  await expect(cp.locator('[data-live-run]')).toHaveCount(0)
+  await chip.click()
+  const trace = cp.locator('[data-run-trace]')
+  await expect(trace.locator('[data-step="turn"]')).toHaveCount(2)
+  await expect(trace.locator('[data-step="tool"][data-state="ok"]')).toHaveCount(1)
+  await expect(trace.locator('[data-run-total]')).toContainText('2 model calls · 1 tools')
+  await trace.locator('[data-step="turn"] button').first().click()
+  await expect(trace.getByText('One sequence on the selected simulator.')).toBeVisible()
+  await cp.screenshot({ path: path.join(shots, '05-trace.png') })
+  await chip.click()
+
+  // a turn that ran out of output keeps a notice and a chip instead of vanishing
+  await cp.locator('[data-copilot-input]').fill('overthink this')
+  await cp.keyboard.press('Enter')
+  await expect(cp.locator('[data-run-chip][data-phase="length"]')).toBeVisible({ timeout: 15000 })
+  await expect(cp.getByText('The model used its whole output (16384 tokens)')).toBeVisible()
+  await cp.locator('[data-run-chip][data-phase="length"]').click()
+  await expect(cp.locator('[data-run-trace] [data-stop="length"]')).toHaveCount(1)
+  await cp.screenshot({ path: path.join(shots, '06-length.png') })
+  await cp.locator('[data-run-chip][data-phase="length"]').click()
 
   // a real (fake) aircraft: Copilot asks before it moves; declining blocks the command
   const host = '127.0.0.31'

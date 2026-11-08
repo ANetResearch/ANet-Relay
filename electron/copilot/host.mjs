@@ -71,13 +71,14 @@ export function createCopilotHost({ copilotWindow, mainWindow, relayBase, langua
     if (!base) throw new Error("backend_unavailable");
     const scope = store.view(cfg).toolScope;
     // The stamp names the stored key without reading it, so a keychain key is decrypted only on a rebuild.
-    const stamp = JSON.stringify([cfg.api, cfg.baseUrl, cfg.model, store.keyStamp(cfg), base, language(), scope]);
+    const view = store.view(cfg);
+    const stamp = JSON.stringify([cfg.api, cfg.baseUrl, cfg.model, store.keyStamp(cfg), base, language(), scope, view.thinking, view.maxTokens]);
     if (copilot && builtFor === stamp) return copilot;
     await dispose();
     const mod = await loadModule();
-    const { models, model } = mod.buildModels(cfg, store.apiKey(cfg));
+    const { models, model, thinking } = mod.buildModels({ ...cfg, thinking: view.thinking, maxTokens: view.maxTokens }, store.apiKey(cfg));
     relay = new mod.RelayHttp(base);
-    copilot = mod.createCopilot({ relay, models, model, emit, lang: language, scope: () => store.view().toolScope });
+    copilot = mod.createCopilot({ relay, models, model, emit, lang: language, scope: () => store.view().toolScope, thinking });
     builtFor = stamp;
     return copilot;
   };
@@ -94,7 +95,7 @@ export function createCopilotHost({ copilotWindow, mainWindow, relayBase, langua
     const beforeStamp = store.keyStamp(store.load());
     const { before, cfg: next } = store.save(input);
     // A conversation survives window-only changes such as opacity; the agent is rebuilt on the next prompt otherwise.
-    const agentKey = (c, stamp) => JSON.stringify([c.api, c.baseUrl, c.model, stamp, c.toolScope, c.keyStorage]);
+    const agentKey = (c, stamp) => JSON.stringify([c.api, c.baseUrl, c.model, stamp, c.toolScope, c.keyStorage, c.thinking, c.maxTokens]);
     if (agentKey(before, beforeStamp) !== agentKey(next, store.keyStamp(next))) await dispose();
     const view = store.view(next);
     copilotWindow.setOpacity(view.opacity / 100);

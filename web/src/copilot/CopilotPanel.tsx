@@ -10,10 +10,11 @@ import { Button } from '@/ui/components/ui/button'
 import { Textarea } from '@/ui/components/ui/textarea'
 import { Icon } from '@/ui/icons'
 import { useCT, type ControlKey } from '@/control/strings'
-import { useCopilot, type CopilotItem } from './store'
+import { runEnded, useCopilot, type CopilotItem } from './store'
 import { cpt, useCPT, type CopilotKey } from './strings'
 import { toolLabel } from './toolLabels'
 import { KeyMigrationNotice } from './KeyMigration'
+import { LiveRunBar, RunBlock } from './RunTrace'
 import { VoxelLoader } from '@/ui/voxel/VoxelLoader'
 import './copilot.css'
 
@@ -277,20 +278,29 @@ function Transcript() {
   const t = useCPT()
   const items = useCopilot((s) => s.items)
   const busy = useCopilot((s) => s.busy)
+  const runs = useCopilot((s) => s.runs)
+  const openRun = useCopilot((s) => s.openRun)
+  const maxTokens = useCopilot((s) => s.config?.maxTokens ?? 16384)
   const end = React.useRef<HTMLDivElement>(null)
+  const runOf = React.useMemo(() => new Map(runs.filter((r) => r.userKey !== null).map((r) => [r.userKey as number, r])), [runs])
+  const live = runs.length > 0 && !runEnded(runs[runs.length - 1])
   React.useEffect(() => {
-    end.current?.scrollIntoView({ block: 'end' })
-  }, [items, busy])
+    // opening a trace must not jump to the bottom
+    if (openRun === null) end.current?.scrollIntoView({ block: 'end' })
+  }, [items, busy, openRun])
   return (
     <div className="flex flex-col gap-2.5 px-3 py-3">
       {items.map((it) => {
         switch (it.kind) {
-          case 'user':
+          case 'user': {
+            const run = runOf.get(it.key)
             return (
-              <div key={it.key} className="cp-user">
-                {it.text}
-              </div>
+              <React.Fragment key={it.key}>
+                <div className="cp-user">{it.text}</div>
+                {run ? <RunBlock run={run} /> : null}
+              </React.Fragment>
             )
+          }
           case 'assistant':
             return (
               <div key={it.key} className="cp-assistant">
@@ -306,12 +316,12 @@ function Transcript() {
           default:
             return (
               <p key={it.key} className={cn('text-hud-sub', it.tone === 'error' ? 'text-[var(--g200)]' : 'text-[var(--g400)]')}>
-                {it.text}
+                {it.code ? t(`cp.notice.${it.code}`, { max: maxTokens }) : it.text}
               </p>
             )
         }
       })}
-      {busy && !items.some((it) => (it.kind === 'assistant' && it.streaming) || (it.kind === 'tool' && it.state === 'running')) ? (
+      {busy && !live && !items.some((it) => (it.kind === 'assistant' && it.streaming) || (it.kind === 'tool' && it.state === 'running')) ? (
         <p className="cp-thinking text-hud-sub text-[var(--g400)]">{t('cp.thinking')}</p>
       ) : null}
       <div ref={end} />
@@ -331,6 +341,7 @@ function Composer() {
   }
   return (
     <div className="flex flex-col gap-1.5 border-t border-[var(--border)] p-3">
+      <LiveRunBar />
       <Textarea
         value={text}
         onChange={(e) => setText(e.target.value)}

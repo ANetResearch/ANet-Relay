@@ -308,14 +308,14 @@ POST /api/v1/vehicles/sim-1/plan
 
 | 方法与路径 | 权限 | 用途 |
 |---|---|---|
-| `GET /programs` | – | 内置示例（`hover_trim`、`liftoff`、`patrol`、`hunter_easy`、`hunter_medium`、`hunter_hard`、`rammer`，只读）与已保存的程序 |
+| `GET /programs` | – | 内置示例（`hover_trim`、`liftoff`、`patrol`、`hunter_easy`、`hunter_medium`、`hunter_hard`、`rammer`、`figure8_evader`，只读）与已保存的程序 |
 | `POST /programs` | 会话或操作员 | `{name, source?, description?, params?, tests?, note?, copy_of?}` → `{program, validation}` |
 | `GET /programs/{pid}` · `GET /programs/{pid}/revisions` | – | 单个程序（`source`、`params`、`tests`、`rev`）；最近 50 个版本，最新在前，含作者与说明 |
 | `PUT /programs/{pid}` | 会话或操作员 | `{source}` 或 `{patch: [{start, end, text}]}`（行号从 1 起、含首尾，均按当前版本计；`end = start - 1` 表示在 `start` 前插入），另可带 `name`、`description`、`params`、`tests`、`note`：产生新版本，返回 `{program, validation}` |
 | `DELETE /programs/{pid}` | 会话或操作员 | 删除已保存的程序 |
 | `POST /programs/{pid}/validate` | 会话或操作员 | `{source?}`：只做语言校验，返回 `{ok, errors: [{line, col, code, message_en, message_zh}], params, param_ranges}` |
 | `POST /programs/{pid}/test` | 会话或操作员 | `{rev?, source?, tests?, seed?}`：运行单元测试，返回 `{results, passed, total}` |
-| `POST /vehicles/{id}/program` | 控制者或操作员 | `{program, rev?, params?, mode: pilot \| copilot, sensors?, arena?, seed?, airframe?}`：部署；程序以 `PROGRAM · <名称>` 的身份持有摇杆 |
+| `POST /vehicles/{id}/program` | 控制者或操作员 | `{program, rev?, params?, mode: pilot \| copilot, sensors?, arena?, seed?, airframe?, team?}`：部署；`team`（1–16 字符）为该机在所有接触表中的队伍，程序声明了 `team` 参数时一并填入；程序以 `PROGRAM · <名称>` 的身份持有摇杆 |
 | `POST /vehicles/{id}/program/stop` · `.../resume` | 控制者或操作员 | 停止；恢复已暂停的程序 |
 | `PATCH /vehicles/{id}/program/params` | 控制者或操作员 | `{name: value}`：实时调参，类型与范围取自 `PARAMS` 与 `PARAM_RANGES` |
 | `GET /vehicles/{id}/program/log?after=&limit=` | – | 日志环（500 行）：`{lines: [{seq, t, level, text}], last_seq}` |
@@ -404,8 +404,8 @@ with RelayClient() as relay:
 
 | 方法与路径 | 权限 | 用途 |
 |---|---|---|
-| `POST /scenarios/dogfight` | 应用控制（开启 `agents_app_control` 的会话，或操作员） | `{aircraft（2–12，缺省 6；超过 8 返回 dogfight_no_aircraft），teams（"ffa" / 2 / 3），roles: {gunner, rammer}（之和等于 aircraft；缺省射手与撞击手 2 : 1），programs: {gunner, rammer}，arena: {radius（3–30，缺省 8），ceiling（2–10，缺省 4）}，airframe（ideal / typical / rough），hover_assist（缺省 false），duration_s（30–1800，缺省 180），respawn（缺省 true），seed，vehicles}` → 狗斗视图；已有狗斗时 `dogfight_running` |
-| `GET /scenarios/dogfight` | – | `{running, phase（idle / booting / arming / deploying / running / ending / done）, started_at, ends_at, config, aircraft: [{vid, role, program, team, state（booting / arming / deploying / flying / human / down / stopped / failed）}], match, by, reason（time / stopped / error）, error}` |
+| `POST /scenarios/dogfight` | 应用控制（开启 `agents_app_control` 的会话，或操作员） | `{aircraft（2–12，缺省 6；超过 8 返回 dogfight_no_aircraft），teams（"ffa" / 2 / 3），roles: {gunner, rammer}（之和等于 aircraft；缺省射手与撞击手 2 : 1），programs: {gunner, rammer}，arena: {radius（3–30，缺省 8），ceiling（2–10，缺省 4）}，airframe（ideal / typical / rough），hover_assist（缺省 false），duration_s（30–1800，缺省 180），respawn（缺省 true），seed，vehicles，entrants}` → 狗斗视图。`entrants`（2–8 项）逐机设定并取代 `aircraft`、`roles`、`teams`：`{role: gunner \| rammer \| pilot（从不开火），program（pilot 必填，其余缺省同角色），team（≤ 16 字符，缺省为自身 id），position: none \| uwb \| gps（缺省 none），params，label}`；已有狗斗时 `dogfight_running` |
+| `GET /scenarios/dogfight` | – | `{running, phase（idle / booting / arming / deploying / running / ending / done）, started_at, ends_at, config, aircraft: [{vid, role, program, team, position, label, state（booting / arming / deploying / flying / human / down / stopped / failed）}], match, by, reason（time / stopped / error）, error}` |
 | `DELETE /scenarios/dogfight` | 应用控制 | 提前结束；没有狗斗时 `dogfight_not_running` |
 | `POST /arena/match` | 应用控制 | `{duration_s}`（30–1800，缺省 180）：在本机与所有版本 2 对端开启对局；`arena_off`、`match_running` |
 | `DELETE /arena/match` | 应用控制 | 在所有终端结束当前对局（`ended: true`）；没有对局时清零统计（`ended: false`） |
@@ -415,7 +415,7 @@ with RelayClient() as relay:
 
 **协议版本 2。** Relay 0.5 使用场地协议版本 2，并与 0.4 保持兼容：0.4 认识的每种报文仍以版本字节 1 逐字节不变地发送；只有 `COLLIDE`、`MATCH` 以及约每秒一次携带统计块的 `STATE` 使用版本 2（0.4 终端将其视为畸形报文丢弃，其余状态照常接收）。对端在收到其第一个合法的版本 2 报文后视为版本 2；对局与碰撞只涉及版本 2 对端。`MATCH` 在所有终端开启或结束对局（冲突时最早开始者优先；运行期间每 2 s 重发）。**局域网碰撞**：每个终端用对端最近一次上报的状态（最多外推 0.15 s）与本机飞机做扫掠检测；发现接触时只对本机飞机施加响应，并向另一架飞机的所属终端发送 `COLLIDE`。所属终端重新核验后才施加：报文不超过 0.3 s（时钟差加半个往返）、按其自身视图在接触时刻两机相距不超过 0.6 m、每个对端飞机每秒最多 4 个、同一对飞机 0.5 s 内只施加一次；并回复一次（回复不再被回复），使发送方得知自己造成的坠毁。被拒绝的 `COLLIDE` 不产生任何影响。事件 `collision`（`data.a`、`data.b`、`data.b_label`、`data.point`、`data.v_rel`、`data.crashed`、`data.kind`、`data.remote`）。
 
-SDK：`dogfight_start(...)`、`dogfight_stop()`、`dogfight_status()`、`leaderboard(by)`、`match_start(duration_s)`、`match_end()`。MCP（应用服务器）与 Copilot：`dogfight_start`、`dogfight_stop`、`dogfight_status`、`leaderboard`。例如"开一场 6 机混战，4 架开火 2 架撞击"对应 `dogfight_start {aircraft: 6, teams: "ffa", roles: {gunner: 4, rammer: 2}}`。
+SDK：`dogfight_start(...)`、`dogfight_stop()`、`dogfight_status()`、`leaderboard(by)`、`match_start(duration_s)`、`match_end()`。MCP（应用服务器）与 Copilot：`dogfight_start`、`dogfight_stop`、`dogfight_status`、`leaderboard`。例如"开一场 6 机混战，4 架开火 2 架撞击"对应 `dogfight_start {aircraft: 6, teams: "ffa", roles: {gunner: 4, rammer: 2}}`。"三架飞机：A 飞 8 字并躲避、可获取全局位置，一架撞 A，一架用子弹打 A"对应 `dogfight_start {entrants: [{role: "pilot", program: "figure8_evader", team: "A", position: "gps", label: "A"}, {role: "rammer", team: "B"}, {role: "gunner", team: "B"}]}`：两架攻击机只把 A 当作接触对象，A 获得位置与速度。
 
 ## 6. WebSocket `/api/v1/stream`
 
@@ -586,6 +586,8 @@ Relay 不在 8765 端口运行时，追加 `"--base", "http://127.0.0.1:<port>"`
 
 - **浮动窗口：** Copilot 是一个独立的浮动窗口，始终位于其他应用之上，但不是模态窗口：显示期间仍可点击 Relay 主窗口和其他应用。拖动标题栏可放到屏幕任意位置（包括主窗口左侧），拖动边缘调整大小；位置与大小会被记住。顶栏的 Copilot 按钮、Ctrl/Cmd + J 或窗口自身的隐藏按钮可显示或隐藏它。每条消息会附带主窗口中当前选中的飞机。
 - **配置：** 设置 → Copilot：接口类型（OpenAI 兼容端点选 `openai-completions`，另有 `anthropic-messages`、`openai-responses`）、Base URL、模型 ID、API Key、工具范围与窗口不透明度（60%–100%）。**测试连接** 会发送一次简短请求。Key 保存在应用数据目录（`copilot-secrets.json`，以每次安装随机生成、存于 `copilot-secrets.key` 的密钥做 AES-256-GCM 加密，两个文件均仅当前系统用户可读），不会回传到界面；端点只会收到对话内容和工具结果。开启 **使用系统钥匙串保存密钥**（缺省关闭）后改存于 macOS 钥匙串、Windows 凭据加密或 Linux Secret Service，只有此时 Relay 才调用 Electron `safeStorage`。Relay 不读取、也不需要系统登录密码：钥匙串对话框来自操作系统，只有在选择用钥匙串保存密钥时才会出现。0.3 及更早版本保存的密钥留在钥匙串中、不会被自动解密，直到在 Copilot 窗口中重新输入或选择 **继续使用钥匙串**。
+- **思考与输出上限：** **思考**（`auto` 为缺省，交给端点决定；`off`、`low`、`high` 为 DeepSeek V4 等推理模型设定）与 **最大输出 tokens**（1024–131072，缺省 16384，单次模型调用、含思考）。推理模型默认开启思考，思考与回答共用输出上限：输出耗尽的调用以 `length` 结束，对话中会给出说明，而不是没有任何反应。
+- **运行轨迹：** 每条消息下方有一架小小的红色像素飞机，Copilot 工作时它在飞，旁边是阶段（等待模型、思考中及已思考字数、撰写回复、准备调用工具及参数字数、工具执行中、等待批准）与计时；该条目滚出视野时，输入框上方显示同样的条目。点击打开本次运行的轨迹：每次模型调用的耗时、输入 / 输出 / 思考 tokens 与结束原因，可展开查看完整思考、回复与请求的工具调用；每个工具的参数与完整结果。
 - **工具范围：** `flight`（飞行：状态、技能、动作序列、短时杆量、再飞、急停）、`flight+device`（另加设备级工具）、`all`（缺省，另加应用控制工具：语言、工作区、选择飞机、扫描网络、模拟机、设置、手柄、记录、窗口与截图）。工具与第 5 节的接口一一对应。
 - **安全：** 对真机的每个运动指令与设备级写入（起飞、平移、转向、悬停、降落、动作序列、再飞、电机测试、执行器、重启、校准、终止等），聊天中都会出现审批卡片，操作员批准前不会发送任何指令（120 秒未处理视为拒绝）；需要审批时浮动窗口会自动显示并提示。确认词由审批代替，Copilot 不会自行填写。接管和急停对 Copilot 与其他智能体同样有效。
 - **程序与控制等级：** Copilot 在每条消息前读取 `agent_flight_level`。在 `sticks`（缺省）等级下，它没有起飞、平移、转向、悬停、动作序列与再飞工具，系统提示会说明高层飞行不可用、稳定飞行需要编写程序；在 `full` 等级下这些工具恢复。在任何工具范围内它都具备程序工具（`program_list`、`program_get`、`program_create`、`program_update`、`program_validate`、`program_test`、`program_deploy`、`program_stop`、`program_resume`、`program_params`、`program_status`、`program_log`、`challenge_list`、`challenge_submit`、`job_status`、`duel_run`、`ladder`、`airframe_set`）以及 `relay_arm`、`relay_disarm`、`relay_mode`，系统提示末尾附有 [`programs-guide.md`](programs-guide.md)。编写与修改程序无需审批；在真机上部署或恢复程序、解锁与切换模式，与其他运动指令一样需要操作员批准。

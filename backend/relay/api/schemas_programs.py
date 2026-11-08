@@ -98,6 +98,10 @@ class DeployBody(_Body):
     airframe: AirframeBody | None = Field(
         default=None, description="simulators only: airframe defects fitted before the program starts"
     )
+    # 08 §5: the aircraft's team in other aircraft's contact lists, and the program's team parameter
+    team: str | None = Field(
+        default=None, max_length=16, description="team name; filled into a declared team parameter"
+    )
 
 
 class AllowBody(_Body):

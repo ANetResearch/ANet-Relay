@@ -44,12 +44,32 @@ export const DOGFIGHT_PARAMS = Type.Object({
   respawn: opt(Type.Boolean({ description: "Back at the spawn point 5 s after a shoot-down or crash (default true)" })),
   seed: opt(Type.Integer({ minimum: 0, maximum: 2 ** 31 - 1 })),
   vehicles: opt(Type.Array(Type.String(), { description: "Simulators (sim-N) to use first; others are added. Real aircraft are refused." })),
+  // 08 §5: a custom fight, one entry per aircraft
+  entrants: opt(
+    Type.Array(
+      Type.Object({
+        role: lit("gunner", "rammer", "pilot"),
+        program: opt(Type.String({ description: "Program id. Required for a pilot (for example figure8_evader or one you wrote); gunner and rammer default to hunter_medium and rammer" })),
+        team: opt(Type.String({ maxLength: 16, description: "Team name: aircraft on one team never target each other. Default: the aircraft's own id" })),
+        position: opt(lit("none", "uwb", "gps")),
+        params: opt(Type.Record(Type.String(), Type.Any(), { description: "Program parameters" })),
+        label: opt(Type.String({ maxLength: 16, description: "A short name for the aircraft, e.g. A" })),
+      }),
+      {
+        minItems: 2,
+        maxItems: 8,
+        description:
+          "A custom fight: one entry per aircraft, in spawn order; replaces aircraft, roles and teams. role pilot flies its own program and never fires; " +
+          "position gps (or uwb) gives that program its own global position and velocity (obs.pos, obs.vel), none gives only its own sensors and the contacts it sees.",
+      },
+    ),
+  ),
 });
 
 /** The dogfight request body from the tool parameters (only the keys given). */
 export function dogfightBody(p) {
   const out = {};
-  for (const key of ["aircraft", "teams", "roles", "programs", "arena", "airframe", "hover_assist", "duration_s", "respawn", "seed", "vehicles"]) {
+  for (const key of ["aircraft", "teams", "roles", "programs", "arena", "airframe", "hover_assist", "duration_s", "respawn", "seed", "vehicles", "entrants"]) {
     if (p[key] !== undefined) out[key] = p[key];
   }
   return out;

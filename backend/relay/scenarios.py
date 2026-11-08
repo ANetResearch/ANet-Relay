@@ -47,6 +47,9 @@ if TYPE_CHECKING:
 log = logging.getLogger("relay.scenarios")
 
 DEFAULT_PROGRAMS = {"gunner": "hunter_medium", "rammer": "rammer"}
+ROLES = ("gunner", "rammer", "pilot")  # 08 §5: a pilot flies its own program and never fires
+POSITIONS = ("none", "uwb", "gps")
+ENTRANT_TEXT = 16
 SENSORS = {"baro": True, "position": "none", "contacts": True}
 SESSION_NAME = "dogfight"
 SPAWN_MARGIN_M = 3.0  # spawns 3 m inside the edge: room to climb and turn before the boundary
@@ -66,12 +69,15 @@ POLL_S = 0.1
 @dataclass
 class Craft:
     vid: str
-    role: str  # gunner | rammer
+    role: str  # gunner | rammer | pilot
     program: str
     team: str
     spawn: tuple[float, float, float]  # x, y, compass yaw in degrees
     seed: int
     index: int
+    position: str = "none"  # 08 §5: the program's position source (none | uwb | gps)
+    params: dict[str, Any] = field(default_factory=dict)
+    label: str = ""
     state: str = "booting"  # booting | arming | deploying | flying | human | down | stopped | failed
     since: float = 0.0  # fleet clock of the last state change
     tries: int = 0
@@ -83,6 +89,8 @@ class Craft:
             "role": self.role,
             "program": self.program,
             "team": self.team,
+            "position": self.position,
+            "label": self.label,
             "state": self.state,
         }
 
@@ -100,6 +108,7 @@ class Config:
     respawn: bool
     seed: int
     lan: bool = False
+    entrants: list[dict[str, Any]] | None = None  # 08 §5: one entry per aircraft, in spawn order
 
     def view(self) -> dict[str, Any]:
         return {
@@ -114,6 +123,7 @@ class Config:
             "respawn": self.respawn,
             "seed": self.seed,
             "lan": self.lan,
+            "entrants": None if self.entrants is None else [dict(e) for e in self.entrants],
         }
 
 
@@ -221,7 +231,8 @@ class Dogfights:
 
     def _parse(self, body: dict[str, Any], actor: Actor) -> tuple[Config, list[str]]:
         fleet = self.fleet
-        n = int(body.get("aircraft") or 6)
+        entrants = self._entrants(body.get("entrants"))
+        n = len(entrants) if entrants is not None else int(body.get("aircraft") or 6)
         wanted = list(body.get("vehicles") or [])
         for vid in wanted:
             v = fleet.vehicles.get(vid)
@@ -232,7 +243,9 @@ class Dogfights:
         if n > SIM_LIMIT:
             raise err("dogfight_no_aircraft", needed=n, free=SIM_LIMIT, limit=SIM_LIMIT)
         roles_raw = body.get("roles")
-        if roles_raw:
+        if entrants is not None:
+            roles = {r: sum(1 for e in entrants if e["role"] == r) for r in ROLES}
+        elif roles_raw:
             roles = {"gunner": int(roles_raw.get("gunner", 0)), "rammer": int(roles_raw.get("rammer", 0))}
             if roles["gunner"] + roles["rammer"] != n:
                 raise err("invalid_request", reason="roles must add up to aircraft")
@@ -244,8 +257,11 @@ class Dogfights:
             if pid:
                 programs[role] = str(pid)
         for role in ("gunner", "rammer"):
-            if roles[role]:
+            if roles.get(role):
                 fleet.programs.store.get(programs[role])  # program_not_found for an unknown id
+        for e in entrants or ():
+            e["program"] = e["program"] or programs[e["role"]]
+            fleet.programs.store.get(e["program"])
         box = body.get("arena") or {}
         arena = {
             "radius": float(box.get("radius", 8.0)),
@@ -257,8 +273,8 @@ class Dogfights:
         seed = body.get("seed")
         if seed is None:
             seed = secrets.randbelow(2**31)
-        teams = body.get("teams", "ffa")
-        if teams not in ("ffa", 2, 3):
+        teams = "custom" if entrants is not None else body.get("teams", "ffa")
+        if teams not in ("ffa", 2, 3, "custom"):
             raise err("invalid_request", reason="teams must be ffa, 2 or 3")
         config = Config(
             aircraft=n,
@@ -271,8 +287,46 @@ class Dogfights:
             duration_s=float(body.get("duration_s") or 180.0),
             respawn=bool(body.get("respawn", True)),
             seed=int(seed),
+            entrants=entrants,
         )
         return config, wanted
+
+    @staticmethod
+    def _entrants(raw: Any) -> list[dict[str, Any]] | None:
+        """08 §5: the per-aircraft entries of a custom fight, checked and filled in, or None without them."""
+        if raw is None:
+            return None
+        if not isinstance(raw, list) or not 2 <= len(raw) <= SIM_LIMIT:
+            raise err("invalid_request", reason=f"entrants must be a list of 2 to {SIM_LIMIT} entries")
+        out = []
+        for i, e in enumerate(raw):
+            if not isinstance(e, dict):
+                raise err("invalid_request", reason=f"entrants[{i}] must be an object")
+            role = e.get("role", "gunner")
+            if role not in ROLES:
+                raise err("invalid_request", reason=f"entrants[{i}].role must be gunner, rammer or pilot")
+            program = e.get("program")
+            if role == "pilot" and not program:
+                raise err("invalid_request", reason=f"entrants[{i}].program is required for a pilot")
+            position = e.get("position", "none")
+            if position not in POSITIONS:
+                raise err("invalid_request", reason=f"entrants[{i}].position must be none, uwb or gps")
+            params = e.get("params") or {}
+            if not isinstance(params, dict):
+                raise err("invalid_request", reason=f"entrants[{i}].params must be an object")
+            team = str(e.get("team") or "").strip()[:ENTRANT_TEXT]
+            label = str(e.get("label") or "").strip()[:ENTRANT_TEXT]
+            out.append(
+                {
+                    "role": role,
+                    "program": str(program) if program else "",
+                    "team": team,
+                    "position": position,
+                    "params": dict(params),
+                    "label": label,
+                }
+            )
+        return out
 
     # ------------------------------------------------------------------ set-up
 
@@ -316,9 +370,26 @@ class Dogfights:
         roles = ["gunner"] * config.roles["gunner"] + ["rammer"] * config.roles["rammer"]
         crafts = []
         for i, vid in enumerate(chosen):
+            sp = spawns[i]
+            if config.entrants is not None:
+                e = config.entrants[i]
+                crafts.append(
+                    Craft(
+                        vid=vid,
+                        role=e["role"],
+                        program=e["program"],
+                        team=e["team"] or vid,
+                        spawn=(sp.x, sp.y, sp.yaw_deg),
+                        seed=entrant_seed(config.seed, i),
+                        index=i,
+                        position=e["position"],
+                        params=dict(e["params"]),
+                        label=e["label"],
+                    )
+                )
+                continue
             role = roles[i]
             team = vid if config.teams == "ffa" else f"team-{i % int(config.teams) + 1}"
-            sp = spawns[i]
             crafts.append(
                 Craft(
                     vid=vid,
@@ -343,7 +414,7 @@ class Dogfights:
                 )
                 fleet.programs.teams[c.vid] = c.team
                 arena.respawn_hold.add(c.vid)
-                if c.role == "rammer":
+                if c.role in ("rammer", "pilot"):
                     arena.hold_fire.add(c.vid)
                 else:
                     arena.hold_fire.discard(c.vid)
@@ -567,7 +638,7 @@ class Dogfights:
         fleet = self.fleet
         program = fleet.programs.store.get(c.program)
         revision = fleet.programs.store.revision(c.program, None)
-        params: dict[str, Any] = {}
+        params: dict[str, Any] = dict(c.params)
         if run.config.teams != "ffa" and "team" in validator.validate(revision["source"]).params:
             params["team"] = c.team
         fleet.programs.deploy_source(
@@ -579,7 +650,7 @@ class Dogfights:
             params,
             stored=revision.get("params") or {},
             mode="pilot",
-            sensors=dict(SENSORS),
+            sensors={**SENSORS, "position": c.position},
             arena=dict(run.config.arena),
             seed=c.seed,
         )

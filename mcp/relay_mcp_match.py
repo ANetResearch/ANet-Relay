@@ -17,7 +17,11 @@ MATCH_INSTRUCTIONS = (
     "simulators, arms them and deploys a program per role: gunners fire, rammers ram and never fire; the "
     "programs fly with sticks only), so do not arm or deploy anything first. For example 'a six-aircraft "
     "free-for-all, four shooting and two ramming' is dogfight_start {aircraft: 6, teams: 'ffa', roles: "
-    "{gunner: 4, rammer: 2}}. dogfight_status shows the phase and every aircraft's state, dogfight_stop ends it "
+    "{gunner: 4, rammer: 2}}. entrants sets each aircraft on its own (role gunner, rammer or pilot that never "
+    "fires; program, team, position source none/uwb/gps, params, label): 'A flies a figure eight and evades with "
+    "global position, one rams A, one shoots A' is dogfight_start {entrants: [{role: 'pilot', program: "
+    "'figure8_evader', team: 'A', position: 'gps', label: 'A'}, {role: 'rammer', team: 'B'}, {role: 'gunner', "
+    "team: 'B'}]}. dogfight_status shows the phase and every aircraft's state, dogfight_stop ends it "
     "early, leaderboard ranks every aircraft of this terminal and its LAN peers by downs, survival, accuracy "
     "or rams. Simulators only: a real aircraft id is refused."
 )
@@ -55,6 +59,25 @@ DOGFIGHT_PROPS = {
     "respawn": {"type": "boolean", "description": "back at the spawn 5 s after going down (default true)"},
     "seed": {"type": "integer", "minimum": 0},
     "vehicles": {"type": "array", "items": {"type": "string"}, "description": "simulators to use first"},
+    "entrants": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 8,
+        "items": {
+            "type": "object",
+            "properties": {
+                "role": {"enum": ["gunner", "rammer", "pilot"], "description": "pilot never fires"},
+                "program": {"type": "string", "description": "required for pilot; default per role"},
+                "team": {"type": "string", "maxLength": 16, "description": "default: its own id"},
+                "position": {"enum": ["none", "uwb", "gps"], "description": "position source (default none)"},
+                "params": {"type": "object"},
+                "label": {"type": "string", "maxLength": 16},
+            },
+            "required": ["role"],
+            "additionalProperties": False,
+        },
+        "description": "one entry per aircraft; replaces aircraft, roles and teams",
+    },
 }
 
 

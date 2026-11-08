@@ -124,6 +124,7 @@ Python 3 语法的子集，部署前由 AST 白名单校验：
 | `liftoff` | 油门搜索起飞 |
 | `patrol` | 无定位源的定时转向巡逻 |
 | `hunter_easy` / `hunter_medium` / `hunter_hard` | 三档对抗机器人状态机：搜索 → 接近 → 射击 → 规避；目标快速逼近时闪避（`dodge_s`、`threat_dist`、`threat_closing`） |
+| `figure8_evader` | 依靠位置源绕场地中心飞 8 字（Gerono 双纽线，速度前馈加位置修正），按气压计保持高度并缓慢起伏；躲避优先：另一队的接触在 `threat_dist` 内以超过 `threat_closing` 的速度逼近时，横向闪避（偏向场地中心）并改变高度；从不开火 |
 | `rammer` | 撞击对手、从不开火：爬升 → 搜索 → 追击（对最近目标做比例导引，并在垂直于视线的方向上蛇形机动，使不做提前量的射手打偏）→ 撞击（进入 `ram_dist` 后全力加速）→ `obs.collision` 报告接触后恢复 |
 
 示例只读；复制后即可修改。
@@ -151,7 +152,7 @@ Python 3 语法的子集，部署前由 AST 白名单校验：
 
 实时对抗：把程序部署到本机多架模拟机，在对抗场中实时进行；局域网中其他终端部署的程序也在同一场地。
 
-**狗斗**：`POST /scenarios/dogfight`（Copilot 与 MCP 的 `dogfight_start`，SDK 的 `dogfight_start`）一次调用布置 2 至 8 架模拟机的限时对战：出生环、机头朝向中心，每种角色一段程序（射手缺省 `hunter_medium` 开火，撞击手运行 `rammer`、从不开火），混战或 2 / 3 队（各程序的 `team` 参数），5 s 后重生，结束时降落，最终成绩保留在排行榜上（`GET /arena/leaderboard`：击落、存活、命中率、撞落）。程序只用摇杆级控制；操作员可随时附身任意一架。局域网中加入共享对局，否则场地以本机练习模式运行。仅限模拟机；详见 `agent-api.zh-CN.md`（狗斗、对局与排行榜）。
+**狗斗**：`POST /scenarios/dogfight`（Copilot 与 MCP 的 `dogfight_start`，SDK 的 `dogfight_start`）一次调用布置 2 至 8 架模拟机的限时对战：出生环、机头朝向中心，每种角色一段程序（射手缺省 `hunter_medium` 开火，撞击手运行 `rammer`、从不开火），混战或 2 / 3 队（各程序的 `team` 参数），或用 `entrants` 逐机设定（角色 `gunner`、`rammer` 或 `pilot`，程序、队伍、位置源、参数、标签），5 s 后重生，结束时降落，最终成绩保留在排行榜上（`GET /arena/leaderboard`：击落、存活、命中率、撞落）。程序只用摇杆级控制；操作员可随时附身任意一架。局域网中加入共享对局，否则场地以本机练习模式运行。仅限模拟机；详见 `agent-api.zh-CN.md`（狗斗、对局与排行榜）。
 
 **回放**：打开轨迹后切到飞行工作区，舞台进入多机回放（所有飞机与子弹），底部为回放控制：播放 / 暂停、1x / 4x / 16x、拖动进度、退出。有飞机开始被手动飞行时回放自动关闭，舞台回到实时机群。
 
@@ -167,7 +168,7 @@ Python 3 语法的子集，部署前由 AST 白名单校验：
 | `GET /programs/{id}/revisions` | 版本（最近 50 个）`[{rev, source, params, author, note, t}]` |
 | `POST /programs/{id}/validate` | 只做 AST 校验 `{source?}` → `{ok, errors: [{line, col, end_line, end_col, code, message_en, message_zh}], params, param_ranges}` |
 | `POST /programs/{id}/test` | 运行单元测试 `{source?, tests?, rev?, seed?}` |
-| `POST /vehicles/{id}/program` | 部署 `{program, rev?, params?, mode: pilot | copilot}` |
+| `POST /vehicles/{id}/program` | 部署 `{program, rev?, params?, mode: pilot | copilot, team?}` |
 | `POST /vehicles/{id}/program/stop` · `.../resume` | 停止 / 恢复 |
 | `PATCH /vehicles/{id}/program/params` | 实时调参 `{名称: 值}` |
 | `GET /vehicles/{id}/program/log?after=` | 日志（环 500 行）`{lines: [{seq, t, level, text}], last_seq}` |

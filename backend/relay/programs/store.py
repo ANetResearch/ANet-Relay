@@ -35,7 +35,16 @@ DESCRIPTION_MAX = 2000
 NOTE_MAX = 200
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 EXAMPLES_DIR = Path(__file__).resolve().parent / "examples"
-BUILTIN_IDS = ("hover_trim", "liftoff", "patrol", "hunter_easy", "hunter_medium", "hunter_hard", "rammer")
+BUILTIN_IDS = (
+    "hover_trim",
+    "liftoff",
+    "patrol",
+    "hunter_easy",
+    "hunter_medium",
+    "hunter_hard",
+    "rammer",
+    "figure8_evader",
+)
 
 
 def _clean_text(value: Any, limit: int, field: str) -> str:

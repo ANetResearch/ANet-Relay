@@ -2,7 +2,7 @@
 // never read back into the renderer: the shell only reports whether one is stored and its last four characters.
 // Storage (06 §9): the app data folder by default, the system keychain only when the operator turns it on.
 import * as React from 'react'
-import type { CopilotApi, CopilotConfig, CopilotToolScope } from '@/api'
+import type { CopilotApi, CopilotConfig, CopilotThinking, CopilotToolScope } from '@/api'
 import { notify } from '@/shell/notify'
 import { Button } from '@/ui/components/ui/button'
 import { Input } from '@/ui/components/ui/input'
@@ -18,6 +18,8 @@ type RowComponent = React.ComponentType<{ label: string; hint?: React.ReactNode;
 const APIS: CopilotApi[] = ['openai-completions', 'anthropic-messages', 'openai-responses']
 const SCOPES: CopilotToolScope[] = ['flight', 'flight+device', 'all']
 const OPACITY_RANGE = [60, 100] as const
+const THINKING: CopilotThinking[] = ['auto', 'off', 'low', 'high']
+const MAX_TOKENS_RANGE = [1024, 131072] as const
 
 export function CopilotSettings({ Row }: { Row: RowComponent }) {
   const t = useCPT()
@@ -28,6 +30,7 @@ export function CopilotSettings({ Row }: { Row: RowComponent }) {
   const [model, setModel] = React.useState('')
   const [key, setKey] = React.useState('')
   const [opacity, setOpacity] = React.useState(100)
+  const [maxTokens, setMaxTokens] = React.useState('16384')
   const [busy, setBusy] = React.useState<'save' | 'test' | null>(null)
   const [result, setResult] = React.useState<string | null>(null)
 
@@ -41,6 +44,7 @@ export function CopilotSettings({ Row }: { Row: RowComponent }) {
       setBaseUrl(c.baseUrl)
       setModel(c.model)
       setOpacity(c.opacity)
+      setMaxTokens(String(c.maxTokens))
     }, () => {})
     return () => {
       alive = false
@@ -57,6 +61,7 @@ export function CopilotSettings({ Row }: { Row: RowComponent }) {
       setCfg(next)
       useCopilot.getState().setConfig(next)
       if (Object.hasOwn(patch, 'apiKey')) setKey('')
+      setMaxTokens(String(next.maxTokens))
       notify(t('cps.saved'))
       return true
     } catch (e) {
@@ -65,6 +70,11 @@ export function CopilotSettings({ Row }: { Row: RowComponent }) {
     } finally {
       setBusy(null)
     }
+  }
+  const commitMaxTokens = () => {
+    const n = Math.round(Number(maxTokens))
+    if (!Number.isFinite(n) || n === cfg?.maxTokens) return setMaxTokens(String(cfg?.maxTokens ?? 16384))
+    void save({ maxTokens: Math.min(MAX_TOKENS_RANGE[1], Math.max(MAX_TOKENS_RANGE[0], n)) })
   }
   const test = async () => {
     if (!(await save({ api, baseUrl, model, ...(key ? { apiKey: key } : {}) }))) return
@@ -90,6 +100,37 @@ export function CopilotSettings({ Row }: { Row: RowComponent }) {
       </Row>
       <Row label={t('cps.model')} hint={t('cps.modelHint')}>
         <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="gpt-5.5" spellCheck={false} className="h-7 w-[260px] font-mono text-[12px]" aria-label={t('cps.model')} data-copilot-model="" />
+      </Row>
+      <Row label={t('cps.thinking')} hint={t('cps.thinkingHint')} wide>
+        <NativeSelect
+          value={cfg?.thinking ?? 'auto'}
+          onChange={(e) => void save({ thinking: e.target.value as CopilotThinking })}
+          className="w-[260px]"
+          aria-label={t('cps.thinking')}
+          data-copilot-thinking=""
+        >
+          {THINKING.map((th) => (
+            <NativeSelectOption key={th} value={th}>
+              {t(`cps.thinking.${th}` as CopilotKey)}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </Row>
+      <Row label={t('cps.maxTokens')} hint={t('cps.maxTokensHint')} wide>
+        <Input
+          type="number"
+          inputMode="numeric"
+          min={MAX_TOKENS_RANGE[0]}
+          max={MAX_TOKENS_RANGE[1]}
+          step={1024}
+          value={maxTokens}
+          onChange={(e) => setMaxTokens(e.target.value)}
+          onBlur={commitMaxTokens}
+          onKeyDown={(e) => e.key === 'Enter' && commitMaxTokens()}
+          className="num h-7 w-[140px] text-[12px]"
+          aria-label={t('cps.maxTokens')}
+          data-copilot-max-tokens=""
+        />
       </Row>
       <Row label={t('cps.scope')} hint={t('cps.scopeHint')} wide>
         <NativeSelect

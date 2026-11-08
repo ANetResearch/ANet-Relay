@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/media/readme/banner.gif" alt="昏暗体素大厅中的一队开放式机架四旋翼" width="100%" />
+<img src="docs/media/readme/banner.gif" alt="ANet Relay：面向智能体集群的地面站。昏暗体素大厅中的一队开放式机架四旋翼" width="100%" />
 
 <h1>ANet Relay</h1>
 

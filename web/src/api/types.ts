@@ -1766,7 +1766,7 @@ export interface DogfightView {
  */
 export interface DogfightConfig {
   aircraft: number
-  teams: 'ffa' | 2 | 3
+  teams: 'ffa' | 2 | 3 | 'custom'
   roles: {
     [k: string]: number | undefined
   }
@@ -1785,6 +1785,10 @@ export interface DogfightConfig {
    * on the LAN (the match is shared) or local practice
    */
   lan: boolean
+  /**
+   * 08 §5: the custom entries, filled in
+   */
+  entrants: {}[] | null
 }
 /**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
@@ -1792,9 +1796,11 @@ export interface DogfightConfig {
  */
 export interface DogfightAircraft {
   vid: string
-  role: 'gunner' | 'rammer'
+  role: 'gunner' | 'rammer' | 'pilot'
   program: string
   team: string
+  position: 'none' | 'uwb' | 'gps'
+  label: string
   /**
    * booting | arming | deploying | flying | human | down | stopped | failed
    */

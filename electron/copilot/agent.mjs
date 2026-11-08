@@ -18,7 +18,13 @@ import { PROGRAM_DANGER, programTools } from "./tools-programs.mjs";
 import { matchTools } from "./tools-match.mjs"; // WP-B (07 §3-§4)
 
 export const APIS = ["openai-completions", "anthropic-messages", "openai-responses"];
+/** 08 §2: auto leaves thinking to the endpoint; off, low and high declare a reasoning model and set it. */
+export const THINKING = ["auto", "off", "low", "high"];
+export const MAX_TOKENS = { min: 1024, max: 131072, default: 16384 };
 const PROVIDER = "relay-copilot";
+const TRACE_TEXT = 12000; // characters of tool arguments and results kept for the run trace (08 §3)
+const THINKING_FLUSH_MS = 120;
+const DRAFT_EVERY_MS = 250;
 const HEARTBEAT_MS = 5000;
 const APPROVAL_TIMEOUT_MS = 120_000;
 /** Flight tools that move an aircraft; on a real one each waits for the operator's approval (04 §6.2). */
@@ -58,17 +64,20 @@ const STICKS_HIDDEN_DEVICE = new Set(["device_attitude", "device_velocity"]);
 /** A pi Models collection with one provider/model built from the user's endpoint settings. */
 export function buildModels(cfg, apiKey) {
   if (!APIS.includes(cfg.api)) throw new Error(`unsupported API ${cfg.api}`);
+  const thinking = THINKING.includes(cfg.thinking) ? cfg.thinking : "auto";
+  const maxTokens = Number.isFinite(cfg.maxTokens) ? Math.min(MAX_TOKENS.max, Math.max(MAX_TOKENS.min, Math.round(cfg.maxTokens))) : MAX_TOKENS.default;
   const model = {
     id: cfg.model,
     name: cfg.model,
     api: cfg.api,
     provider: PROVIDER,
     baseUrl: cfg.baseUrl,
-    reasoning: false,
+    // 08 §2: a reasoning model only when the operator chose a thinking level, so that "off" can switch it off
+    reasoning: thinking !== "auto",
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
-    maxTokens: 4096,
+    maxTokens,
     // Generic OpenAI-compatible servers (vLLM, Ollama, gateways) understand the classic subset only.
     compat:
       cfg.api === "openai-completions"
@@ -89,7 +98,7 @@ export function buildModels(cfg, apiKey) {
   });
   const models = createModels({ identity: { attribution: null } });
   models.setProvider(provider);
-  return { models, model: models.getModel(PROVIDER, cfg.model) };
+  return { models, model: models.getModel(PROVIDER, cfg.model), thinking };
 }
 
 // ---------------------------------------------------------------------------
@@ -423,6 +432,8 @@ export function systemPrompt(lang, scope = "all", level = "full") {
     "- Before flying, check relay_fleet or relay_vehicle when you are not sure which aircraft is meant or whether it is ready.",
     // WP-B (07 §3): phrases that mean a dogfight go straight to dogfight_start; it sets up the aircraft itself
     '- Dogfights: call dogfight_start directly, without arming or deploying anything first. "开一场 6 机混战，4 架开火 2 架撞击" or "a six-aircraft free-for-all, four shooting and two ramming" -> dogfight_start {aircraft: 6, teams: "ffa", roles: {gunner: 4, rammer: 2}}; "两队对抗" / "two teams" -> teams: 2; "三队" -> teams: 3; "打 5 分钟" -> duration_s: 300; "不复活" -> respawn: false; "用困难猎手" -> programs: {gunner: "hunter_hard"}. "谁击落最多" / "排行榜" -> leaderboard {by: "downs"}; "谁活得最久" -> by: "survival"; "命中率" -> by: "accuracy"; "撞毁最多" -> by: "rams". Simulators only: never put a real aircraft in a dogfight.',
+    // 08 §5: custom fights with per-aircraft roles, programs, teams and position sources
+    '- Custom fights: when aircraft need different programs, targets or sensors, call dogfight_start once with entrants (one entry per aircraft) instead of adding simulators and deploying programs yourself; it sets up the simulators, practice arena (so rounds count), teams, sensors, arming and programs. Put attackers on one team and their target on another so they only chase it. "全局状态 / global status / knows where it is" -> position: "gps"; "只有视角 / only its own view" -> position: "none" (it sees other aircraft only as contacts). Example: "三架飞机，A 尽量飞 8 字并优先躲避、可获取全局状态，一架撞毁 A，一架用子弹打掉 A" -> dogfight_start {entrants: [{role: "pilot", program: "figure8_evader", team: "A", position: "gps", label: "A"}, {role: "rammer", team: "B"}, {role: "gunner", team: "B"}]}. figure8_evader is a built-in example that flies a figure eight on its position source and dodges; to change its behaviour, copy it with program_create, edit and test it, then pass your program id. Report the aircraft ids and roles, then watch dogfight_status and leaderboard.',
     "- If the user did not name an aircraft, use the selected aircraft given in the message context; if none, ask.",
     "- A person can possess any aircraft at any time and always wins. If a tool reports possessed_by_human, stop and tell the user to release the aircraft first. Never retry around it.",
     "- Real aircraft only move after the operator approves each command in the chat; this covers every motion tool, arming, mode changes, program deployment and every device tool that can spin a motor, drive an output, override RC, reboot, calibrate, terminate, force-arm, write a parameter or fly a target. If they decline, do not insist. The approval is the confirmation: never ask the user to type a confirm word.",
@@ -483,7 +494,169 @@ function summarise(name, args, danger) {
 // Approval ids stay unique across agent rebuilds, so a card from an earlier conversation never matches a new one.
 let approvalSeq = 0;
 
-export function createCopilot({ relay, models, model, emit, lang = () => "en", scope = () => "all" }) {
+// Run numbers stay unique across agent rebuilds, like approval ids.
+let runSeq = 0;
+
+/** "{...}" of a tool call's arguments for the trace, cut at TRACE_TEXT characters. */
+const traceJson = (value) => {
+  try {
+    const out = JSON.stringify(value ?? {}, null, 1);
+    return out.length > TRACE_TEXT ? `${out.slice(0, TRACE_TEXT)}…` : out;
+  } catch {
+    return "";
+  }
+};
+
+const usageOf = (u) =>
+  u
+    ? {
+        input: u.input ?? 0,
+        output: u.output ?? 0,
+        reasoning: u.reasoning ?? null,
+        cacheRead: u.cacheRead ?? 0,
+        total: u.totalTokens ?? (u.input ?? 0) + (u.output ?? 0),
+      }
+    : null;
+
+/**
+ * The run trace (08 §3) from pi agent events: run, turn and tool timing, thinking in batches, the progress of tool
+ * arguments the model is writing, and per-turn stop reasons and token usage. Calls `emit` with renderer events.
+ */
+export function createTracer(emit, { model = "", thinking = "auto", now = () => Date.now(), timers = { setTimeout, clearTimeout } } = {}) {
+  let run = null;
+  let pending = "";
+  let flushTimer = null;
+  let lastDraft = 0;
+
+  const flush = () => {
+    if (flushTimer) timers.clearTimeout(flushTimer);
+    flushTimer = null;
+    if (pending && run) emit({ type: "thinking", run: run.id, turn: run.turn, delta: pending });
+    pending = "";
+  };
+
+  return {
+    handle(event) {
+      switch (event.type) {
+        case "agent_start":
+          run = { id: ++runSeq, at: now(), turn: 0, turnAt: 0, tools: 0, usage: { input: 0, output: 0, reasoning: 0, cacheRead: 0, total: 0 }, outcome: "done", toolAt: new Map() };
+          emit({ type: "run_start", run: run.id, at: run.at, model, thinking });
+          emit({ type: "busy", busy: true });
+          break;
+        case "message_start":
+          if (event.message.role === "assistant" && run) {
+            run.turn += 1;
+            run.turnAt = now();
+            lastDraft = 0;
+            emit({ type: "assistant_start", run: run.id, turn: run.turn });
+            emit({ type: "turn_start", run: run.id, turn: run.turn, at: run.turnAt });
+          }
+          break;
+        case "message_update": {
+          const e = event.assistantMessageEvent;
+          if (!e || !run) break;
+          if (e.type === "text_delta") {
+            flush();
+            emit({ type: "text", run: run.id, turn: run.turn, delta: e.delta });
+          } else if (e.type === "thinking_delta") {
+            pending += e.delta;
+            flushTimer ??= timers.setTimeout(flush, THINKING_FLUSH_MS);
+          } else if (e.type === "toolcall_start" || e.type === "toolcall_delta") {
+            flush();
+            const t = now();
+            if (e.type === "toolcall_start" || t - lastDraft >= DRAFT_EVERY_MS) {
+              lastDraft = t;
+              const block = e.partial?.content?.[e.contentIndex];
+              const chars = block?.partialJson?.length ?? block?.partialArgs?.length ?? JSON.stringify(block?.arguments ?? {}).length;
+              emit({ type: "draft", run: run.id, turn: run.turn, tool: block?.name ?? "", chars });
+            }
+          }
+          break;
+        }
+        case "message_end":
+          if (event.message.role === "assistant" && run) {
+            flush();
+            const m = event.message;
+            const content = m.content ?? [];
+            const toolCalls = content.filter((c) => c.type === "toolCall").map((c) => ({ id: c.id, name: c.name, args: traceJson(c.arguments) }));
+            const textChars = content.filter((c) => c.type === "text").reduce((n, c) => n + c.text.length, 0);
+            const thinkingChars = content.filter((c) => c.type === "thinking").reduce((n, c) => n + (c.thinking?.length ?? 0), 0);
+            const usage = usageOf(m.usage);
+            if (usage) {
+              for (const k of ["input", "output", "cacheRead", "total"]) run.usage[k] += usage[k];
+              run.usage.reasoning += usage.reasoning ?? 0;
+            }
+            const error = m.stopReason === "error" ? m.errorMessage || "error" : null;
+            const aborted = m.stopReason === "aborted";
+            // 08 §1: a turn that ran out of output, or said nothing at all, is reported instead of vanishing
+            const empty = !error && !aborted && textChars === 0 && toolCalls.length === 0;
+            // the run ends the way its last turn ended
+            if (error) run.outcome = "error";
+            else if (aborted) run.outcome = "aborted";
+            else if (m.stopReason === "length") run.outcome = "length";
+            else if (empty) run.outcome = "empty";
+            else run.outcome = "done";
+            emit({
+              type: "assistant_end",
+              run: run.id,
+              turn: run.turn,
+              error,
+              aborted,
+              stopReason: m.stopReason ?? null,
+              usage,
+              ms: now() - run.turnAt,
+              toolCalls,
+              textChars,
+              thinkingChars,
+              empty,
+            });
+          }
+          break;
+        case "tool_execution_start":
+          if (run) {
+            run.tools += 1;
+            run.toolAt.set(event.toolCallId, now());
+          }
+          emit({ type: "tool_start", run: run?.id, turn: run?.turn, at: now(), id: event.toolCallId, tool: event.toolName, args: event.args });
+          break;
+        case "tool_execution_update":
+          emit({ type: "tool_update", id: event.toolCallId, text: event.partialResult?.content?.[0]?.text ?? "" });
+          break;
+        case "tool_execution_end": {
+          const full = event.result?.content?.[0]?.text ?? "";
+          const started = run?.toolAt.get(event.toolCallId);
+          emit({
+            type: "tool_end",
+            id: event.toolCallId,
+            tool: event.toolName,
+            error: Boolean(event.isError),
+            text: full.slice(0, 600),
+            full: full.length > TRACE_TEXT ? `${full.slice(0, TRACE_TEXT)}…` : full,
+            ms: started === undefined ? null : now() - started,
+          });
+          break;
+        }
+        case "agent_end":
+          flush();
+          if (run) {
+            const at = now();
+            emit({ type: "run_end", run: run.id, at, ms: at - run.at, turns: run.turn, tools: run.tools, usage: run.usage, outcome: run.outcome });
+          }
+          run = null;
+          emit({ type: "busy", busy: false });
+          break;
+        default:
+          break;
+      }
+    },
+    /** A run the agent aborted before it ended (the window still gets run_end and busy false). */
+    get running() {
+      return run !== null;
+    },
+  };
+}
+
+export function createCopilot({ relay, models, model, emit, lang = () => "en", scope = () => "all", thinking = "auto" }) {
   const approvals = new Map();
   let vehicleKinds = new Map();
   const danger = dangerResolver(relay);
@@ -529,7 +702,13 @@ export function createCopilot({ relay, models, model, emit, lang = () => "en", s
     });
 
   const agent = new Agent({
-    initialState: { systemPrompt: systemPrompt(lang(), scope(), flightLevel), model, tools: toolsFor(relay, scope(), danger, flightLevel), thinkingLevel: "off" },
+    initialState: {
+      systemPrompt: systemPrompt(lang(), scope(), flightLevel),
+      model,
+      tools: toolsFor(relay, scope(), danger, flightLevel),
+      // 08 §2: low and high ask for that effort; auto and off send none (off also switches a reasoning model off)
+      thinkingLevel: thinking === "low" || thinking === "high" ? thinking : "off",
+    },
     streamFn: models.streamSimple.bind(models),
     toolExecution: "sequential",
     identity: { attribution: null },
@@ -545,47 +724,8 @@ export function createCopilot({ relay, models, model, emit, lang = () => "en", s
     },
   });
 
-  agent.subscribe((event) => {
-    switch (event.type) {
-      case "agent_start":
-        emit({ type: "busy", busy: true });
-        break;
-      case "message_start":
-        if (event.message.role === "assistant") emit({ type: "assistant_start" });
-        break;
-      case "message_update": {
-        const e = event.assistantMessageEvent;
-        if (e?.type === "text_delta") emit({ type: "text", delta: e.delta });
-        break;
-      }
-      case "message_end":
-        if (event.message.role === "assistant") {
-          const m = event.message;
-          emit({ type: "assistant_end", error: m.stopReason === "error" ? m.errorMessage || "error" : null, aborted: m.stopReason === "aborted" });
-        }
-        break;
-      case "tool_execution_start":
-        emit({ type: "tool_start", id: event.toolCallId, tool: event.toolName, args: event.args });
-        break;
-      case "tool_execution_update":
-        emit({ type: "tool_update", id: event.toolCallId, text: event.partialResult?.content?.[0]?.text ?? "" });
-        break;
-      case "tool_execution_end":
-        emit({
-          type: "tool_end",
-          id: event.toolCallId,
-          tool: event.toolName,
-          error: Boolean(event.isError),
-          text: (event.result?.content?.[0]?.text ?? "").slice(0, 600),
-        });
-        break;
-      case "agent_end":
-        emit({ type: "busy", busy: false });
-        break;
-      default:
-        break;
-    }
-  });
+  const tracer = createTracer(emit, { model: model?.id ?? "", thinking });
+  agent.subscribe((event) => tracer.handle(event));
 
   /** The level Relay reports (a Relay without the setting flies everything); the last one read when unreachable. */
   const readLevel = async () => {

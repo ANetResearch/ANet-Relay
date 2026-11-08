@@ -29,7 +29,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 __all__ = ["DEFAULT_BASE", "RelayClient", "RelayError"]
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 DEFAULT_BASE = os.environ.get("RELAY_API", "http://127.0.0.1:8765")
 API = "/api/v1"
@@ -783,8 +783,13 @@ class RelayClient:
         respawn: bool | None = None,
         seed: int | None = None,
         vehicles: list[str] | None = None,
+        entrants: list[dict] | None = None,
     ) -> dict:
         """A timed dogfight of 2 to 8 simulators, e.g. ``dogfight_start(6, roles={"gunner": 4, "rammer": 2})``.
+
+        ``entrants`` sets each aircraft on its own and replaces ``aircraft``, ``roles`` and ``teams``: a list of
+        ``{role: gunner | rammer | pilot, program?, team?, position?: none | uwb | gps, params?, label?}``
+        (``pilot`` never fires and needs ``program``).
 
         Relay adds or reuses the simulators, places them on a ring facing the centre, arms them and deploys a
         program per role (gunners fire, rammers ram); the programs fly with sticks only. Real aircraft never
@@ -802,6 +807,7 @@ class RelayClient:
             respawn=respawn,
             seed=seed,
             vehicles=list(vehicles) if vehicles is not None else None,
+            entrants=list(entrants) if entrants is not None else None,
         )
         return self._app("POST", "/scenarios/dogfight", body)
 
@@ -945,12 +951,14 @@ class RelayClient:
         arena: dict | None = None,
         seed: int | None = None,
         airframe: dict | None = None,
+        team: str | None = None,
     ) -> dict:
         """Run a revision on an aircraft at 50 Hz (06 §2.6); returns ``{id, program}`` (the run view).
 
         ``mode`` is ``pilot`` or ``copilot``. Simulators also take ``sensors`` ``{baro, position, contacts}``,
         ``arena`` ``{radius, floor, ceiling}``, ``seed`` and ``airframe`` ``{preset | params, seed?}``. A real
         aircraft needs the operator's ``Allow programs`` switch (``programs_not_allowed``) and preflight.
+        ``team`` sets the aircraft's team in every contact list (and a declared ``team`` parameter).
         """
         body = _drop_none(
             program=program_id,
@@ -961,6 +969,7 @@ class RelayClient:
             arena=arena,
             seed=seed,
             airframe=airframe,
+            team=team,
         )
         return self._either("POST", f"/vehicles/{vehicle_id}/program", body)
 

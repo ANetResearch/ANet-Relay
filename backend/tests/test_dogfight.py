@@ -193,6 +193,63 @@ def test_a_practice_dogfight_from_boot_to_the_end(svc, stepper):
     assert kinds(svc, "match_finished")
 
 
+def test_a_custom_fight_with_entrants(svc, stepper):
+    """08 §5: A flies figure8_evader on a position source on its own team; a rammer and a gunner hunt it."""
+    client = TestClient(create_app(svc), base_url="http://127.0.0.1")
+    for entrants, err in (
+        ([{"role": "pilot"}, {"role": "gunner"}], "invalid_request"),  # a pilot needs a program
+        ([{"role": "gunner"}], "invalid_request"),
+        ([{"role": "pilot", "program": "nope"}, {"role": "rammer"}], "program_not_found"),
+        ([{"role": "gunner", "position": "lidar"}, {"role": "rammer"}], "invalid_request"),
+    ):
+        res = client.post(f"{API}/scenarios/dogfight", headers=OP, json={"entrants": entrants})
+        assert res.json()["error"]["code"] == err, entrants
+    body = {
+        "entrants": [
+            {"role": "pilot", "program": "figure8_evader", "team": "A", "position": "gps", "label": "A"},
+            {"role": "rammer", "team": "B"},
+            {"role": "gunner", "team": "B", "params": {"fire_dist": 6.0}},
+        ],
+        "duration_s": 60,
+        "seed": 3,
+    }
+    view = client.post(f"{API}/scenarios/dogfight", headers=OP, json=body).json()
+    DogfightView.model_validate(view)
+    assert view["config"]["aircraft"] == 3 and view["config"]["teams"] == "custom"
+    assert [(a["role"], a["program"], a["team"], a["position"], a["label"]) for a in view["aircraft"]] == [
+        ("pilot", "figure8_evader", "A", "gps", "A"),
+        ("rammer", "rammer", "B", "none", ""),
+        ("gunner", "hunter_medium", "B", "none", ""),
+    ]
+    assert svc.arena.hold_fire == {"sim-1", "sim-2"}  # only the gunner's trigger counts
+    assert until(svc, stepper, lambda: all(c.state == "flying" for c in crafts(svc).values()), 10)
+    assert svc.programs.teams == {"sim-1": "A", "sim-2": "B", "sim-3": "B"}
+    runs = svc.programs.runs
+    assert runs["sim-1"].builder.sensors.position == "gps"
+    assert runs["sim-2"].builder.sensors.position == "none"
+    assert svc.vehicles["sim-1"].program.params["team"] == "A"
+    assert svc.vehicles["sim-2"].program.params["team"] == "B"
+    assert svc.vehicles["sim-3"].program.params["fire_dist"] == 6.0
+    run(svc, stepper, 4.0)
+    assert svc.vehicles["sim-1"].program.state in ("climb", "eight", "dodge")
+    svc.dogfights.stop(OPERATOR)
+    run(svc, stepper, 1.0)
+
+
+def test_a_manual_deploy_sets_the_team(svc, stepper):
+    svc.add_sims(1)
+    stepper.run(2.5)
+    client = TestClient(create_app(svc), base_url="http://127.0.0.1")
+    client.post(f"{API}/vehicles/sim-1/mode", headers=OP, json={"name": "STABILIZE"})
+    client.post(f"{API}/vehicles/sim-1/arm", headers=OP, json={"arm": True})
+    stepper.run(0.5)
+    res = client.post(f"{API}/vehicles/sim-1/program", headers=OP, json={"program": "rammer", "team": "B"})
+    assert res.status_code == 200, res.json()
+    assert svc.programs.teams["sim-1"] == "B" and svc.vehicles["sim-1"].program.params["team"] == "B"
+    res = client.post(f"{API}/vehicles/sim-1/program", headers=OP, json={"program": "rammer", "team": ""})
+    assert res.json()["error"]["code"] == "invalid_request"
+
+
 def test_rammers_never_fire(svc, stepper):
     svc.dogfights.start(
         {"aircraft": 2, "roles": {"gunner": 1, "rammer": 1}, "duration_s": 30, "seed": 2}, OPERATOR

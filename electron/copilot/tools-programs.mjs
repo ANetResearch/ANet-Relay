@@ -219,8 +219,9 @@ export function programTools(relay) {
         arena: opt(Type.Object({ radius: Type.Number(), floor: Type.Number(), ceiling: Type.Number() })),
         seed: opt(Type.Integer({ minimum: 0 })),
         airframe: opt(AIRFRAME),
+        team: opt(Type.String({ maxLength: 16, description: "Team of this aircraft in every contact list; filled into the program's team parameter. Aircraft on one team never target each other." })),
       }),
-      claimed((p) => call("POST", prog(p.vehicle), pick(p, ["program", "rev", "params", "mode", "sensors", "arena", "seed", "airframe"]))),
+      claimed((p) => call("POST", prog(p.vehicle), pick(p, ["program", "rev", "params", "mode", "sensors", "arena", "seed", "airframe", "team"]))),
     ),
     defineTool("program_stop", "Stop program", "Stop the program on an aircraft; the sticks go back to the safety layer (an airborne simulator in a manual mode then descends: land it or stop it).", Type.Object({ vehicle: VID }), claimed((p) => call("POST", `${prog(p.vehicle)}/stop`))),
     defineTool(

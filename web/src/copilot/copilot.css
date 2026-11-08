@@ -134,10 +134,116 @@ html[data-window='copilot'] body {
   }
 }
 
+/* 08 §4: run chip, pixel craft and run trace */
+.cp-run-chip {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  text-align: left;
+  font-size: 11px;
+  transition: border-color var(--dur-quick, 160ms);
+}
+
+.cp-run-chip:hover,
+.cp-run-chip[aria-expanded="true"] {
+  border-color: var(--g500);
+}
+
+.cp-run-live {
+  background: var(--g900);
+}
+
+.cp-craft {
+  fill: var(--r500);
+  overflow: visible;
+}
+
+.cp-craft .cp-craft-nose {
+  fill: var(--r300);
+}
+
+.cp-craft[data-active] .cp-craft-body {
+  animation: cp-craft-bob 0.9s steps(2, jump-none) infinite;
+}
+
+.cp-craft[data-active] .cp-craft-a {
+  animation: cp-craft-rotor 0.24s steps(1, end) infinite;
+}
+
+.cp-craft[data-active] .cp-craft-b {
+  animation: cp-craft-rotor 0.24s steps(1, end) infinite reverse;
+  animation-delay: -0.12s;
+}
+
+@keyframes cp-craft-rotor {
+  50% {
+    opacity: 0.15;
+  }
+}
+
+@keyframes cp-craft-bob {
+  0% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(-1px);
+  }
+}
+
+.cp-run-trace {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--g900);
+  padding: 7px 9px;
+  font-size: 11px;
+}
+
+.cp-run-step + .cp-run-step {
+  border-top: 1px solid var(--border);
+}
+
+.cp-run-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  text-align: left;
+}
+
+.cp-run-step[data-stop="length"] .cp-run-row,
+.cp-run-step[data-state="error"] .cp-run-row {
+  color: var(--g100);
+}
+
+.cp-run-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 0 6px 18px;
+}
+
+.cp-run-pre {
+  max-height: 220px;
+  border-radius: 4px;
+  background: var(--g950);
+  padding: 4px 6px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cp-spin,
   .cp-pulse,
-  .cp-thinking {
+  .cp-thinking,
+  .cp-craft .cp-craft-body,
+  .cp-craft .cp-craft-a,
+  .cp-craft .cp-craft-b {
     animation: none;
   }
 }
