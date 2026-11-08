@@ -12,16 +12,20 @@ export const DEFAULT_BOOT_MODE: BootMode = 'short'
 
 /** The eight cooperation films of 06 §8. */
 export const COOP_CLIPS = ['cut-formation', 'cut-handover', 'cut-groundair', 'cut-quadruped', 'cut-vtol', 'cut-assembly', 'cut-gateduel', 'cut-search'] as const
-/** The nine camera-move films of 06 §8 (barrel roll, pull-back with spin, fisheye, spiral, vortex, FPV flip, helix, dolly zoom, whip pan). */
-export const CAM_CLIPS = ['cut-cam-roll', 'cut-cam-pullspin', 'cut-cam-fisheye', 'cut-cam-spiral', 'cut-cam-vortex', 'cut-cam-fpvflip', 'cut-cam-helix', 'cut-cam-dolly', 'cut-cam-whip'] as const
-/** Boot films in web/public/boot/ (WebM VP9 with a JPEG poster each); the short cut rotates through all nineteen in this order, camera moves first. */
-export const CLIPS = [...CAM_CLIPS, ...COOP_CLIPS, 'cut-chase', 'cut-split'] as const
+/** The action films of 06 §8 and §12: the chase and its five siblings (tight chase camera, shake, speed), then the six
+ * camera-move films (barrel roll, fisheye, FPV flip, helix, dolly zoom, whip pan). */
+export const ACTION_CLIPS = [
+  'cut-chase', 'cut-chase-tunnel', 'cut-chase-pillars', 'cut-chase-dogfight', 'cut-chase-dive', 'cut-chase-skim',
+  'cut-cam-roll', 'cut-cam-fisheye', 'cut-cam-fpvflip', 'cut-cam-helix', 'cut-cam-dolly', 'cut-cam-whip',
+] as const
+/** Boot films in web/public/boot/ (WebM VP9 with a JPEG poster each); the short cut rotates through all twenty-one in this order, action films first. */
+export const CLIPS = [...ACTION_CLIPS, ...COOP_CLIPS, 'cut-split'] as const
 export type Clip = (typeof CLIPS)[number]
 
-/** The director's cut of launch `n`: a camera-move film, then a cooperation film, each rotating by launch count (06 §8). */
+/** The director's cut of launch `n`: an action film, then a cooperation film, each rotating by launch count (06 §8). */
 export function fullClips(n = 0): readonly Clip[] {
   const k = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0
-  return [CAM_CLIPS[k % CAM_CLIPS.length], COOP_CLIPS[k % COOP_CLIPS.length]]
+  return [ACTION_CLIPS[k % ACTION_CLIPS.length], COOP_CLIPS[k % COOP_CLIPS.length]]
 }
 
 /** localStorage keys. `mode` mirrors Settings > General because the boot runs before the backend answers. */

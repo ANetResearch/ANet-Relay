@@ -19,22 +19,23 @@ describe('arena HUD geometry', () => {
     expect(Math.abs(incomingAngle([35, 0, 0], cam))).toBeCloseTo(90, 6)
   })
 
-  it('turns marks into a flash on our aircraft and debris at the hit point', () => {
+  it('turns marks into a flash on our aircraft and a voxel burst at every hit point', () => {
     const calls: string[] = []
     const api = {
-      debris: (_at: THREE.Vector3, n: number) => void calls.push(`debris ${n}`),
+      burst: (_at: THREE.Vector3, kind: 'hit' | 'down') => void calls.push(`burst ${kind}`),
       flash: (vid: string) => void calls.push(`flash ${vid}`),
     }
     const mark = (kind: ArenaMark['kind'], down = false): ArenaMark => ({ seq: 1, kind, vehicle: 'sim-1', at: 0, point: [0, 0, 1], dir: null, down })
-    applyMarks([mark('taken', true), mark('hit')], api, () => new THREE.Vector3())
-    expect(calls).toEqual(['flash sim-1', 'debris 8', 'debris 18', 'debris 8'])
+    applyMarks([mark('taken', true), mark('hit'), mark('hit', true)], api, () => new THREE.Vector3())
+    // a shoot-down burst belongs to the aircraft that went down, so only a hit taken carries one here
+    expect(calls).toEqual(['flash sim-1', 'burst hit', 'burst down', 'burst hit', 'burst hit'])
   })
 })
 
 describe('arena marks under reduced motion', () => {
   afterEach(() => {
     initMotionTier('')
-    fx.voxels = []
+    fx.bursts = []
     fx.flashes = []
   })
 
@@ -46,18 +47,18 @@ describe('arena marks under reduced motion', () => {
     expect(markRemainingMs(1000, 1000, 0)).toBe(0) // unreadable token: no mark rather than a stuck one
   })
 
-  it('throws no debris and no flash in reduced or off motion, remote shoot-downs included', () => {
-    fx.enabled = true
-    fx.debris(new THREE.Vector3(), 18, new THREE.Color(), 500, 0.6)
+  it('keeps a still cube at each hit and no flash in reduced or off motion, remote shoot-downs included', () => {
+    fx.burst(new THREE.Vector3(), 'down', 1)
     fx.flash('sim-1', 80)
-    expect([fx.voxels.length, fx.flashes.length]).toEqual([18, 1])
+    expect([fx.bursts.map((b) => b.kind), fx.flashes.length]).toEqual([['down'], 1])
     for (const tier of ['reduced', 'off']) {
-      fx.voxels = []
+      fx.bursts = []
       fx.flashes = []
       initMotionTier(`?motion=${tier}`)
-      fx.debris(new THREE.Vector3(), 18, new THREE.Color(), 500, 0.6)
+      fx.burst(new THREE.Vector3(), 'down', 1)
+      fx.burst(new THREE.Vector3(), 'hit', 2)
       fx.flash('sim-1', 80)
-      expect([fx.voxels.length, fx.flashes.length]).toEqual([0, 0])
+      expect([fx.bursts.map((b) => b.kind), fx.flashes.length]).toEqual([['still', 'still'], 0])
     }
   })
 })

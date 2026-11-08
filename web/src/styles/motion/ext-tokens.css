@@ -48,8 +48,9 @@
     --voxel-cycle: 1200ms;                /* VoxelLoader: build and tear-down loop */
     --voxel-wipe: 300ms;                  /* VoxelWipe: workspace switch and replay open (250-350 ms) */
     --voxel-scatter: 350ms;               /* StageLoading: cube scatters out when the model is ready */
-    /* LAN arena (05 §7.5, WP-D); the hit flash uses --duration-micro and hit debris --duration-medium */
-    --duration-arena-trail: 40ms;         /* bullet tracer tail, as a span of flight time */
+    /* LAN arena (05 §7.5, WP-D; bullets and hits per 06 §11); the hit flash and burst core use --duration-micro */
+    --duration-arena-trail: 90ms;         /* voxel tracer tail, as a span of flight time (about 3 m) */
+    --duration-arena-burst: 650ms;        /* voxel hit burst; a shoot-down adds a burst of twice --duration-very-slow */
     --duration-arena-hit-mark: 120ms;     /* crosshair corners jump out on a confirmed hit */
     --duration-arena-hit-dir: 200ms;      /* screen-edge arc towards the shooter after a hit taken */
   }

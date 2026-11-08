@@ -19,6 +19,8 @@ export const ARENA_TOKENS = {
   debris: '--duration-medium',
   downDebris: '--duration-very-slow',
   trail: '--duration-arena-trail',
+  burst: '--duration-arena-burst',
+  core: '--duration-micro',
   hitMark: '--duration-arena-hit-mark',
   hitDir: '--duration-arena-hit-dir',
 } as const

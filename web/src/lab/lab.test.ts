@@ -4,7 +4,7 @@ import type { Program } from '@/api'
 import { normChallenges, normJob, normLadder, jobFinished } from './api'
 import { LAB_DICTS, reasonKey, type LabKey } from './copy'
 import { diffStats, lineDiff, withContext } from './diff'
-import { parseTrace, recentEvent, sampleAt, sampleIndex, shotsAt, traceStageId } from './trace'
+import { impactsAt, parseTrace, recentEvent, sampleAt, sampleIndex, shotsAt, traceImpacts, traceStageId } from './trace'
 import { isDirty, NEW_SOURCE, testsOf } from './store'
 import { intLiteral, paramRange, paramStep } from './ParamsTab'
 import { parseObject } from './TestsTab'
@@ -109,6 +109,21 @@ describe('trace', () => {
     expect(shotsAt(tr.shots, 4.1)).toHaveLength(0)
     expect(recentEvent(tr.events, 1)?.kind).toBe('hit')
     expect(recentEvent(tr.events, 3)).toBeNull()
+  })
+  it('finds every impact once: where a round ended on a hit, or where the aircraft was hit or went down', () => {
+    const tr = parseTrace({ ...raw, events: [...raw.events, { t: 1.2, kind: 'hit', vehicle: 'b', by: 'a' }, { t: 1.8, kind: 'down', vehicle: 'b', by: 'a' }] })!
+    const all = traceImpacts(tr)
+    expect(all.map((m) => [m.t, m.kind, m.key])).toEqual([[0.6, 'hit', 'shot:s1'], [1.2, 'hit', 'event:1'], [1.8, 'down', 'event:2']])
+    // the round of s1 flew about 3.3 m east (drag) before it hit
+    expect(all[0].p[0]).toBeGreaterThan(3.1)
+    expect(all[0].p[0]).toBeLessThan(3.6)
+    // the unmatched hit and the shoot-down sit on aircraft b
+    expect(all[2].p[0]).toBeCloseTo(5)
+    expect(traceImpacts(tr)).toBe(all)
+    const life = (k: 'hit' | 'down') => (k === 'down' ? 1 : 0.65)
+    expect(impactsAt(tr, 0.5, life)).toEqual([])
+    expect(impactsAt(tr, 0.7, life).map((m) => m.key)).toEqual(['shot:s1'])
+    expect(impactsAt(tr, 2.5, life).map((m) => m.key)).toEqual(['event:2'])
   })
   it('publishes prefixed stage ids so live aircraft never collide', () => {
     const crafts = craftsAt(parseTrace(raw)!, 1)

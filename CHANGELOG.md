@@ -5,6 +5,29 @@ All notable changes to ANet Relay are documented in this file. The format follow
 [Semantic Versioning](https://semver.org/). Each release section is published as the
 GitHub Release notes for its tag.
 
+## [0.4.1] - 2026-11-08
+
+Bullets and hits that read from across the arena, and a reworked set of opening
+films.
+
+### Changed
+
+- Bullets: every round is now a chain of voxel cubes with a white-hot head and a
+  bright red tail inside an additive glow. Cubes never shrink below a few pixels,
+  so rounds stay visible from far away. This terminal's rounds (or the first
+  aircraft's in a replay) are a lighter red than everyone else's.
+- Hits: every hit throws a voxel burst at the hit point, a white core that
+  swells and fades and red and white shards that fly out and fall. A shoot-down
+  throws a larger grey and red burst. Under reduced motion a still white cube
+  marks the hit instead.
+- Lab replays: duel and challenge replays now show the same tracers and the
+  bursts of every hit and shoot-down. Scrubbing back and forth shows the same
+  frame each time.
+- Opening films: three camera-move films are replaced by five new chase films
+  (tunnel, pillar slalom, dogfight, tower dive and water skim) in the style of
+  the chase. The director's cut opens on an action film, starting with the
+  chase, and then a cooperation film. The opening's length is unchanged.
+
 ## [0.4.0] - 2026-11-08
 
 Onboard programs that fly at 50 Hz on the stick path, judged challenges and duels
@@ -455,6 +478,7 @@ xattr -dr com.apple.quarantine "/Applications/ANet Relay.app"
 - Stick timing has been verified on simulators and fake aircraft; check stick
   directions with the propellers removed before the first flight of each aircraft.
 
+[0.4.1]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.4.1
 [0.4.0]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.4.0
 [0.3.1]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.3.1
 [0.3.0]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.3.0

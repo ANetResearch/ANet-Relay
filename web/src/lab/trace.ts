@@ -1,5 +1,6 @@
 // Evaluation traces (06 §3.4): the 10 Hz downsampled flight of every aircraft in one judged run or duel round, plus
-// the rounds fired, as GET /traces/{id} returns it. Pure: no React, no three.js (trace.test.ts).
+// the rounds fired, as GET /traces/{id} returns it. Pure: no React, no three.js (trace.test.ts); rounds fly
+// arena/ballistics.
 //
 // Wire shape (WP-2b writes it; this parser is the reference reader):
 //
@@ -29,6 +30,8 @@
 // a shared "t" column and a "fields" list, each aircraft's "frames" rows in the order of "fields" (angles in radians,
 // "flags" bit 1 = armed), "states" as [t, name] changes, shots with "shooter" and no end time (the end is the hit
 // event of that shooter whose point is nearest the round's path), and events with "shooter". See fromJudgeTrace.
+
+import { flightAt } from '@/arena/ballistics'
 
 export interface TraceArena {
   radius: number
@@ -328,6 +331,50 @@ export function shotsAt(shots: readonly TraceShot[], t: number, lifetime = 2.5):
     out.push(s)
   }
   return out
+}
+
+/** Where something was hit or shot down in a trace (ENU metres), for the voxel bursts of the replay (06 §11). */
+export interface TraceImpact {
+  t: number
+  kind: 'hit' | 'down'
+  p: [number, number, number]
+  /** stable per impact, so a burst looks the same every time the cursor passes it */
+  key: string
+}
+
+const impactsOf = new WeakMap<Trace, TraceImpact[]>()
+
+/**
+ * Every impact of a trace, by time: the end of each round that ended on a hit (where the round was), a hit event
+ * whose round is unknown (where the target was) and each shoot-down (where the aircraft went down). Cached per trace.
+ */
+export function traceImpacts(trace: Trace): TraceImpact[] {
+  const hit = impactsOf.get(trace)
+  if (hit) return hit
+  const out: TraceImpact[] = []
+  const ended = new Set<string>()
+  for (const s of trace.shots) {
+    if (s.t_end === null) continue
+    const f = flightAt(s, s.t_end)
+    out.push({ t: s.t_end, kind: 'hit', p: [f.p[0], f.p[1], Math.max(0, f.p[2])], key: `shot:${s.id}` })
+    ended.add(`${s.owner}@${s.t_end}`)
+  }
+  trace.events.forEach((e, i) => {
+    if (e.kind !== 'hit' && e.kind !== 'down') return
+    if (e.kind === 'hit' && ended.has(`${e.by}@${e.t}`)) return
+    const craft = trace.aircraft.find((c) => c.id === e.vehicle)
+    if (!craft || !craft.t.length) return
+    const at = sampleAt(craft, e.t)
+    out.push({ t: e.t, kind: e.kind, p: [at.x, at.y, at.z], key: `event:${i}` })
+  })
+  out.sort((a, b) => a.t - b.t)
+  impactsOf.set(trace, out)
+  return out
+}
+
+/** Impacts whose burst is still showing at t (started at or before t, within `lifeS` of their kind). */
+export function impactsAt(trace: Trace, t: number, lifeS: (kind: 'hit' | 'down') => number): TraceImpact[] {
+  return traceImpacts(trace).filter((m) => m.t <= t && t - m.t <= lifeS(m.kind))
 }
 
 /** The newest event at or before t within `window` seconds (for the replay bar caption). */

@@ -1,12 +1,11 @@
 // LAN arena layer of the stage scene (05 §7.5), mounted next to <CourseLayer/>. Remote simulators fly the same
 // airframe in g400 graphite with g200 arm lamps and a "callsign / SIM-N" label, smoothed in their own target table
-// (never live.state, so they stay out of camera framing, the fleet panel and records). Bullets are one InstancedMesh
-// (at most 512 thin tracer capsules, white for this terminal's rounds and g300 for others, toneMapped off) with a
-// short tail; every frame lands on the shared 1/240 s integrator lattice (./ballistics). A hit on one of our
-// aircraft flashes its shell, the only red of the arena (damage to our own armed aircraft: damageTone, single-red
-// rule 2 in store/red.ts), and throws voxel debris; a shoot-down throws grey voxels. Software rendering keeps the
-// bullets as points and drops the tail and the debris; reduced motion drops the flash and all debris, remote
-// shoot-downs included (the fx queue itself refuses them).
+// (never live.state, so they stay out of camera framing, the fleet panel and records). Bullets are voxel tracers
+// (./voxelFx, 06 §11: a white-hot head and a red tail, r400 for this terminal's rounds and r500 for others, with a
+// floor on their size in pixels so they read from far away); every frame lands on the shared 1/240 s integrator
+// lattice (./ballistics). Every hit throws a voxel burst at the hit point; a hit on one of our aircraft also flashes
+// its shell (damageTone, store/red.ts); a shoot-down throws a larger grey and red burst. Software rendering drops
+// the tracer tails. Reduced motion drops the flash and replaces each burst with a still white cube at the hit.
 // Hidden while Records replays a flight.
 import * as React from 'react'
 import * as THREE from 'three'
@@ -28,28 +27,19 @@ import { flightAt, type Flight } from './ballistics'
 import { useTA } from './copy'
 import { useArena, watchArenaEvents, type ArenaMark, type ArenaRemote } from './store'
 import { ARENA_TOKENS, tokenMs } from './timing'
+import { burstLife, seedOf, VoxelFx, type Burst } from './voxelFx'
 
 const MAX_BULLETS = 512
-const MAX_DEBRIS = 192
+const MAX_BURSTS = 64
 const MAX_FLASHES = 8
 const SMOOTH_TAU = 0.12
 const LEAD_MAX_S = 0.15
 const SNAP_DISTANCE = 3
-const TRACER_LENGTH = 0.06
-const TRACER_RADIUS = 0.0035
-const VOXEL = 0.012
-const HIT_VOXELS = 8
-const DOWN_VOXELS = 18
 const FLASH_RADIUS = 0.085
 const LABEL_LIFT = 0.12
 
 const tmpV = new THREE.Vector3()
-const tmpQ = new THREE.Quaternion()
-const tmpM = new THREE.Matrix4()
-const tmpS = new THREE.Vector3(1, 1, 1)
 const tmpD = new THREE.Vector3()
-const ONE = new THREE.Vector3(1, 1, 1)
-const AXIS_Y = new THREE.Vector3(0, 1, 0)
 
 function scene(p: readonly number[], out = new THREE.Vector3()): THREE.Vector3 {
   const [x, y, z] = enuToScene(p[0], p[1], p[2])
@@ -86,41 +76,23 @@ function useRemoteList(): { key: string; label: string }[] {
 
 // ---------------------------------------------------------------- effects pool
 
-interface Voxel {
-  born: number
-  life: number
-  p: THREE.Vector3
-  v: THREE.Vector3
-  color: THREE.Color
-}
-
 interface FlashState {
   vehicle: string
   born: number
   life: number
 }
 
-/** Imperative effect queue shared by the remote fleet (shoot-downs) and the mark handler (hits); refuses every
- * effect under reduced motion, whoever asks. Exported for tests. */
+/** Seconds on the clock the live bursts use. */
+const fxNow = () => performance.now() / 1000
+
+/** Imperative effect queue shared by the remote fleet (shoot-downs) and the mark handler (hits). Under reduced
+ * motion a burst becomes a still cube and the shell flash is refused. Exported for tests. */
 export const fx = {
-  voxels: [] as Voxel[],
+  bursts: [] as Burst[],
   flashes: [] as FlashState[],
-  enabled: true,
-  debris(at: THREE.Vector3, n: number, color: THREE.Color, lifeMs: number, speed: number): void {
-    if (!this.enabled || lifeMs <= 0 || motionReduced()) return
-    const now = performance.now()
-    for (let i = 0; i < n; i++) {
-      if (this.voxels.length >= MAX_DEBRIS) this.voxels.shift()
-      const a = (i / n) * Math.PI * 2 + Math.random() * 0.6
-      const up = 0.4 + Math.random() * 0.8
-      this.voxels.push({
-        born: now,
-        life: lifeMs * (0.75 + Math.random() * 0.25),
-        p: at.clone(),
-        v: new THREE.Vector3(Math.cos(a), up, Math.sin(a)).normalize().multiplyScalar(speed * (0.6 + Math.random() * 0.4)),
-        color,
-      })
-    }
+  burst(at: THREE.Vector3, kind: 'hit' | 'down', seed: number): void {
+    if (this.bursts.length >= MAX_BURSTS) this.bursts.shift()
+    this.bursts.push({ p: [at.x, at.y, at.z], t0: fxNow(), seed, kind: motionReduced() ? 'still' : kind })
   },
   flash(vehicle: string, lifeMs: number): void {
     if (lifeMs <= 0 || motionReduced()) return
@@ -130,19 +102,13 @@ export const fx = {
 }
 
 /** Effects for a batch of hit marks (pure enough to unit-test with a fake fx). */
-export function applyMarks(marks: readonly ArenaMark[], api: { debris: typeof fx.debris; flash: typeof fx.flash }, at = (vid: string | null) => (vid ? live.state.get(vid)?.pos ?? null : null)): void {
-  const hitColor = token('g200').color
-  const downColor = token('g500').color
+export function applyMarks(marks: readonly ArenaMark[], api: { burst: typeof fx.burst; flash: typeof fx.flash }, at = (vid: string | null) => (vid ? live.state.get(vid)?.pos ?? null : null)): void {
   for (const m of marks) {
     const where = m.point ? scene(m.point) : at(m.vehicle)?.clone() ?? null
-    if (m.kind === 'taken') {
-      if (m.vehicle) api.flash(m.vehicle, tokenMs(ARENA_TOKENS.flash))
-      if (where) api.debris(where, HIT_VOXELS, hitColor, tokenMs(ARENA_TOKENS.debris), 0.9)
-      const body = at(m.vehicle)
-      if (m.down && body) api.debris(body.clone(), DOWN_VOXELS, downColor, tokenMs(ARENA_TOKENS.downDebris), 0.6)
-    } else if (where) {
-      api.debris(where, HIT_VOXELS, hitColor, tokenMs(ARENA_TOKENS.debris), 0.9)
-    }
+    if (m.kind === 'taken' && m.vehicle) api.flash(m.vehicle, tokenMs(ARENA_TOKENS.flash))
+    if (where) api.burst(where, 'hit', seedOf(`${m.seq}:${m.kind}`))
+    const body = m.kind === 'taken' && m.down ? at(m.vehicle) : null
+    if (body) api.burst(body.clone(), 'down', seedOf(`${m.seq}:down`))
   }
 }
 
@@ -214,7 +180,7 @@ class Craft {
     this.spin += ((flying ? v.throttle : 0) - this.spin) * expAlpha(dt, 0.15)
     const rps = flying ? 8 + 40 * this.spin : 0
     if (rps > 0) for (const p of this.props) p.rotation.y += (p.userData[PROP_KEY] as number) * rps * 2 * Math.PI * dt
-    if (v.down && !this.down) fx.debris(this.root.position.clone(), DOWN_VOXELS, token('g500').color, tokenMs(ARENA_TOKENS.downDebris), 0.6)
+    if (v.down && !this.down) fx.burst(this.root.position, 'down', seedOf(`${v.key}:${v.hp}`))
     this.down = v.down
     const hp = String(v.hp)
     if (this.hpEl && this.hpText !== hp) {
@@ -323,167 +289,77 @@ class RemoteBoundary extends React.Component<{ children: React.ReactNode }, { fa
 
 // ---------------------------------------------------------------- bullets
 
-/** All rounds in flight: tracer capsules with a short tail, or points on software renderers. */
+/** All rounds in flight as voxel tracers (heads only on software renderers). */
 class BulletView {
-  readonly objects: THREE.Object3D[] = []
-  private readonly own = token('white').color
-  private readonly other = token('g300').color
-  private readonly mesh: THREE.InstancedMesh | null = null
-  private readonly trail: THREE.LineSegments | null = null
-  private readonly points: THREE.Points | null = null
+  readonly vox = new VoxelFx()
   private readonly flights = new Map<string, Flight>()
 
-  constructor(private readonly light: boolean) {
-    if (light) {
-      const geo = new THREE.BufferGeometry()
-      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAX_BULLETS * 3), 3))
-      geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(MAX_BULLETS * 3), 3))
-      this.points = new THREE.Points(geo, new THREE.PointsMaterial({ size: 3, sizeAttenuation: false, vertexColors: true, toneMapped: false }))
-      this.objects.push(this.points)
-    } else {
-      const geo = new THREE.CapsuleGeometry(TRACER_RADIUS, TRACER_LENGTH - 2 * TRACER_RADIUS, 2, 6)
-      this.mesh = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ toneMapped: false }), MAX_BULLETS)
-      this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
-      this.mesh.setColorAt(0, this.own)
-      this.mesh.count = 0
-      const tgeo = new THREE.BufferGeometry()
-      tgeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAX_BULLETS * 6), 3))
-      tgeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(MAX_BULLETS * 6), 3))
-      this.trail = new THREE.LineSegments(
-        tgeo,
-        new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.45, depthWrite: false, toneMapped: false }),
-      )
-      this.objects.push(this.mesh, this.trail)
-    }
-    for (const o of this.objects) {
-      o.frustumCulled = false
-      o.raycast = () => {}
-    }
-  }
+  constructor(private readonly light: boolean) {}
 
-  update(): void {
+  update(cam: THREE.Camera, heightPx: number): void {
     const view = useArena.getState().view
     const shots = view?.enabled ? view.shots : []
     const now = backendNow()
     const tailS = this.light ? 0 : tokenMs(ARENA_TOKENS.trail) / 1000
     const seen = new Set<string>()
-    const pos = this.points?.geometry.getAttribute('position') as THREE.BufferAttribute | undefined
-    const col = this.points?.geometry.getAttribute('color') as THREE.BufferAttribute | undefined
-    const tpos = this.trail?.geometry.getAttribute('position') as THREE.BufferAttribute | undefined
-    const tcol = this.trail?.geometry.getAttribute('color') as THREE.BufferAttribute | undefined
     let n = 0
+    this.vox.begin(cam, heightPx)
     for (const s of shots) {
       if (n >= MAX_BULLETS) break
       seen.add(s.id)
       const f = flightAt(s, now, this.flights.get(s.id))
       this.flights.set(s.id, f)
       if (f.done || (f.steps === 0 && now < s.t0)) continue
-      const color = s.mine ? this.own : this.other
-      scene(f.p, tmpV)
-      if (this.mesh) {
-        tmpQ.setFromUnitVectors(AXIS_Y, scene(f.v, tmpD).normalize())
-        tmpM.compose(tmpV, tmpQ, ONE)
-        this.mesh.setMatrixAt(n, tmpM)
-        this.mesh.setColorAt(n, color)
-        if (tpos && tcol && tailS > 0) {
-          scene([f.p[0] - f.v[0] * tailS, f.p[1] - f.v[1] * tailS, f.p[2] - f.v[2] * tailS], tmpD)
-          tpos.setXYZ(n * 2, tmpV.x, tmpV.y, tmpV.z)
-          tpos.setXYZ(n * 2 + 1, tmpD.x, tmpD.y, tmpD.z)
-          tcol.setXYZ(n * 2, color.r, color.g, color.b)
-          tcol.setXYZ(n * 2 + 1, 0, 0, 0)
-        }
-      } else if (pos && col) {
-        pos.setXYZ(n, tmpV.x, tmpV.y, tmpV.z)
-        col.setXYZ(n, color.r, color.g, color.b)
-      }
+      this.vox.tracer(scene(f.p, tmpV), scene(f.v, tmpD), s.mine, tailS)
       n++
     }
+    this.vox.end()
     for (const id of [...this.flights.keys()]) if (!seen.has(id)) this.flights.delete(id)
-    if (this.mesh) {
-      this.mesh.count = n
-      this.mesh.instanceMatrix.needsUpdate = true
-      if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true
-    }
-    if (this.trail && tpos && tcol) {
-      this.trail.geometry.setDrawRange(0, tailS > 0 ? n * 2 : 0)
-      tpos.needsUpdate = true
-      tcol.needsUpdate = true
-    }
-    if (this.points && pos && col) {
-      this.points.geometry.setDrawRange(0, n)
-      pos.needsUpdate = true
-      col.needsUpdate = true
-    }
-  }
-
-  dispose(): void {
-    for (const o of this.objects) {
-      const m = o as THREE.Mesh
-      m.geometry.dispose()
-      ;(m.material as THREE.Material).dispose()
-    }
   }
 }
 
 function Bullets({ light }: { light: boolean }) {
   const [view] = React.useState(() => new BulletView(light))
-  React.useEffect(() => () => view.dispose(), [view])
-  useFrame(() => view.update())
+  React.useEffect(() => () => view.vox.dispose(), [view])
+  useFrame(({ camera, size }) => view.update(camera, size.height))
   return (
     <>
-      {view.objects.map((o) => (
+      {view.vox.objects.map((o) => (
         <primitive key={o.uuid} object={o} />
       ))}
     </>
   )
 }
 
-// ---------------------------------------------------------------- hit flash and debris
+// ---------------------------------------------------------------- hit flash and bursts
 
-/** Voxel debris (one InstancedMesh) and the hit flash shells of our aircraft. */
+/** Voxel bursts and the hit flash shells of our aircraft. */
 class EffectsView {
-  readonly objects: THREE.Object3D[] = []
-  private readonly cubes: THREE.InstancedMesh
+  readonly vox = new VoxelFx(2048)
+  readonly objects: THREE.Object3D[]
   private readonly shells: THREE.Mesh[]
   private readonly shellGeo = new THREE.SphereGeometry(FLASH_RADIUS, 20, 14)
 
   constructor() {
-    this.cubes = new THREE.InstancedMesh(new THREE.BoxGeometry(VOXEL, VOXEL, VOXEL), new THREE.MeshBasicMaterial({ toneMapped: false }), MAX_DEBRIS)
-    this.cubes.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
-    this.cubes.setColorAt(0, token('g200').color)
-    this.cubes.count = 0
-    this.cubes.frustumCulled = false
-    this.cubes.raycast = () => {}
     this.shells = Array.from({ length: MAX_FLASHES }, () => {
       const m = new THREE.Mesh(this.shellGeo, new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, toneMapped: false }))
       m.visible = false
       m.raycast = () => {}
       return m
     })
-    this.objects.push(this.cubes, ...this.shells)
+    this.objects = [...this.vox.objects, ...this.shells]
   }
 
-  update(dt: number, owner: RedOwner): void {
-    const now = performance.now()
-    fx.voxels = fx.voxels.filter((v) => now - v.born < v.life)
-    let n = 0
-    for (const v of fx.voxels) {
-      v.v.y -= 9.81 * dt
-      v.p.addScaledVector(v.v, dt)
-      if (v.p.y < VOXEL / 2) {
-        v.p.y = VOXEL / 2
-        v.v.multiplyScalar(0.4)
-      }
-      tmpS.setScalar(Math.max(0.05, 1 - (now - v.born) / v.life))
-      tmpM.compose(v.p, tmpQ.identity(), tmpS)
-      this.cubes.setMatrixAt(n, tmpM)
-      this.cubes.setColorAt(n, v.color)
-      n++
-    }
-    this.cubes.count = n
-    this.cubes.instanceMatrix.needsUpdate = true
-    if (this.cubes.instanceColor) this.cubes.instanceColor.needsUpdate = true
+  update(cam: THREE.Camera, heightPx: number, owner: RedOwner): void {
+    const t = fxNow()
+    const coreS = tokenMs(ARENA_TOKENS.core) / 1000
+    const lives = { burst: tokenMs(ARENA_TOKENS.burst) / 1000, down: (2 * tokenMs(ARENA_TOKENS.downDebris)) / 1000 }
+    fx.bursts = fx.bursts.filter((b) => t - b.t0 <= burstLife(b.kind, lives))
+    this.vox.begin(cam, heightPx)
+    for (const b of fx.bursts) this.vox.burst(b, t - b.t0, coreS, burstLife(b.kind, lives))
+    this.vox.end()
 
+    const now = performance.now()
     fx.flashes = fx.flashes.filter((f) => now - f.born < f.life)
     // damage to our own aircraft: red under the single-red rule, bold g50 while a critical alert owns red
     const color = damageTone(owner) === 'red' ? token('r500').color : token('g50').color
@@ -503,32 +379,30 @@ class EffectsView {
   }
 
   dispose(): void {
-    this.cubes.geometry.dispose()
-    ;(this.cubes.material as THREE.Material).dispose()
+    this.vox.dispose()
     this.shellGeo.dispose()
     for (const s of this.shells) (s.material as THREE.Material).dispose()
   }
 }
 
-function Effects({ light, owner }: { light: boolean; owner: RedOwner }) {
+function Effects({ owner }: { owner: RedOwner }) {
   const [view] = React.useState(() => new EffectsView())
   const ownerRef = React.useRef(owner)
   React.useEffect(() => {
     ownerRef.current = owner
   }, [owner])
   React.useEffect(() => () => view.dispose(), [view])
-  // hits arrive as events: turn each new mark into a flash and debris once
+  // hits arrive as events: turn each new mark into a burst (and a flash on our aircraft) once
   React.useEffect(() => {
-    fx.enabled = !light
     let last = useArena.getState().marks.at(-1)?.seq ?? 0
     return useArena.subscribe((s) => {
       const fresh = s.marks.filter((m) => m.seq > last)
       if (!fresh.length) return
       last = fresh[fresh.length - 1].seq
-      if (!motionReduced()) applyMarks(fresh, fx)
+      applyMarks(fresh, fx)
     })
-  }, [light])
-  useFrame((_, rawDt) => view.update(Math.min(0.1, rawDt), ownerRef.current))
+  }, [])
+  useFrame(({ camera, size }) => view.update(camera, size.height, ownerRef.current))
   return (
     <>
       {view.objects.map((o) => (
@@ -556,7 +430,7 @@ export function ArenaLayer() {
         </React.Suspense>
       </RemoteBoundary>
       <Bullets light={light} />
-      <Effects light={light} owner={owner} />
+      <Effects owner={owner} />
     </group>
   )
 }
