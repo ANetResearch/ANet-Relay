@@ -146,7 +146,7 @@ def build_tools() -> list[Tool]:
             "app_set_workspace",
             "set_workspace",
             "Switch workspace: fly (stage and controls), agents (sessions and activity) or records.",
-            {"workspace": {"type": "string", "enum": ["fly", "agents", "records"]}},
+            {"workspace": {"type": "string", "enum": ["fly", "agents", "records", "lab"]}},  # WP-3: lab
             ["workspace"],
         ),
         ui_tool(

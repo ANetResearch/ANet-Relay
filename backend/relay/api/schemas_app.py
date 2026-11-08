@@ -47,7 +47,7 @@ class UiState(_Model):
     """What the Relay window currently shows (04 §3.1)."""
 
     lang: Literal["en", "zh"] = "en"
-    workspace: Literal["fly", "agents", "records"] = "fly"
+    workspace: Literal["fly", "agents", "records", "lab"] = "fly"  # WP-3: lab
     selected: str | None = None
     view: Literal["overview", "chase", "top"] = "overview"
     inspector: UiInspector = Field(default_factory=UiInspector)

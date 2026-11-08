@@ -955,7 +955,7 @@ export interface AirframeParams {
  */
 export interface UiState {
   lang: 'en' | 'zh'
-  workspace: 'fly' | 'agents' | 'records'
+  workspace: 'fly' | 'agents' | 'records' | 'lab'
   selected: string | null
   view: 'overview' | 'chase' | 'top'
   inspector: UiInspector

@@ -13,6 +13,7 @@ ANet Relay is the desktop ground control station for small drone fleets on a loc
 [![License](https://img.shields.io/badge/license-modified%20Apache--2.0-1f1f1f)](LICENSE)
 
 **[Download](https://github.com/ANetResearch/ANet-Relay/releases/latest)** · **[Agent API](docs/agent-api.md)** ·
+[Onboard programs](docs/programs.md) ·
 [Hardware setup (zh)](docs/hardware.zh-CN.md) ·
 [Design documents (zh)](docs/design/) ·
 [Changelog](CHANGELOG.md) · [ANet4D](https://github.com/ANetResearch/ANet4D) · [ANet](https://github.com/ANetResearch/ANet)
@@ -187,6 +188,10 @@ Three feel presets, Gentle, Standard and Sport, scale tilt, yaw and keyboard rea
 
 The **Arena** switch in the top bar joins every Relay terminal on the same network; there are no rooms or lobby, and switching it off leaves. Remote simulators appear on the stage in graphite with the terminal's callsign (Settings → Network), on twelve seats around a 10 m circle. Hold R1 or `X` to fire from a possessed, airborne simulator: 8 rounds per second, 24 per magazine. Rounds follow the same ballistic model on every terminal; the owner of the aircraft that is hit judges the hit, five hits bring a simulator down, and it respawns after 5 s. A scoreboard, a crosshair and the hit direction appear on the stage, and the driving HUD shows hit points and ammunition. Simulators on one terminal can also fire at each other for practice. **Real aircraft never join the arena and are never affected by virtual rounds**: only simulators are shared, and the arena's UDP socket carries no control, so nothing received from the network reaches sticks, arming, claims, parameters, skills or plans.
 
+### Lab and onboard programs
+
+The **Lab** workspace (⌘4 / Ctrl+4) is where flight programs are written: restricted Python that runs at 50 Hz on this computer, reads only what the aircraft can sense and outputs sticks. Programs and examples on the left with the challenges; the editor in the middle (save makes a revision, problems are marked inline); Params, Tests, Run, Judge, Duel and History on the right. Deployed programs fly as `PROGRAM · <name> · <state>`, possession pauses them, and judged runs and duels replay with every aircraft on the Fly stage. The [onboard programs guide](docs/programs.md) covers the language, the observation, the `relay` library, the challenges, duels and the API.
+
 ### Agents workspace
 
 <img src="docs/media/agents.png" alt="Agents workspace: sessions, claims matrix, recent calls and the interface addresses with the MCP command" width="100%" />
@@ -234,7 +239,7 @@ The backend runs on its own with `.venv/bin/python -m relay --dev`. Pushing a `v
 | `sdk/python/`, `mcp/` | Python SDK with examples; MCP server |
 | `tools/fakes/` | Fake bridge and flight controller for testing without hardware |
 | `e2e/` | Playwright tests and the screen walkthrough at three window sizes in two languages |
-| `docs/` | Agent API guide, hardware guide and flight tuning guide (Chinese); `docs/design/` holds the product, experience and system design (Chinese) |
+| `docs/` | Agent API guide, onboard programs guide, hardware guide and flight tuning guide (Chinese); `docs/design/` holds the product, experience and system design (Chinese) |
 
 <details>
 <summary><b>Relation to ANet</b></summary>

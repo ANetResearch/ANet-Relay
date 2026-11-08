@@ -16,6 +16,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useT8 } from '@/fleet/copy'
 import { useHold } from '@/fleet/holds'
 import { useReplay } from '@/records/replayState'
+import { useTL } from '@/lab/copy' // WP-3
 import { HoldProgress, usePillSpec } from '@/ui/relay'
 import { useStage } from '../store'
 import { token } from '../tokens'
@@ -189,6 +190,7 @@ interface Facts {
   claim: { name: string; suspended: boolean } | null
   possession: { input: 'keyboard' | 'screen' | 'gamepad'; pad: number | null } | null
   program: string | null // WP-1: name of the onboard program
+  programState: string | null // WP-3: its state name (06 §7 PROGRAM · name · state)
 }
 
 /** Narrow, discrete facts for the label and colours; changes at most once a second while the link is lost. */
@@ -204,6 +206,7 @@ function useFacts(id: string): Facts | null {
       claim: v.claim ? { name: v.claim.name, suspended: v.claim.suspended } : null,
       possession: v.possession ? { input: v.possession.input, pad: v.possession.pad } : null,
       program: v.program?.name ?? null,
+      programState: v.program && v.controller === 'program' ? v.program.state || null : null,
     }
     return JSON.stringify(f)
   })
@@ -213,6 +216,7 @@ function useFacts(id: string): Facts | null {
 function Label({ id, facts, fallback, bind }: { id: string; facts: Facts | null; fallback: string; bind(el: HTMLDivElement | null): void }) {
   const t = useT()
   const t8 = useT8()
+  const tL = useTL()
   const owner = useRedOwner()
   const spec = usePillSpec(
     facts
@@ -227,9 +231,15 @@ function Label({ id, facts, fallback, bind }: { id: string; facts: Facts | null;
   const hold = useHold(id)
   // Records replay: the label states the recorded armed state and controller, not the live ones
   const replay = useReplay(useShallow((r) => (r.active && r.vehicleId === id && r.frame ? { armed: r.frame.armed, controller: r.frame.controller ?? 'none' } : null)))
-  const armed = replay ? replay.armed : facts?.armed
-  const lost = replay ? null : (facts?.lostS ?? null)
-  const critical = replay ? false : facts?.critical
+  // WP-3: an aircraft of a multi-aircraft trace states its program, state and hit points
+  const craft = useReplay(useShallow((r) => {
+    const c = r.active && r.crafts ? r.crafts.find((x) => x.id === id) : undefined
+    return c ? { armed: c.frame.armed, program: c.program, state: c.state, hp: c.hp } : null
+  }))
+  // trace aircraft are headless-evaluator simulators: no ARMED word, red stays with the live fleet
+  const armed = craft ? false : replay ? replay.armed : facts?.armed
+  const lost = replay || craft ? null : (facts?.lostS ?? null)
+  const critical = replay || craft ? false : facts?.critical
   const armedRed = armed && armedTone(owner) === 'red'
   const critRed = critical && criticalTone(owner) === 'red'
   return (
@@ -240,7 +250,13 @@ function Label({ id, facts, fallback, bind }: { id: string; facts: Facts | null;
         <span className={critRed ? 'stage-crit-red' : critical ? 'stage-crit-strong' : undefined}>{facts?.label ?? fallback}</span>
       </div>
       <div className="stage-label-sub">
-        {lost !== null ? <span>{t('status.lostFor', { s: lost })}</span> : <span>{replay ? t8(`records.ctl.${replay.controller}`) : spec.label}</span>}
+        {lost !== null ? (
+          <span>{t('status.lostFor', { s: lost })}</span>
+        ) : craft ? (
+          <span>{[t('ctrl.program'), craft.program, craft.state, craft.hp !== null ? tL('lab.replay.hp', { n: craft.hp }) : null].filter(Boolean).join(' · ')}</span>
+        ) : (
+          <span>{replay ? t8(`records.ctl.${replay.controller}`) : facts?.programState ? `${spec.label} · ${facts.programState}` : spec.label}</span>
+        )}
       </div>
       {hold ? <HoldProgress active durationMs={hold.durationMs} className="stage-label-hold" /> : null}
     </div>

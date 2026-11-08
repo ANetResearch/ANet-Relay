@@ -1,0 +1,57 @@
+/* Lab workspace (06 §7, WP-3). Colours only through theme.css tokens; durations only through motion tokens. Results
+   are told apart by lightness and weight in the graphite ramp, never by red (single-red rule, store/red.ts). */
+@layer components {
+  .lab-row { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 6px 8px; border-radius: var(--radius); border: 1px solid transparent;
+    text-align: left; outline: none; transition: background-color var(--duration-quick) var(--ease-smooth-out); }
+  .lab-row-inline { flex-direction: row; align-items: center; gap: 8px; }
+  .lab-row:hover { background: oklch(from var(--g850) l c h / 0.55); }
+  .lab-row[data-selected] { background: var(--g850); border-color: var(--border); }
+  .lab-row:focus-visible { box-shadow: 0 0 0 2px oklch(from var(--g50) l c h / 0.25); }
+  html:is([data-motion="reduced"], [data-motion="off"]) .lab-row { transition: none; }
+
+  /* unsaved marker next to a program name */
+  .lab-dot { display: inline-block; width: 6px; height: 6px; flex: none; border-radius: 999px; background: var(--g50); }
+
+  /* challenge status: passed = solid g50, attempted = ring g400, new = dash g700 */
+  .lab-mark { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 999px; }
+  .lab-mark-passed { background: var(--g50); }
+  .lab-mark-failed { border: 1px solid var(--g400); }
+  .lab-mark-new { width: 6px; height: 1px; border-radius: 0; background: var(--g700); margin: 0 1px; }
+
+  /* unit test rows (06 §3.1), LeetCode-like */
+  .lab-tests > li + li { border-top: 1px dotted var(--border); }
+  .lab-verdict { display: inline-flex; flex: none; width: 14px; height: 14px; align-items: center; justify-content: center; border-radius: 4px;
+    border: 1px dashed var(--g700); color: var(--g950); }
+  .lab-verdict-pass { border: none; background: var(--g300); }
+  .lab-verdict-fail, .lab-verdict-error { border: none; background: var(--g50); }
+
+  /* program log tail */
+  .lab-log { max-height: 240px; min-height: 96px; overflow: auto; padding: 6px 8px; border-radius: var(--radius); border: 1px solid var(--border);
+    background: var(--g950); font: 450 11px/17px var(--font-mono); color: var(--g300); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .lab-log-error { color: var(--g50); font-weight: 650; }
+  .lab-log-event { color: var(--g500); }
+
+  /* history diff */
+  .lab-diff { max-height: 420px; overflow: auto; border-radius: var(--radius); border: 1px solid var(--border); background: var(--g950);
+    font: 450 11px/17px var(--font-mono); }
+  .lab-diff-row { display: grid; grid-template-columns: 28px 28px 14px max-content; min-width: 100%; width: max-content; color: var(--g400); }
+  .lab-diff-no { padding-right: 6px; text-align: right; color: var(--g600); font-variant-numeric: tabular-nums; user-select: none; }
+  .lab-diff-mark { text-align: center; user-select: none; }
+  .lab-diff-text { white-space: pre; padding-right: 12px; }
+  .lab-diff-add { background: oklch(from var(--g600) l c h / 0.35); color: var(--g50); }
+  .lab-diff-del { background: oklch(from var(--g800) l c h / 0.6); color: var(--g500); }
+  .lab-diff-del .lab-diff-text { text-decoration: line-through; text-decoration-color: oklch(from var(--g500) l c h / 0.6); }
+  .lab-diff-gap { position: sticky; left: 0; padding: 2px 8px; color: var(--g600); font-family: var(--font-sans); border-block: 1px dotted var(--border); }
+
+  /* duel program picker */
+  .lab-picklist { max-height: 228px; overflow: auto; padding: 2px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--g950); }
+
+  /* editor host: CodeMirror fills it; its theme lives in editorTheme.ts */
+  .lab-editor .cm-editor { height: 100%; }
+  .lab-editor .cm-scroller { overscroll-behavior: contain; }
+
+  /* trace replay bar on the Fly stage */
+  .lab-replay { animation: lab-rise var(--duration-fast) var(--ease-smooth-out) backwards; }
+  @keyframes lab-rise { from { opacity: 0; translate: 0 8px; } }
+  html:is([data-motion="reduced"], [data-motion="off"]) .lab-replay { animation: none; }
+}

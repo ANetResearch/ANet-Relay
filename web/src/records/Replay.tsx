@@ -212,7 +212,7 @@ export function Replay({ record, focusT }: { record: RecordSummary; focusT: numb
       if (useReplay.getState().active) exitReplay()
       return
     }
-    setReplay({ active: true, recordId: record.id, vehicleId: record.vehicle_id, label: record.label, kind: record.kind, t: cur, frame: frameAt(d, cur), playing })
+    setReplay({ active: true, recordId: record.id, vehicleId: record.vehicle_id, label: record.label, kind: record.kind, t: cur, frame: frameAt(d, cur), playing, crafts: null })
   }, [d, cur, onStage, playing, record.id, record.vehicle_id, record.label, record.kind])
   React.useEffect(() => () => exitReplay(), [])
 

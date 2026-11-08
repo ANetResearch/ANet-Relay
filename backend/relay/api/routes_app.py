@@ -57,7 +57,8 @@ ACTIONS: list[dict[str, Any]] = [
         "set_workspace",
         "Switch the workspace.",
         "切换工作区。",
-        _arg("workspace", "string", "Workspace.", "工作区。", True, ["fly", "agents", "records"]),
+        # WP-3: lab
+        _arg("workspace", "string", "Workspace.", "工作区。", True, ["fly", "agents", "records", "lab"]),
     ),
     _action(
         "select_vehicle",

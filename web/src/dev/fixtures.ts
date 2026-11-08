@@ -10,6 +10,8 @@ import { useBoot } from '@/app/boot'
 import { startArenaFixture } from './arenaFixture'
 // WP-2a: airframe routes stand-in
 import { startAirframeFixture } from './airframeFixture'
+// WP-3: Lab stand-in (programs, tests, deployment, challenges, duels, traces)
+import { startLabFixture } from './labFixture'
 
 type V = Vehicle
 
@@ -206,8 +208,18 @@ export function startFixture(name: FixtureName): () => void {
     emit('sim_airframe_changed', id, { preset, seed, by: 'operator' })
   })
 
+  // WP-3: Lab stand-in
+  const lab = startLabFixture({
+    now: () => now,
+    vehicle: (id) => fleet.vehicles.find((x) => x.id === id),
+    mutate,
+    emit: (kind, vehicle, data) => emit(kind as RelayEvent['kind'], vehicle, data),
+  })
+
   const transport: RestTransport = {
     async request(method, path, body) {
+      const labbed = lab.handle(method, path, body) // WP-3
+      if (labbed !== undefined) return labbed
       // WP-D: the arena toggle and settings
       if (path === '/settings' && method === 'PUT') {
         arena.settings(body)
@@ -310,5 +322,6 @@ export function startFixture(name: FixtureName): () => void {
     timers.forEach(clearTimeout)
     clearInterval(tick)
     arena.stop() // WP-D
+    lab.stop() // WP-3
   }
 }

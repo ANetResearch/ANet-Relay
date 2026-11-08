@@ -37,6 +37,7 @@ function shellCommands(): Command[] {
     { id: 'ws.fly', group: 'navigation', label: t('cmd.goFly'), icon: 'ws.fly', shortcut: '1', run: () => ui.setWorkspace('fly') },
     { id: 'ws.agents', group: 'navigation', label: t('cmd.goAgents'), icon: 'ws.agents', shortcut: '2', run: () => ui.setWorkspace('agents') },
     { id: 'ws.records', group: 'navigation', label: t('cmd.goRecords'), icon: 'ws.records', shortcut: '3', run: () => ui.setWorkspace('records') },
+    { id: 'ws.lab', group: 'navigation', label: t('cmd.goLab'), icon: 'ws.lab', shortcut: `${MOD}4`, keywords: ['lab', 'program', 'code', '实验室', '程序'], run: () => ui.setWorkspace('lab') }, // WP-3
     { id: 'fleet.stopAll', group: 'fleet', label: t('cmd.stopAll'), icon: 'stop', shortcut: `${MOD}.`, keywords: ['emergency', 'stop', '急停'], run: stopAll },
     { id: 'fleet.scan', group: 'fleet', label: t('cmd.scan'), icon: 'scan', run: scanNetwork },
     { id: 'fleet.connect', group: 'fleet', label: t('cmd.connect'), icon: 'connect', run: () => ui.openConnect('address') },

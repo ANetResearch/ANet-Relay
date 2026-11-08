@@ -410,3 +410,24 @@ loading; buttons keep `Spinner`.
   `hover_assist_off`) and land and fail when it is switched off in flight; the Bench tab shows the finding text.
 - **Copy:** bench and arena keep their own dictionaries (`bench/copy.ts`, `arena/copy.ts`, each with an en / zh parity
   test); the shared `i18n` files carry only the keys other modules read.
+
+## 11. v0.4.0 WP-3 additions (Lab, 06 §7)
+
+- **Workspace:** `Workspace` gains `'lab'` (keys `4` and `mod+4`, command `ws.lab`, app-control `set_workspace`).
+  `src/lab/LabWorkspace.tsx` loads lazily (CodeMirror is in its chunk). The Lab owns `src/lab/`; its copy is
+  `lab/copy.ts` (`useTL()` / `tL()`, en / zh parity test).
+- **Store:** `lab/store.ts` `useLab` (program list, open program, unsaved `source` / `params` / `tests`, validation,
+  tab, challenge, Run-tab aircraft, judge and duel jobs). `isDirty(state)`, `testsOf(program)`.
+- **API:** `lab/api.ts` `labApi.*` covers the WP-1 program routes and the WP-2b routes (`/challenges`,
+  `/challenges/{id}/submit`, `/jobs/{id}`, `/duels`, `/ladder`, `/traces/{id}`). WP-2b bodies go through
+  `normChallenges`, `normJob`, `normLadder`; the expected shapes are in the file header. `RestTransport` methods now
+  include `PATCH` (live parameters).
+- **Replay of several aircraft:** `useReplay` gains `crafts: ReplayCraft[] | null` (`{id, label, sim, frame, program,
+  state, hp}`). While set, the stage places every craft by `frame.x/y/z` (`stage/live.ts`), `Fleet` mounts one
+  aircraft per craft and the label reads `PROGRAM · <program> · <state> · HP n` with no ARMED word. Craft ids are
+  `trace:<id>` (`lab/trace.ts traceStageId`) so they never collide with live aircraft. Records sets `crafts: null`.
+  `lab/traceReplay.ts` (`openTrace`, `openTraceById`, `closeTrace`, `seekTrace`, `stepTrace`) drives it;
+  `TraceLayer` (scene, next to `ArenaLayer`) draws the rounds and the arena ring; `TraceReplayBar` (Fly stage
+  overlay, bottom centre) plays, scrubs and exits, and closes the replay when an aircraft is newly possessed.
+- **Stage label:** a live aircraft under `controller === 'program'` reads `PROGRAM · <name> · <state>`.
+- **Inspector:** the Control tab mounts `lab/ProgramGroup` after the course group.

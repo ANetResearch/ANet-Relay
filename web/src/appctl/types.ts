@@ -3,7 +3,7 @@
 import type { UiCommandMessage } from '@/api'
 
 export type UiLang = 'en' | 'zh'
-export type UiWorkspace = 'fly' | 'agents' | 'records'
+export type UiWorkspace = 'fly' | 'agents' | 'records' | 'lab'
 export type UiView = 'overview' | 'chase' | 'top'
 /** The one dialog or overlay in front, or null. */
 export type UiDialog = 'settings' | 'connect' | 'palette' | 'alerts' | 'pads' | 'inspector_sheet' | null

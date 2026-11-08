@@ -13,7 +13,7 @@ export interface Hotkey {
   combo: string
   handler(e: KeyboardEvent): void | false
   /** only while this workspace is shown */
-  workspace?: 'fly' | 'agents' | 'records'
+  workspace?: 'fly' | 'agents' | 'records' | 'lab'
   /** also fire while a text field has focus (default false) */
   inText?: boolean
   /** also fire while a dialog, sheet, popover or menu is open (default false) */
@@ -153,6 +153,9 @@ function builtins(): Hotkey[] {
     { combo: '1', handler: () => ui().setWorkspace('fly') },
     { combo: '2', handler: () => ui().setWorkspace('agents') },
     { combo: '3', handler: () => ui().setWorkspace('records') },
+    // WP-3: Lab (06 §7) on 4 like the other workspaces, and on mod+4 from anywhere, the editor included
+    { combo: '4', handler: () => ui().setWorkspace('lab') },
+    { combo: 'mod+4', inText: true, handler: () => ui().setWorkspace('lab') },
     { combo: 'up', workspace: 'fly', repeat: true, handler: () => moveSelection(-1) },
     { combo: 'down', workspace: 'fly', repeat: true, handler: () => moveSelection(1) },
     {
