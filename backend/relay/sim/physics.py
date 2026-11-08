@@ -241,6 +241,7 @@ class State:
     crash_reason: str | None = None
     crash_code: str | None = None  # 07 §2: 'ground' | 'collision' | 'shot_down'
     crash_point: tuple[float, float, float] | None = None  # simulator ENU where the crash happened
+    crash_speed: float | None = None  # m/s at the crash (07 §5: a hard ground crash explodes)
     accel: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
     q: list[float] = field(default_factory=lambda: [1.0, 0.0, 0.0, 0.0])  # FRD -> NED (w, x, y, z)
     omega: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0, 0.0])  # rotor speeds, rad/s
@@ -653,6 +654,7 @@ class Quad:
         s.crash_reason = reason
         s.crash_code = code
         s.crash_point = point if point is not None else (s.p[0], s.p[1], s.p[2])
+        s.crash_speed = math.sqrt(s.v[0] * s.v[0] + s.v[1] * s.v[1] + s.v[2] * s.v[2])
         s.motor = 0.0
 
     @property

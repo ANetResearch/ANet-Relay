@@ -4,7 +4,8 @@ Every fleet tick, before the simulator drivers report, ``_world_step`` advances 
 tick together through ``World.step`` (one 250 Hz physics step at a time, contacts swept after each), with
 the solid rings of every active ring course, and publishes the contacts as ``collision`` events. Real
 aircraft never take part. ``_crash_details`` adds the cause and place of a simulator crash to the
-``crashed`` event (``reason_code`` ``ground`` / ``collision`` / ``shot_down``, ``point`` in world ENU).
+``crashed`` event (``reason_code`` ``ground`` / ``collision`` / ``shot_down``, ``point`` in world ENU,
+``speed`` in m/s at the crash).
 
 The LAN arena (WP-B) reaches the world through ``self.world.external`` (remote aircraft, local frame) and
 ``self.world.on_external_contact``; the evaluator through ``self.world.fixed_rings``.
@@ -85,7 +86,7 @@ class WorldOps:
         """``crashed`` event data: the cause code, the place, and for a collision what it hit (the text)."""
         sim = getattr(v.driver, "sim", None)
         if v.kind != "sim" or sim is None:
-            return {"reason_code": None, "point": None, "detail_en": "", "detail_zh": ""}
+            return {"reason_code": None, "point": None, "speed": None, "detail_en": "", "detail_zh": ""}
         s = sim.quad.s
         point = s.crash_point
         if point is not None:
@@ -99,4 +100,11 @@ class WorldOps:
             detail_en, detail_zh = f": collided with {other}", f"：与{other_zh}相撞"
         elif s.crash_code == "shot_down" and reason in SHOT_DOWN_DETAIL:  # WP-D: say why a scenario downed it
             detail_en, detail_zh = SHOT_DOWN_DETAIL[reason]
-        return {"reason_code": s.crash_code, "point": point, "detail_en": detail_en, "detail_zh": detail_zh}
+        speed = None if s.crash_speed is None else round(s.crash_speed, 2)  # the renderer's hard-crash test
+        return {
+            "reason_code": s.crash_code,
+            "point": point,
+            "speed": speed,
+            "detail_en": detail_en,
+            "detail_zh": detail_zh,
+        }

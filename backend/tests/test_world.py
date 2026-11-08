@@ -196,6 +196,20 @@ def test_a_scenario_crash_names_its_reason(svc, stepper):
     assert crashed["text_en"] == "SIM-1 crashed: left the arena." and "飞出场地" in crashed["text_zh"]
 
 
+def test_a_crashed_event_carries_the_impact_speed(svc, stepper):
+    """07 §5: the renderer explodes a ground crash at 6 m/s or more, so the event says how fast it hit."""
+    (vid,) = svc.add_sims(1)
+    stepper.run(0.5)
+    events = []
+    svc.events.add_listener(events.append)
+    s = svc.vehicles[vid].driver.sim.quad.s
+    s.p[2], s.on_ground = 6.0, False  # dropped from 6 m with the motors off
+    stepper.run(2.5)
+    (crashed,) = [e for e in events if e["kind"] == "crashed"]
+    assert crashed["data"]["reason_code"] == "ground"
+    assert 6.0 <= crashed["data"]["speed"] < 12.0
+
+
 def test_contacts_carry_the_closing_speed(svc, stepper):
     ids = svc.add_sims(2)
     stepper.run(0.5)
