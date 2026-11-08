@@ -30,6 +30,8 @@ export const en6 = {
   'course.reason.removed': 'aircraft removed',
   'course.reason.reset': 'simulator reset',
   'course.ringCount': '{n} rings',
+  // WP-C v0.5 (07 §5)
+  'stage.layer.volumes': 'Collision volumes',
 }
 
 export type Key6 = keyof typeof en6
@@ -59,6 +61,8 @@ export const zh6: Record<Key6, string> = {
   'course.reason.removed': '飞机已移除',
   'course.reason.reset': '模拟机已复位',
   'course.ringCount': '{n} 环',
+  // WP-C v0.5 (07 §5)
+  'stage.layer.volumes': '碰撞体积',
 }
 
 export const DICTS6: Record<Lang, Record<Key6, string>> = { en: en6, zh: zh6 }

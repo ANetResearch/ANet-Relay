@@ -49,10 +49,15 @@
     --voxel-wipe: 300ms;                  /* VoxelWipe: workspace switch and replay open (250-350 ms) */
     --voxel-scatter: 350ms;               /* StageLoading: cube scatters out when the model is ready */
     /* LAN arena (05 §7.5, WP-D; bullets and hits per 06 §11); the hit flash and burst core use --duration-micro */
-    --duration-arena-trail: 90ms;         /* voxel tracer tail, as a span of flight time (about 3 m) */
+    --duration-arena-trail: 120ms;        /* voxel tracer tail, as a span of flight time (about 4 m; 07 §5: 90 -> 120 ms) */
     --duration-arena-burst: 650ms;        /* voxel hit burst; a shoot-down adds a burst of twice --duration-very-slow */
     --duration-arena-hit-mark: 120ms;     /* crosshair corners jump out on a confirmed hit */
     --duration-arena-hit-dir: 200ms;      /* screen-edge arc towards the shooter after a hit taken */
+    /* WP-C v0.5 (07 §5): explosions, collision sparks (--duration-arena-burst), ground dust and camera shake */
+    --duration-arena-explosion: 1200ms;   /* voxel explosion (shoot-down, ram, hard crash) and the ground dust ring */
+    --duration-arena-explosion-core: 120ms; /* white-hot core swell at the start of an explosion */
+    --duration-arena-shake: 120ms;        /* chase camera shake within 5 m of an explosion or collision */
+    --duration-arena-ring-flash: 250ms;   /* ring flashes white when an aircraft grazes its tube (ring_touch) */
   }
   html[data-tier="S"] { --telemetry-text-interval: 250ms; }   /* Tier S text <= 4 Hz (ADR-029) */
 }

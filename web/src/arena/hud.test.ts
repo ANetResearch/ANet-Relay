@@ -22,21 +22,22 @@ describe('arena HUD geometry', () => {
   it('turns marks into a flash on our aircraft and a voxel burst at every hit point', () => {
     const calls: string[] = []
     const api = {
-      burst: (_at: THREE.Vector3, kind: 'hit' | 'down') => void calls.push(`burst ${kind}`),
+      burst: (_at: unknown, kind: string) => void calls.push(`burst ${kind}`),
       flash: (vid: string) => void calls.push(`flash ${vid}`),
+      explode: (key: string | null) => (calls.push(`explode ${key}`), true),
     }
     const mark = (kind: ArenaMark['kind'], down = false): ArenaMark => ({ seq: 1, kind, vehicle: 'sim-1', at: 0, point: [0, 0, 1], dir: null, down })
     applyMarks([mark('taken', true), mark('hit'), mark('hit', true)], api, () => new THREE.Vector3())
     // a shoot-down burst belongs to the aircraft that went down, so only a hit taken carries one here
-    expect(calls).toEqual(['flash sim-1', 'burst hit', 'burst down', 'burst hit', 'burst hit'])
+    // v0.5 (07 §5): the shoot-down is an explosion of that aircraft
+    expect(calls).toEqual(['flash sim-1', 'burst hit', 'explode sim-1', 'burst hit', 'burst hit'])
   })
 })
 
 describe('arena marks under reduced motion', () => {
   afterEach(() => {
     initMotionTier('')
-    fx.bursts = []
-    fx.flashes = []
+    fx.clear()
   })
 
   it('unmounts a HUD mark after its token duration, whether or not an animation ran', () => {
@@ -48,17 +49,19 @@ describe('arena marks under reduced motion', () => {
   })
 
   it('keeps a still cube at each hit and no flash in reduced or off motion, remote shoot-downs included', () => {
-    fx.burst(new THREE.Vector3(), 'down', 1)
+    fx.explode('peer/sim-1', new THREE.Vector3(), 1)
     fx.flash('sim-1', 80)
-    expect([fx.bursts.map((b) => b.kind), fx.flashes.length]).toEqual([['down'], 1])
+    expect([fx.bursts.map((b) => [b.kind, b.still ?? false]), fx.flashes.length]).toEqual([[['explosion', false]], 1])
+    // v0.5: the same aircraft reported down twice explodes once
+    expect(fx.explode('peer/sim-1', new THREE.Vector3(), 2)).toBe(false)
     for (const tier of ['reduced', 'off']) {
-      fx.bursts = []
-      fx.flashes = []
+      fx.clear()
       initMotionTier(`?motion=${tier}`)
-      fx.burst(new THREE.Vector3(), 'down', 1)
+      fx.explode('peer/sim-1', new THREE.Vector3(), 1)
       fx.burst(new THREE.Vector3(), 'hit', 2)
+      fx.burst(new THREE.Vector3(), 'spark', 3)
       fx.flash('sim-1', 80)
-      expect([fx.bursts.map((b) => b.kind), fx.flashes.length]).toEqual([['still', 'still'], 0])
+      expect([fx.bursts.map((b) => [b.kind, b.still]), fx.flashes.length]).toEqual([[['explosion', true], ['hit', true], ['spark', true]], 0])
     }
   })
 })

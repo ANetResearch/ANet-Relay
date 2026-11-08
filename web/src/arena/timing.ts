@@ -23,6 +23,11 @@ export const ARENA_TOKENS = {
   core: '--duration-micro',
   hitMark: '--duration-arena-hit-mark',
   hitDir: '--duration-arena-hit-dir',
+  // WP-C v0.5 (07 §5)
+  explosion: '--duration-arena-explosion',
+  explosionCore: '--duration-arena-explosion-core',
+  shake: '--duration-arena-shake',
+  ringFlash: '--duration-arena-ring-flash',
 } as const
 
 /**

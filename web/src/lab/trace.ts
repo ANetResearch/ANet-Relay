@@ -19,7 +19,10 @@
 //       }
 //     }],
 //     "shots": [{"id": "s1", "owner": "a", "t0": 3.2, "p": [x, y, z], "v": [vx, vy, vz], "t_end": 3.6 | null}],
-//     "events": [{"t": 3.6, "kind": "hit" | "down" | "finish", "vehicle": "b", "by": "a"}]
+//     "events": [{"t": 3.6, "kind": "hit" | "down" | "finish", "vehicle": "b", "by": "a"},
+//                {"t": 4.1, "kind": "collision", "vehicle": "a", "with": "b" | "ring:2", "point": [x, y, z],
+//                 "v_rel": 2.4, "crashed": ["a", "b"] | true | false},           // v0.5 (07 §2, §5)
+//                {"t": 4.1, "kind": "crash", "vehicle": "a", "point": [x, y, z], "reason": "ground" | "collision" | "shot_down"}]
 //   }
 //
 // Times are seconds from the start of the run. Shots fly the arena integrator (arena/ballistics.ts, 1/240 s, drag
@@ -74,6 +77,16 @@ export interface TraceEvent {
   kind: string
   vehicle: string | null
   by: string | null
+  // v0.5 collision and crash events (07 §5); absent on older traces
+  /** the other body of a collision: an aircraft id or "ring:<i>" */
+  with?: string | null
+  /** ENU metres in the arena frame */
+  point?: [number, number, number] | null
+  v_rel?: number | null
+  /** aircraft a collision crashed */
+  crashed?: string[]
+  /** crash cause: 'ground' | 'collision' | 'shot_down' */
+  reason?: string | null
 }
 
 export interface Trace {
@@ -258,7 +271,20 @@ export function parseTrace(raw: unknown): Trace | null {
   for (const e of Array.isArray(o.events) ? o.events : []) {
     const x = obj(e)
     if (!finite(x.t) || typeof x.kind !== 'string') continue
-    events.push({ t: x.t, kind: x.kind, vehicle: typeof x.vehicle === 'string' ? x.vehicle : null, by: typeof x.by === 'string' ? x.by : null })
+    const ev: TraceEvent = { t: x.t, kind: x.kind, vehicle: typeof x.vehicle === 'string' ? x.vehicle : null, by: typeof x.by === 'string' ? x.by : null }
+    if (x.kind === 'collision' || x.kind === 'crash') {
+      // v0.5 (07 §5): `crashed` is a list of ids, or a flag meaning both bodies of the collision (rings never crash)
+      const other = typeof x.with === 'string' ? x.with : null
+      const both = [ev.vehicle, other && !other.startsWith('ring:') ? other : null].filter((id): id is string => id !== null)
+      Object.assign(ev, {
+        with: other,
+        point: vec3(x.point),
+        v_rel: finite(x.v_rel) ? x.v_rel : null,
+        crashed: Array.isArray(x.crashed) ? x.crashed.filter((id): id is string => typeof id === 'string') : x.crashed === true ? both : [],
+        reason: typeof x.reason === 'string' ? x.reason : null,
+      })
+    }
+    events.push(ev)
   }
   events.sort((a, b) => a.t - b.t)
   const last = Math.max(...aircraft.map((c) => c.t[c.t.length - 1]))
@@ -333,20 +359,28 @@ export function shotsAt(shots: readonly TraceShot[], t: number, lifetime = 2.5):
   return out
 }
 
-/** Where something was hit or shot down in a trace (ENU metres), for the voxel bursts of the replay (06 §11). */
+/** Effect kinds of a trace replay (06 §11, 07 §5); the same voxel effects the live stage throws. */
+export type TraceImpactKind = 'hit' | 'explosion' | 'spark' | 'dust'
+
+/** Where something was hit, shot down, collided or crashed in a trace (ENU metres), for the replay's voxel effects. */
 export interface TraceImpact {
   t: number
-  kind: 'hit' | 'down'
+  kind: TraceImpactKind
   p: [number, number, number]
   /** stable per impact, so a burst looks the same every time the cursor passes it */
   key: string
 }
 
+/** A second explosion of one aircraft within this many seconds of the first is the same destruction reported twice. */
+const EXPLOSION_DEDUPE_S = 1.2
+
 const impactsOf = new WeakMap<Trace, TraceImpact[]>()
 
 /**
  * Every impact of a trace, by time: the end of each round that ended on a hit (where the round was), a hit event
- * whose round is unknown (where the target was) and each shoot-down (where the aircraft went down). Cached per trace.
+ * whose round is unknown (where the target was), an explosion for each shoot-down (where the aircraft went down) and
+ * each aircraft a collision crashed, sparks at every collision point, and dust where an aircraft crashed on the
+ * ground (or where a shot-down wreck landed). An aircraft explodes at most once per EXPLOSION_DEDUPE_S. Cached.
  */
 export function traceImpacts(trace: Trace): TraceImpact[] {
   const hit = impactsOf.get(trace)
@@ -359,21 +393,44 @@ export function traceImpacts(trace: Trace): TraceImpact[] {
     out.push({ t: s.t_end, kind: 'hit', p: [f.p[0], f.p[1], Math.max(0, f.p[2])], key: `shot:${s.id}` })
     ended.add(`${s.owner}@${s.t_end}`)
   }
+  const at = (id: string | null | undefined, t: number): [number, number, number] | null => {
+    const craft = id ? trace.aircraft.find((c) => c.id === id) : undefined
+    if (!craft || !craft.t.length) return null
+    const s = sampleAt(craft, t)
+    return [s.x, s.y, Math.max(0, s.z)]
+  }
+  const exploded = new Map<string, number>()
+  const explode = (id: string, t: number, p: [number, number, number] | null, key: string) => {
+    const last = exploded.get(id)
+    if (!p || (last !== undefined && t - last <= EXPLOSION_DEDUPE_S)) return
+    exploded.set(id, t)
+    out.push({ t, kind: 'explosion', p, key })
+  }
   trace.events.forEach((e, i) => {
-    if (e.kind !== 'hit' && e.kind !== 'down') return
-    if (e.kind === 'hit' && ended.has(`${e.by}@${e.t}`)) return
-    const craft = trace.aircraft.find((c) => c.id === e.vehicle)
-    if (!craft || !craft.t.length) return
-    const at = sampleAt(craft, e.t)
-    out.push({ t: e.t, kind: e.kind, p: [at.x, at.y, at.z], key: `event:${i}` })
+    if (e.kind === 'hit') {
+      if (ended.has(`${e.by}@${e.t}`)) return
+      const p = at(e.vehicle, e.t)
+      if (p) out.push({ t: e.t, kind: 'hit', p, key: `event:${i}` })
+    } else if (e.kind === 'down') {
+      if (e.vehicle) explode(e.vehicle, e.t, at(e.vehicle, e.t), `event:${i}`)
+    } else if (e.kind === 'collision') {
+      const p = e.point ?? at(e.vehicle, e.t)
+      if (p) out.push({ t: e.t, kind: 'spark', p: [p[0], p[1], Math.max(0, p[2])], key: `event:${i}` })
+      for (const id of e.crashed ?? []) explode(id, e.t, at(id, e.t) ?? p, `event:${i}:${id}`)
+    } else if (e.kind === 'crash') {
+      const p = e.point ?? at(e.vehicle, e.t)
+      if (!p || !e.vehicle) return
+      if (e.reason === 'collision') explode(e.vehicle, e.t, p, `event:${i}`)
+      else out.push({ t: e.t, kind: 'dust', p: [p[0], p[1], Math.max(0, Math.min(p[2], 0.05))], key: `event:${i}` })
+    }
   })
   out.sort((a, b) => a.t - b.t)
   impactsOf.set(trace, out)
   return out
 }
 
-/** Impacts whose burst is still showing at t (started at or before t, within `lifeS` of their kind). */
-export function impactsAt(trace: Trace, t: number, lifeS: (kind: 'hit' | 'down') => number): TraceImpact[] {
+/** Impacts whose effect is still showing at t (started at or before t, within `lifeS` of their kind). */
+export function impactsAt(trace: Trace, t: number, lifeS: (kind: TraceImpactKind) => number): TraceImpact[] {
   return traceImpacts(trace).filter((m) => m.t <= t && t - m.t <= lifeS(m.kind))
 }
 

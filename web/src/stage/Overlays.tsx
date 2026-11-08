@@ -79,6 +79,7 @@ export function ViewTools({ top }: { top: number }) {
     { k: 'labels', key: 'stage.layer.labels' },
     { k: 'trails', key: 'stage.layer.trails' },
     { k: 'arena', key: 'stage.layer.arena' },
+    { k: 'volumes', key: 'stage.layer.volumes' }, // WP-C v0.5 (07 §5)
   ]
   const safetyShown = layers.safety === 'on' || (layers.safety === 'auto' && [...live.targets.values()].some((x) => x.kind !== 'slot'))
   return (
