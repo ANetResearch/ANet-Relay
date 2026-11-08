@@ -53,6 +53,8 @@ TRACE_EVENTS = {
     "arena_down": "down",
     "program_faulted": "program_faulted",
     "program_stopped": "program_stopped",
+    "collision": "collision",  # WP-A (07 §2)
+    "crashed": "crash",
 }
 
 
@@ -248,6 +250,8 @@ class Headless:
             origin = (player.spawn.x, player.spawn.y, 0.0, 0.0)
             self.course_run = coursemod.CourseRun.begin(svc.course(self.scenario.course), origin, None)
             self.course = {"id": self.scenario.course, "rings": list(self.course_run.rings)}
+            # WP-A (07 §2): the course's rings are solid for every aircraft of the run
+            self.svc.world.fixed_rings = [(f"ring:{i + 1}", r) for i, r in enumerate(self.course_run.rings)]
         self.t0 = self.clock.t
         self._events.clear()
 
@@ -346,6 +350,18 @@ class Headless:
             )
         elif kind in ("program_faulted", "program_stopped"):
             out.update(reason=data.get("reason"))
+        elif kind == "collision":  # WP-A (07 §2)
+            out.update(
+                {
+                    "with": data.get("b"),
+                    "point": data.get("point"),
+                    "v_rel": data.get("v_rel"),
+                    "crashed": data.get("crashed"),
+                }
+            )
+        elif kind == "crash":
+            self._crash_logged.add(str(event.get("vehicle")))
+            out.update(point=data.get("point"), reason=data.get("reason_code"))
         return out
 
     def _arena_bounds(self) -> None:
@@ -386,9 +402,18 @@ class Headless:
                 | (FLAG_CRASHED if tr.crashed else 0)
                 | (FLAG_OUT if tr.out else 0)
             )
-            if tr.crashed and slot.vid not in self._crash_logged:
+            if tr.crashed and slot.vid not in self._crash_logged:  # no crashed event seen (a shoot-down)
                 self._crash_logged.add(slot.vid)
-                self.trace_events.append({"t": _r(self.t), "kind": "crash", "vehicle": slot.vid})
+                details = self.svc._crash_details(self.svc.vehicles[slot.vid])
+                self.trace_events.append(
+                    {
+                        "t": _r(self.t),
+                        "kind": "crash",
+                        "vehicle": slot.vid,
+                        "point": details["point"],
+                        "reason": details["reason_code"],
+                    }
+                )
             self.frames[slot.vid].append(
                 [
                     _r(tr.p[0]),

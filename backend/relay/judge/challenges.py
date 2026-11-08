@@ -293,6 +293,7 @@ class RingsScorer(_Base):
     total: int = 0
     time_s: float | None = None
     aborted: str | None = None
+    touches: int = 0  # WP-A (07 §2): rings passed while touching the tube (still passed)
 
     def begin(self, run: Headless) -> None:
         super().begin(run)
@@ -309,7 +310,17 @@ class RingsScorer(_Base):
         for kind, data in self.course.update(tr.p, t, t, tr.airborne):
             if kind == "ring_passed":
                 self.rings = int(data["ring"])
-                run.mark("ring", self.player.vid, ring=self.rings, total=self.total, elapsed=data["elapsed"])
+                run.mark(
+                    "ring",
+                    self.player.vid,
+                    ring=self.rings,
+                    total=self.total,
+                    elapsed=data["elapsed"],
+                    clean=data["clean"],
+                )
+            elif kind == "ring_touch":
+                self.touches += 1
+                run.mark("ring_touch", self.player.vid, ring=int(data["ring"]), point=data["point"])
             elif kind == "course_finished":
                 self.time_s = float(data["total_s"])
                 run.mark("course_finished", self.player.vid, total_s=self.time_s)
@@ -333,6 +344,7 @@ class RingsScorer(_Base):
                 "total": self.total,
                 "time_s": None if self.time_s is None else round(self.time_s, 3),
                 "aborted": self.aborted,
+                "touches": self.touches,
             },
         }
 

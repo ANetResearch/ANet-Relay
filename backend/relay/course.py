@@ -5,6 +5,11 @@ origin. A ring's ``yaw_deg`` is the compass heading of its normal (0 = north,
 90 = east); passing means crossing the ring plane from the negative to the
 positive side with the crossing point within ``r`` of the centre. Only the
 next ring counts.
+
+Rings are solid (07 §2, WP-A): the aircraft is a sphere of ``CRAFT_RADIUS`` and the ring a torus with tube
+``RING_TUBE``. A pass is clean when the whole sphere clears the tube at the crossing (the crossing point
+within ``r - CRAFT_RADIUS - RING_TUBE`` of the centre); a pass whose sphere overlaps the tube still counts
+but also reports ``ring_touch`` (the collision world bounces or wrecks the aircraft physically).
 """
 
 from __future__ import annotations
@@ -12,6 +17,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from typing import Any
+
+from .sim.collide import CRAFT_RADIUS, RING_TUBE
 
 DESIGN_VOLUME = (3.0, 3.0, 2.0)
 MIN_RADIUS = 0.3
@@ -131,6 +138,23 @@ def crossing(
     return dist <= ring["r"], f
 
 
+def pass_check(
+    p0: tuple[float, float, float], p1: tuple[float, float, float], ring: dict[str, Any]
+) -> tuple[bool, float | None, bool, tuple[float, float, float] | None]:
+    """(passed, fraction, clean, crossing point) for one position step against one solid ring (07 §2)."""
+    c = ring["c"]
+    n = normal(ring["yaw_deg"])
+    d0 = sum((p0[i] - c[i]) * n[i] for i in range(3))
+    d1 = sum((p1[i] - c[i]) * n[i] for i in range(3))
+    if not (d0 < 0.0 <= d1):
+        return False, None, False, None
+    f = d0 / (d0 - d1) if d0 != d1 else 0.0
+    q = (p0[0] + (p1[0] - p0[0]) * f, p0[1] + (p1[1] - p0[1]) * f, p0[2] + (p1[2] - p0[2]) * f)
+    dist = math.sqrt(sum((q[i] - c[i]) ** 2 for i in range(3)))
+    passed = dist <= ring["r"]
+    return passed, f, passed and dist <= ring["r"] - CRAFT_RADIUS - RING_TUBE, q
+
+
 def fmt_time(seconds: float) -> str:
     minutes, rest = divmod(max(0.0, seconds), 60.0)
     return f"{int(minutes):02d}:{rest:05.2f}"
@@ -155,6 +179,7 @@ class CourseRun:
     ended: float | None = None
     last_p: tuple[float, float, float] | None = None
     controller: str | None = None
+    touches: list[int] = field(default_factory=list)  # WP-A: rings passed while touching the tube
 
     @classmethod
     def begin(
@@ -169,7 +194,7 @@ class CourseRun:
     def update(
         self, p: tuple[float, float, float], now: float, wall: float, airborne: bool
     ) -> list[tuple[str, dict]]:
-        """Feed one position sample; returns events (ring_passed, course_finished)."""
+        """Feed one position sample; returns events (ring_passed, ring_touch, course_finished)."""
         events: list[tuple[str, dict]] = []
         if not self.active:
             return events
@@ -182,7 +207,7 @@ class CourseRun:
             self.last_p = p
             return events
         if self.last_p is not None:
-            passed, _ = crossing(self.last_p, p, self.rings[self.next])
+            passed, _, clean, point = pass_check(self.last_p, p, self.rings[self.next])
             if passed:
                 assert self.last_pass is not None and self.started is not None
                 split = round(now - self.last_pass, 3)
@@ -193,9 +218,18 @@ class CourseRun:
                 events.append(
                     (
                         "ring_passed",
-                        {"ring": self.next, "total": len(self.rings), "split": split, "elapsed": elapsed},
+                        {
+                            "ring": self.next,
+                            "total": len(self.rings),
+                            "split": split,
+                            "elapsed": elapsed,
+                            "clean": clean,
+                        },
                     )
                 )
+                if not clean and point is not None:
+                    self.touches.append(self.next)
+                    events.append(("ring_touch", {"ring": self.next, "point": [round(x, 3) for x in point]}))
                 if self.next >= len(self.rings):
                     self.state = "finished"
                     self.finished = now

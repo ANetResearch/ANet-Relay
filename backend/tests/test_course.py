@@ -114,3 +114,31 @@ def test_custom_course_validation():
         course.validate_custom("x", {"rings": [{"c": [2, 0, 1], "r": 0.4}]}, (3, 3, 2))
     with pytest.raises(ValueError):
         course.validate_custom("x", {"rings": [{"c": [0, 0, 1], "r": 0.1}]}, (3, 3, 2))
+
+
+# ---------------------------------------------------------------------------- solid rings (07 §2, WP-A)
+
+
+def test_clean_pass_needs_the_whole_sphere_to_clear_the_tube():
+    clear = RING["r"] - course.CRAFT_RADIUS - course.RING_TUBE  # 0.22 m for a 0.4 m ring
+    passed, _f, clean, point = course.pass_check((clear - 0.01, -0.1, 1.0), (clear - 0.01, 0.1, 1.0), RING)
+    assert passed and clean and point == pytest.approx((clear - 0.01, 0.0, 1.0))
+    passed, _f, clean, _p = course.pass_check((0.35, -0.1, 1.0), (0.35, 0.1, 1.0), RING)
+    assert passed and not clean  # the centre is inside, the sphere scrapes the tube: passed, touched
+    passed, _f, clean, _p = course.pass_check((0.45, -0.1, 1.0), (0.45, 0.1, 1.0), RING)
+    assert not passed and not clean
+
+
+def test_a_touched_pass_counts_and_reports_ring_touch():
+    run = course.CourseRun.begin(
+        {"id": "t", "rings": [dict(RING), {**RING, "c": [0.0, 2.0, 1.0]}]}, (0, 0, 0, 0), None
+    )
+    run.update((0.0, -1.0, 0.5), 0.0, 0.0, True)
+    events = run.update((0.35, -0.5, 1.0), 0.5, 0.5, True) + run.update((0.35, 0.5, 1.0), 1.0, 1.0, True)
+    kinds = [k for k, _ in events]
+    assert kinds == ["ring_passed", "ring_touch"]
+    assert events[0][1]["clean"] is False and events[1][1]["ring"] == 1
+    assert events[1][1]["point"] == pytest.approx([0.35, 0.0, 1.0])
+    events = run.update((0.0, 1.5, 1.0), 1.5, 1.5, True) + run.update((0.0, 2.5, 1.0), 2.0, 2.0, True)
+    assert [k for k, _ in events] == ["ring_passed", "course_finished"] and events[0][1]["clean"] is True
+    assert run.touches == [1]
