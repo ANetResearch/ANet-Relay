@@ -136,25 +136,34 @@ def test_sdk_flies_a_program_at_the_sticks_level(base):
         op.remove_sims([vid])
 
 
-def test_sdk_judge_calls_name_a_missing_judge(base):
+def test_sdk_judges_a_program_and_runs_a_duel(base):
+    """WP-5: the SDK judge calls against the merged judge routes, the evaluator in its worker process."""
     agent = RelayClient(base)
     agent.open_session("sdk-judge")
     try:
-        try:
-            agent.challenge_list()
-        except RelayError as exc:
-            assert exc.code == "judge_unavailable" and exc.status == 404 and exc.message_zh
-        else:
-            pytest.skip("this Relay has the judge API; its own tests cover it")
-        for call in (
-            lambda: agent.challenge_submit("hover", "hover_trim"),
-            lambda: agent.job_status("j1"),
-            lambda: agent.duel_run(["hunter_easy", "hunter_hard"], rounds=1),
-            agent.ladder,
-            lambda: agent.trace("t1"),
-        ):
-            with pytest.raises(RelayError) as exc:
-                call()
-            assert exc.value.code == "judge_unavailable"
+        listed = agent.challenge_list()["challenges"]
+        assert [c["id"] for c in listed][:2] == ["liftoff", "hover"] and len(listed) == 9
+        job = agent.challenge_submit("liftoff", "liftoff", timeout=120)
+        assert job["state"] == "done", job
+        result = job["result"]
+        assert result["challenge"] == "liftoff" and result["passed"] and len(result["seeds"]) == 5
+        assert job["programs"] == [{"program": "liftoff", "rev": 1, "name": "Lift-off"}]
+        trace = agent.trace(result["trace_id"])
+        assert trace["kind"] == "challenge" and trace["aircraft"][0]["program"] == "liftoff"
+        assert len(trace["t"]) == len(trace["aircraft"][0]["frames"]) > 0
+        assert agent.job_status(job["id"])["state"] == "done"
+        duel = agent.duel_run(
+            ["hunter_easy", "hunter_hard"], rounds=1, seed=3, scenario={"duration_s": 15}, timeout=120
+        )
+        assert duel["state"] == "done", duel
+        assert len(duel["result"]["rounds"]) == 1
+        ladder = agent.ladder()["ladder"]
+        assert {r["program"] for r in ladder} == {"hunter_easy", "hunter_hard"}
+        with pytest.raises(RelayError) as exc:
+            agent.job_status("job-missing")
+        assert exc.value.code == "job_not_found"
+        with pytest.raises(RelayError) as exc:
+            agent.challenge_submit("nope", "liftoff")
+        assert exc.value.code == "challenge_not_found"
     finally:
         agent.close()
