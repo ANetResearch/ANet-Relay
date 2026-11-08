@@ -8,7 +8,8 @@ its FirstOrderFilter (PX4-SITL_gazebo-classic), written from the plugin, not fro
 * thrust ``F = w * |w| * motor_constant`` along the rotor axis;
 * the drag torque ``(0, 0, -turning_direction * F * moment_constant)`` (rotor axis z up);
 * rotor drag ``-|w| * rotor_drag_coefficient * v_perp`` and rolling moment
-  ``-|w| * rolling_moment_coefficient * v_perp`` with ``v_perp`` the airspeed perpendicular to the axis.
+  ``-|w| * turning_direction * rolling_moment_coefficient * v_perp`` with ``v_perp`` the airspeed
+  perpendicular to the axis (CW and CCW rotors cancel at equal speeds).
 
 The simulator is compared with it to better than 1 %: the single-rotor step response, thrust, reaction
 torque and rotor drag (with the documented body drag taken out), plus the rolling moment. The envelope
@@ -63,7 +64,8 @@ class GazeboRotor:
 
     def rolling_moment(self, w: float, v: tuple[float, float, float]) -> tuple[float, float, float]:
         perp = (v[0], v[1], 0.0)
-        return tuple(-abs(w) * self.rolling_moment_coefficient * c for c in perp)  # type: ignore[return-value]
+        k = -abs(w) * self.turning_direction * self.rolling_moment_coefficient
+        return tuple(k * c for c in perp)  # type: ignore[return-value]
 
 
 ROTORS = (CCW, CCW, CW, CW)  # quad-x: 1 front-right CCW, 2 rear-left CCW, 3 front-left CW, 4 rear-right CW
@@ -139,17 +141,21 @@ def test_thrust_and_reaction_torque_match_gazebo():
     assert rel(physics.IYY * quad.s.rates[1] / DT, ty_ref) < 0.01
 
 
-@pytest.mark.parametrize("yaw_deg", [0.0, 90.0, 30.0])
-def test_rotor_drag_and_rolling_moment_match_gazebo(yaw_deg):
+@pytest.mark.parametrize(("yaw_deg", "yawing"), [(0.0, False), (90.0, False), (30.0, False), (30.0, True)])
+def test_rotor_drag_and_rolling_moment_match_gazebo(yaw_deg, yawing):
     quad = aloft(math.radians(yaw_deg))
     f = physics.thrust_fraction(0.5)
+    g = physics.thrust_fraction(0.35)
+    # yawing: the CCW pair (1, 2) faster than the CW pair (3, 4); diagonal pairs keep the roll and pitch
+    # thrust level, so only the rolling moment's CCW / CW imbalance turns the body about x and y
+    cmd = (f, f, g, g) if yawing else (f,) * 4
     for _ in range(200):
-        quad.step((f,) * 4, armed=True)
+        quad.step(cmd, armed=True)
         quad.s.p = [0.0, 0.0, 50.0]
         quad.s.set_attitude(0.0, 0.0, math.radians(yaw_deg))
         quad.s.rates = [0.0, 0.0, 0.0]
         quad.s.v = [0.0, 3.0, 0.0]  # 3 m/s north through still air
-    quad.step((f,) * 4, armed=True)
+    quad.step(cmd, armed=True)
     omega = list(quad.s.omega)
     yaw = math.radians(yaw_deg)
     # air velocity in the body frame (FRD): north 3 m/s seen from heading yaw
@@ -169,8 +175,13 @@ def test_rotor_drag_and_rolling_moment_match_gazebo(yaw_deg):
             assert rel(measured - body[k], drag[k]) < 0.01
     # rolling moment: the rotor drag forces at the hubs also turn the body in yaw, so compare roll / pitch
     for k, inertia in enumerate((physics.IXX, physics.IYY)):
-        if abs(roll_m[k]) > 1e-9:
-            assert rel(inertia * quad.s.rates[k] / DT, roll_m[k]) < 0.01
+        measured = inertia * quad.s.rates[k] / DT
+        if not yawing:
+            assert abs(roll_m[k]) < 1e-12 and abs(measured) < 1e-9  # equal rotors: CW and CCW cancel
+        elif abs(roll_m[k]) > 1e-9:
+            assert rel(measured, roll_m[k]) < 0.01
+    if yawing:
+        assert max(abs(c) for c in roll_m) > 1e-7  # the case really has a rolling moment to compare
 
 
 # ---------------------------------------------------------------------------- envelope

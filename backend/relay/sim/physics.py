@@ -8,9 +8,10 @@ matching MAVLink ATTITUDE, and ``State.rates`` are the body rates (p, q, r) in r
 Rotors follow Gazebo's ``MulticopterMotorModel`` (gazebo_motor_model.cpp): the rotor speed follows its
 reference through a first-order filter with separate spin-up and spin-down time constants, thrust is
 ``k_f * w^2``, the reaction torque is ``k_m * thrust`` against the spin direction, a rotor drag force
-``-|w| * rotor_drag * v_perp`` and a rolling moment ``-|w| * rolling_moment * v_perp`` act with the airspeed
-in the rotor plane. Gazebo's linear thrust roll-off with axial airspeed (``1 - v / 25``) is left out: it
-takes thrust away in a descent as well as in a climb; the propeller wake below covers the descent.
+``-|w| * rotor_drag * v_perp`` and a rolling moment ``-|w| * turning_direction * rolling_moment * v_perp``
+act with the airspeed in the rotor plane. Gazebo's linear thrust roll-off with axial airspeed (``1 - v / 25``)
+is left out: it takes thrust away in a descent as well as in a climb; the propeller wake below covers the
+descent.
 
 Rotor layout is PX4 / ArduPilot quad-x (the motor test numbering): 1 front-right CCW, 2 rear-left CCW,
 3 front-left CW, 4 rear-right CW. The ESC maps a motor output ``u`` (0..1) to a thrust fraction
@@ -548,8 +549,11 @@ class Quad:
         # moment of the rotor drag forces at the hubs.
         x1, x2, x3, x4 = ARM - cx, -ARM - cx, ARM - cx, -ARM - cx
         y1, y2, y3, y4 = ARM - cy, -ARM - cy, -ARM - cy, ARM - cy
-        tx = -(y1 * t1 + y2 * t2 + y3 * t3 + y4 * t4) - ROLLING_MOMENT * wsum * bx
-        ty = x1 * t1 + x2 * t2 + x3 * t3 + x4 * t4 - ROLLING_MOMENT * wsum * by
+        # Gazebo's rolling moment -|w| * turning_direction * mu * v_perp: CW and CCW rotors cancel in a
+        # symmetric quad, only a yawing imbalance leaves a net moment
+        wdir = o1 + o2 - o3 - o4  # ROTOR_DIR
+        tx = -(y1 * t1 + y2 * t2 + y3 * t3 + y4 * t4) - ROLLING_MOMENT * wdir * bx
+        ty = x1 * t1 + x2 * t2 + x3 * t3 + x4 * t4 - ROLLING_MOMENT * wdir * by
         sx = o1 * x1 + o2 * x2 + o3 * x3 + o4 * x4
         sy = o1 * y1 + o2 * y2 + o3 * y3 + o4 * y4
         tz = K_M * (t1 + t2 - t3 - t4) - ROTOR_DRAG * (sx * by - sy * bx)
