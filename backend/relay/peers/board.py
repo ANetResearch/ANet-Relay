@@ -210,7 +210,11 @@ class Board:
     def _check_controllers(self, sims: dict[str, Any]) -> None:
         for vid, v in sims.items():
             ctrl = controller(self.fleet, v)
-            if self._controllers.get(vid) != ctrl:
+            prev = self._controllers.get(vid)
+            down = not self._seen.get(vid, (True, False))[0]
+            if down and prev is not None and prev[0] == "program" and ctrl[0] == "agent":
+                continue  # WP-D: a crash stops the program until the respawn; the line still names it
+            if prev != ctrl:
                 self._controllers[vid] = ctrl
                 self.bump()
 

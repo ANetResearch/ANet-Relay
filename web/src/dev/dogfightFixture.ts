@@ -214,7 +214,7 @@ export function boardRows(loops: number, t: number): Obj[] {
     const alive = since !== null ? 0 : t - (last.length ? Math.max(...last) : 0) + (last.length ? 0 : loops * 4)
     const callsign = p.local ? 'Alpha' : 'Bravo'
     return {
-      key: p.local ? p.label : `${callsign} / ${p.label}`, aircraft: p.label, callsign, local: p.local, controller: p.controller,
+      key: p.key, aircraft: p.label, callsign, local: p.local, controller: p.controller,
       downs: x.downs, hits: x.hits, shots: x.shots, accuracy: x.shots ? x.hits / x.shots : null, rams: x.rams, deaths: x.deaths,
       crashes: x.crashes, alive_s: alive, best_alive_s: Math.max(alive, 9 + PILOTS.indexOf(p) * 2.5 + loops * 3), damage: x.damage,
     }

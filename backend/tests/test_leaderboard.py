@@ -152,6 +152,27 @@ def test_rams_between_local_aircraft_come_from_the_collision_events(svc, stepper
     assert rows[0]["rams"] == 1
 
 
+def test_a_downed_aircraft_keeps_its_program_as_the_controller(svc, stepper, monkeypatch):
+    svc.add_sims(1)
+    stepper.run(2.5)
+    join(svc, stepper)
+    stepper.run(0.3)
+    board = svc.arena.board
+    sims = {"sim-1": svc.vehicles["sim-1"]}  # on the ground: not alive
+    who = {"now": ("program", "Rammer r1")}
+    monkeypatch.setattr(boardmod, "controller", lambda fleet, v: who["now"])
+    board._check_controllers(sims)
+    # the crash stopped the program and the dogfight session holds the claim until the respawn
+    who["now"] = ("agent", "dogfight")
+    board._check_controllers(sims)
+    (row,) = [r for r in board.leaderboard()["rows"] if r["key"] == "sim-1"]
+    assert row["controller"] == {"kind": "program", "name": "Rammer r1"}
+    who["now"] = ("human", "keyboard")  # a person takes over: shown at once
+    board._check_controllers(sims)
+    (row,) = [r for r in board.leaderboard()["rows"] if r["key"] == "sim-1"]
+    assert row["controller"]["kind"] == "human"
+
+
 def test_sorting_and_empty_rows_last():
     rows = [
         boardmod._row("a", "SIM-1", "A", True, "none", "", (2, 4, 10, 0, 1, 0, 80), 0.0, 30.0, False),

@@ -19,7 +19,7 @@ import { Icon, StateIcon } from '@/ui/icons'
 import { arenaApi } from './api'
 import { refetchBoard, refetchScenario, useBoard } from './board'
 import { useTA, type ArenaKey } from './copy'
-import { BOARD_TABS, matchLeft, metricCells, ranks, sortRows, type BoardBy, type ControllerKind, type LeaderboardRow } from './leaderboard'
+import { BOARD_TABS, matchLeft, metricCells, ranks, rowLabel, sortRows, type BoardBy, type ControllerKind, type LeaderboardRow } from './leaderboard'
 import { useBoardSignal } from './store'
 import './arena.css'
 
@@ -169,8 +169,8 @@ export function LeaderboardPanel({ top, fallback }: { top: number; fallback: Rea
                     return (
                       <TableRow key={r.key} className={cn('h-6', r.local && 'font-semibold')} data-selected={r.local ? '' : undefined} data-board-row={r.key}>
                         <TableCell data-num="" className={cn(num, 'px-1 text-[var(--g400)]')}>{place[i]}</TableCell>
-                        <TableCell className="truncate px-1 py-1 text-[var(--g100)]" title={r.local ? `${r.key} · ${t('board.own')}` : r.key}>
-                          {r.key}
+                        <TableCell className="truncate px-1 py-1 text-[var(--g100)]" title={r.local ? `${rowLabel(r)} · ${t('board.own')}` : rowLabel(r)}>
+                          {rowLabel(r)}
                         </TableCell>
                         <TableCell className="truncate px-1 py-1 text-[var(--g300)]" title={`${t(CTL_KEY[r.controller.kind])}${r.controller.name ? ` · ${r.controller.name}` : ''}`}>
                           {ctl}

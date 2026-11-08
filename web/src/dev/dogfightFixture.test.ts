@@ -33,7 +33,7 @@ describe('dogfight dev fixture', () => {
     expect(board.rows).toHaveLength(6)
     const top = sortRows(board.rows, 'downs')[0]
     expect(top.downs).toBeGreaterThan(0)
-    expect(board.rows.filter((r) => r.local).map((r) => r.key)).toEqual(['SIM-1', 'SIM-2', 'SIM-3', 'SIM-4'])
-    expect(board.rows.find((r) => r.key === 'SIM-3')!.rams).toBe(2)
+    expect(board.rows.filter((r) => r.local).map((r) => r.key)).toEqual(['sim-1', 'sim-2', 'sim-3', 'sim-4'])
+    expect(board.rows.find((r) => r.key === 'sim-3')!.rams).toBe(2)
   })
 })

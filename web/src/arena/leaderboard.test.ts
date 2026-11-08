@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { defaultForm, defaultRoles, dogfightBody, validateDogfight, withAircraft } from './dogfight'
-import { accuracyText, BOARD_TABS, matchLeft, metricCells, normBoard, normDogfight, normRow, ranks, sortRows, type LeaderboardRow } from './leaderboard'
+import { accuracyText, BOARD_TABS, matchLeft, metricCells, normBoard, normDogfight, normRow, ranks, rowLabel, sortRows, type LeaderboardRow } from './leaderboard'
 import { liveRows } from './LeaderboardPanel'
 import { ARENA_DICTS } from './copy'
 
@@ -25,6 +25,15 @@ describe('leaderboard model (07 §4, §5)', () => {
     expect(b.rows[1]).toMatchObject({ accuracy: 0.25, best_alive_s: 30, controller: { kind: 'none', name: '' }, local: true })
     expect(normRow({ key: 'a', shots: 0, accuracy: 0.9 })?.accuracy).toBeNull()
     expect(normBoard(null, 'survival')).toEqual({ by: 'survival', match: null, rows: [] })
+  })
+
+  it('names this terminal\'s aircraft by label and a peer\'s with its callsign, never by the row key', () => {
+    expect(rowLabel({ aircraft: 'SIM-1', callsign: 'Alpha', local: true })).toBe('SIM-1')
+    expect(rowLabel({ aircraft: 'SIM-2', callsign: 'Bravo', local: false })).toBe('Bravo / SIM-2')
+    expect(rowLabel({ aircraft: 'Bravo / SIM-2', callsign: 'Bravo', local: false })).toBe('Bravo / SIM-2')
+    expect(rowLabel({ aircraft: 'SIM-3', callsign: '', local: false })).toBe('SIM-3')
+    const row = normRow({ key: '00000000000000bb/sim-1', aircraft: 'SIM-1', callsign: 'Bravo', local: false })!
+    expect(rowLabel(row)).toBe('Bravo / SIM-1')
   })
 
   it('orders each tab by its metric, breaks ties stably and shares places', () => {

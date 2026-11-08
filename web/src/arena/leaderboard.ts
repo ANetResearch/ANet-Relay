@@ -15,8 +15,9 @@ export type BoardBy = (typeof BOARD_TABS)[number]
 export type ControllerKind = 'program' | 'agent' | 'human' | 'none'
 
 export interface LeaderboardRow {
-  /** "callsign / SIM-n" for a peer's aircraft, "SIM-n" for this terminal's */
+  /** the backend's row key: "sim-n" for this terminal's aircraft, "<peer instance>/sim-n" for a peer's */
   key: string
+  /** the aircraft's label ("SIM-n") */
   aircraft: string
   callsign: string
   local: boolean
@@ -149,6 +150,12 @@ const ORDER: Record<BoardBy, Cmp[]> = {
 }
 
 /** Rows in the order of a tab (a new array; the input is not touched). */
+/** The name a row is shown with (07 §4): "SIM-n" for this terminal's aircraft, "callsign / SIM-n" for a peer's. */
+export function rowLabel(r: Pick<LeaderboardRow, 'aircraft' | 'callsign' | 'local'>): string {
+  if (r.local || !r.callsign || r.aircraft.includes(' / ')) return r.aircraft
+  return `${r.callsign} / ${r.aircraft}`
+}
+
 export function sortRows(rows: readonly LeaderboardRow[], by: BoardBy): LeaderboardRow[] {
   const cmps = ORDER[by]
   return [...rows].sort((a, b) => {
