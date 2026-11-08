@@ -16,9 +16,14 @@ client refetches the board only on change.
 Matches: ``start`` clears the lines and opens a match of ``duration_s``; on the LAN it sends MATCH start, and
 repeats it every 2 s while it runs, so late joiners and lost packets catch up. A terminal that receives a
 start clears its lines and follows the starter's clock (its start moved by the packet age, adjusted again when
-a repeat differs by more than ``TOLERANCE_S``). Two matches started at once: the earlier start wins (then the
-smaller starter id). When a match ends (its time is up, a MATCH end arrives, or ``end``) the board freezes and
-keeps the final standings until the next start or ``reset``; outside a match the lines accumulate.
+a repeat differs by more than ``TOLERANCE_S``). Two matches started at once (within ``CONCURRENT_S``): the
+earlier start wins (then the smaller starter id). A start is bound to its sender: only the starter sends a
+start and its repeats (the packet's origin is the sending peer), a running match is never replaced by a start
+that merely claims to be older, and one starter opens at most one new match per ``NEW_MATCH_COOLDOWN_S`` here,
+so no peer can extend, take over or keep restarting the others' matches. Any terminal may end a match
+(``DELETE /arena/match`` ends it everywhere). When a match ends (its time is up, a MATCH end arrives, or
+``end``) the board freezes and keeps the final standings until the next start or ``reset``; outside a match
+the lines accumulate.
 """
 
 from __future__ import annotations
@@ -42,6 +47,10 @@ STATS_EVERY = 20  # STATE packets: the statistics block rides on every 20th (onc
 RESEND_S = 2.0
 TOLERANCE_S = 0.5
 MATCH_RATE = 2.0  # MATCH packets per peer and second
+CONCURRENT_S = (
+    3.0  # two starts this close are one decision; a start further from the running one never replaces it
+)
+NEW_MATCH_COOLDOWN_S = 5.0  # new matches accepted from one starter
 ENDED_KEEP = 32
 CONTROLLER_NAME_MAX = 32
 SLOW_PERIOD_S = 0.2  # controllers and the peers' rows are compared at 5 Hz
@@ -97,6 +106,7 @@ class Board:
     _rows_sig: tuple = ()
     _ended: list[int] = field(default_factory=list)
     _match_rate: dict[int, tuple[float, float]] = field(default_factory=dict)
+    _opened_by: dict[int, float] = field(default_factory=dict)  # starter instance -> last new match accepted
     _next_resend: float = 0.0
     _next_slow: float = 0.0
     _state_count: int = 0
@@ -341,6 +351,8 @@ class Board:
             if m is not None and m.id == packet.match and m.running:
                 self._finish(now, "remote", broadcast=False)
             return
+        if packet.origin != peer.instance:
+            return  # a start or its repeat comes from its starter only
         started = now - packet.elapsed_ms / 1000.0 - age
         if started + packet.duration_s <= now or packet.match in self._ended:
             return  # over already, or one this terminal has seen end
@@ -350,8 +362,15 @@ class Board:
                 self.bump()
             return
         incoming = MatchState(packet.match, packet.origin, started, float(packet.duration_s))
-        if m is not None and m.running and not incoming.wins_over(m):
-            return
+        if (
+            m is not None
+            and m.running
+            and (not incoming.wins_over(m) or abs(started - m.started_at) > CONCURRENT_S)
+        ):
+            return  # the running match stays: a later start, or one that only claims an earlier time
+        if now - self._opened_by.get(peer.instance, -math.inf) < NEW_MATCH_COOLDOWN_S:
+            return  # its repeat opens it once the cooldown is over, on the starter's clock
+        self._opened_by[peer.instance] = now
         self._open(incoming, now)
 
     def forget_peer(self, instance: int) -> None:

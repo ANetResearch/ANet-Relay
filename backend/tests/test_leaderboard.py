@@ -339,32 +339,116 @@ def test_match_packets_from_a_peer(svc, stepper):
     feed(svc, peers, wire.encode_match(4, PEER, 1300, wire.Match(0xAB, wire.MATCH_START, 120, 13_000, PEER)))
     stepper.run(0.6)
     assert board.match.started_at < started - 1.5
-    # a later competing match loses; an earlier one wins
+    # a start bound to someone else is refused: no peer moves or claims another's match
+    other = PEER + 7
+    feed(svc, peers, peer_state(other, stats=wire.Stats()), "10.9.9.11")
+    stepper.run(0.1)
+    started = board.match.started_at
     feed(
-        svc, peers, wire.encode_match(5, PEER, 1400, wire.Match(0xCD, wire.MATCH_START, 120, 1_000, PEER + 7))
+        svc,
+        peers,
+        wire.encode_match(5, other, 1400, wire.Match(0xAB, wire.MATCH_START, 120, 0, PEER)),
+        "10.9.9.11",
+    )
+    stepper.run(0.6)
+    assert board.match.id == 0xAB and board.match.started_at == started  # not restarted by a third party
+    feed(svc, peers, wire.encode_match(6, PEER, 1400, wire.Match(0xCD, wire.MATCH_START, 120, 1_000, other)))
+    stepper.run(0.6)
+    assert board.match.id == 0xAB
+    # a later competing match loses; one that only claims a much earlier start loses too
+    feed(
+        svc,
+        peers,
+        wire.encode_match(7, other, 1500, wire.Match(0xCD, wire.MATCH_START, 120, 1_000, other)),
+        "10.9.9.11",
     )
     stepper.run(0.6)
     assert board.match.id == 0xAB
     feed(
         svc,
         peers,
-        wire.encode_match(6, PEER, 1500, wire.Match(0xEF, wire.MATCH_START, 120, 60_000, PEER + 7)),
+        wire.encode_match(8, other, 1600, wire.Match(0xEF, wire.MATCH_START, 120, 110_000, other)),
+        "10.9.9.11",
+    )
+    stepper.run(0.6)
+    assert board.match.id == 0xAB
+    # a start at the same moment (here 1 s earlier) wins, as two operators pressing start together
+    elapsed = round((svc.clock() - board.match.started_at + 1.0) * 1000)
+    feed(
+        svc,
+        peers,
+        wire.encode_match(9, other, 1700, wire.Match(0xEF, wire.MATCH_START, 120, elapsed, other)),
+        "10.9.9.11",
     )
     stepper.run(0.6)
     assert board.match.id == 0xEF
     # the end of the match ends it here; the same id does not start again
     feed(
-        svc, peers, wire.encode_match(7, PEER, 1600, wire.Match(0xEF, wire.MATCH_END, 120, 61_000, PEER + 7))
+        svc,
+        peers,
+        wire.encode_match(10, other, 1800, wire.Match(0xEF, wire.MATCH_END, 120, 61_000, other)),
+        "10.9.9.11",
     )
     stepper.run(0.6)
     assert not board.match.running and board.match.reason == "remote"
     feed(
         svc,
         peers,
-        wire.encode_match(8, PEER, 1700, wire.Match(0xEF, wire.MATCH_START, 120, 62_000, PEER + 7)),
+        wire.encode_match(11, other, 1900, wire.Match(0xEF, wire.MATCH_START, 120, 62_000, other)),
+        "10.9.9.11",
     )
     stepper.run(0.6)
     assert not board.match.running
+    # a new match of the same starter right after: held for the cooldown, then opened on the starter's clock
+    feed(
+        svc,
+        peers,
+        wire.encode_match(12, other, 2000, wire.Match(0x99, wire.MATCH_START, 120, 0, other)),
+        "10.9.9.11",
+    )
+    stepper.run(0.6)
+    assert not board.match.running
+    stepper.run(boardmod.NEW_MATCH_COOLDOWN_S)
+    feed(
+        svc,
+        peers,
+        wire.encode_match(13, other, 2100, wire.Match(0x99, wire.MATCH_START, 120, 6_000, other)),
+        "10.9.9.11",
+    )
+    stepper.run(0.6)
+    assert board.match.id == 0x99 and board.match.running
+
+
+def test_a_forged_match_cannot_extend_or_take_over_a_running_one(svc, stepper):
+    """After 25 s of a 30 s match a third peer repeats it with elapsed 0, then claims an older one (07 §4)."""
+    svc.add_sims(1)
+    stepper.run(2.5)
+    peers, _sent = join(svc, stepper)
+    board = svc.arena.board
+    attacker = PEER + 9
+    feed(svc, peers, peer_state(PEER, stats=wire.Stats()))
+    feed(svc, peers, peer_state(attacker, stats=wire.Stats()), "10.9.9.12")
+    stepper.run(0.1)
+    feed(svc, peers, wire.encode_match(2, PEER, 1100, wire.Match(0xAB, wire.MATCH_START, 30, 25_000, PEER)))
+    stepper.run(0.2)
+    board.shot("sim-1")
+    left = board.match.ends_at - svc.clock()
+    assert left == pytest.approx(5.0, abs=0.3)
+    feed(
+        svc,
+        peers,
+        wire.encode_match(3, attacker, 1200, wire.Match(0xAB, wire.MATCH_START, 30, 0, PEER)),
+        "10.9.9.12",
+    )
+    feed(
+        svc,
+        peers,
+        wire.encode_match(4, attacker, 1200, wire.Match(0x1234, wire.MATCH_START, 30, 29_000, attacker)),
+        "10.9.9.12",
+    )
+    stepper.run(0.2)
+    assert board.match.id == 0xAB and board.match.ends_at - svc.clock() < left
+    assert board.lines["sim-1"].shots == 1  # nobody's board was wiped
 
 
 def test_match_packets_are_rate_limited(svc, stepper):
@@ -381,6 +465,7 @@ def test_match_packets_are_rate_limited(svc, stepper):
             wire.encode_match(10 + k, PEER, 1100, wire.Match(0x100 + k, wire.MATCH_START, 120, k, PEER)),
         )
     stepper.run(0.1)
-    # the bucket holds two: the first starts a match, the second (started 1 ms earlier) wins, the rest drop
-    assert board.match.id == 0x101
+    # the bucket holds two: the first starts a match, the second (started 1 ms earlier) waits for the
+    # starter's cooldown, the rest drop
+    assert board.match.id == 0x100
     assert board._match_rate[PEER][0] < 1.0
