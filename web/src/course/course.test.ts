@@ -61,3 +61,16 @@ describe('ring geometry (03 §8)', () => {
     expect(ringsExtent([])).toBeNull()
   })
 })
+
+describe('voxel ring body (07 §2, §5)', () => {
+  it('chains cubes of twice the tube along the ring centre line, closed and evenly spaced', async () => {
+    const { ringVoxels } = await import('./voxelRing')
+    const { edge, cubes } = ringVoxels(0.5, 0.03)
+    expect(edge).toBeCloseTo(0.06)
+    expect(cubes.length).toBe(Math.ceil((2 * Math.PI * 0.5) / 0.06))
+    for (const c of cubes) expect(Math.hypot(c.x, c.y)).toBeCloseTo(0.5, 9)
+    const gap = Math.hypot(cubes[1].x - cubes[0].x, cubes[1].y - cubes[0].y)
+    expect(gap).toBeLessThanOrEqual(edge + 1e-9)
+    expect(ringVoxels(0.05, 0.03).cubes).toHaveLength(12)
+  })
+})
