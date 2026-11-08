@@ -1,6 +1,6 @@
-// 05 §2.4: the director's cut can be skipped. Fixture mode (no backend wait) with the Full opening set through the
-// setting's localStorage mirror. A key must take the opening straight to its reveal (act 4 / 5, never back into the
-// film) and remove the mask within 6 s of the key reaching the page. The clock is the page's own, from the key event:
+// 05 §2.4, 06 §8: the director's cut can be skipped. Fixture mode (no backend wait) with the Full opening set through
+// the setting's localStorage mirror. A key must take the opening straight to the complete logo and its reveal (act 4 /
+// 5, never back into the film or the assembly) and remove the mask within 6 s of the key reaching the page. The clock is the page's own, from the key event:
 // under software GL (CI, xvfb) the renderer's first mount alone blocks the main thread for seconds with any opening,
 // Minimal included, which delays input delivery and Playwright's polling alike.
 import { expect, test } from '@playwright/test'
@@ -45,8 +45,8 @@ test('opening: the full cut skips on a key and the window is usable within 6 s (
   const key = log.findIndex((e) => e.what === 'key')
   expect(key).toBeGreaterThanOrEqual(0)
   const after = log.slice(key + 1).map((e) => e.what)
-  // after the key: the waiting frame or the reveal, then gone; never another film act
-  expect(after.filter((a) => ['cold', 'assemble', 'cut', 'film'].includes(a)), JSON.stringify(log)).toEqual([])
+  // after the key: the held logo, the waiting frame or the reveal, then gone; never another film or assembly act
+  expect(after.filter((a) => ['cold', 'film', 'cut', 'assemble'].includes(a)), JSON.stringify(log)).toEqual([])
   expect(after.at(-1)).toBe('gone')
   // within 6 s of the key reaching the page, the mask is gone (its own clock: no input or polling latency)
   const gone = log.find((e, i) => i > key && e.what === 'gone')

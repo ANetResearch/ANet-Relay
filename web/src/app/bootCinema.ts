@@ -1,10 +1,12 @@
-// Director's-cut opening (05 §2), the DOM part. Starts the boot clock (first visible frame, or navigation start after
-// 1 s), runs the act machine of app/bootFilm.ts, and for the Full and Short cuts paints the acts into #boot-mask:
-// the voxel logo (act 1), the diagonal cut into the film (act 2), the film with its letterbox, info line and
-// readiness cells (act 3), the held frame (act 4) and the voxel reveal (act 5). Any key, click or controller button
-// skips to the reveal (or to the held frame while the backend is not ready); key events are never consumed, so the
-// stop shortcut keeps working during the opening. Minimal and reduced openings use the same machine and no layers:
-// index.html draws them as in v0.2. The failure clock is not here: boot.ts keeps it from startBoot().
+// Director's-cut opening (05 §2, reordered by 06 §8), the DOM part. Starts the boot clock (first visible frame, or
+// navigation start after 1 s), runs the act machine of app/bootFilm.ts, and for the Full and Short cuts paints the acts
+// into #boot-mask: the film with its letterbox, info line and readiness cells (act 1), the diagonal cut out of the
+// film (act 2), the voxel logo assembling with RELAY tracking in (act 3), the held logo (act 4, and the waiting frame
+// with the progress line under the logo while the backend is not ready) and the voxel reveal (act 5). Any key, click
+// or controller button skips to the complete logo, which stays at least --boot-skip-logo before the reveal; key events
+// are never consumed, so the stop shortcut keeps working during the opening. Minimal and reduced openings use the same
+// machine and no layers: index.html draws them as in v0.2. The failure clock is not here: boot.ts keeps it from
+// startBoot().
 import { cssToken, msToken } from '@/ui/motion/tokens'
 import { translate, useLangStore, type MessageKey } from '@/i18n'
 import { clear, paintDissolve, paintWave, surface, waveTiming, type Surface } from '@/ui/voxel/paint'
@@ -33,17 +35,13 @@ declare const __RELAY_VERSION__: string
 
 /** The film clock falls back to navigation start when no visible frame arrives within this time (05 §2.3). */
 const CLOCK_FALLBACK_MS = 1000
-/** act 1 voxel pitch and the act 2 / act 5 wave pitch (05 §2.3) */
+/** act 3 voxel pitch and the act 2 / act 5 wave pitch (05 §2.3) */
 const LOGO_CELL = 12
 const WAVE_CELL = 24
 const LOGO_MAX_W = 720
 const LOGO_VIEW_SHARE = 0.56
 /** index.html: .boot-mark is centred 24 px above the middle of the window */
 const MARK_LIFT = 24
-/** letterbox share of the window height, top and bottom (05 §2.3 act 3); boot.css draws the same 6 % */
-const LETTERBOX = 0.06
-const BADGE_LEFT = 24
-const BADGE_MAX_H = 22
 const SCATTER_COUNT = 24
 
 export interface BootRunHooks {
@@ -192,6 +190,7 @@ function createPainter(mask: HTMLElement, tl: Timeline, state: () => typeof INIT
   const marks = assembleMarks(tl)
   const logoEl = mask.querySelector<HTMLElement>('.boot-logo')
   const markEl = mask.querySelector<HTMLElement>('.boot-mark')
+  const wordEl = mask.querySelector<HTMLElement>('.boot-word')
 
   mask.dataset.film = tl.variant
   mask.dataset.act = 'cold'
@@ -221,26 +220,24 @@ function createPainter(mask: HTMLElement, tl: Timeline, state: () => typeof INIT
   lbBottom.append(info, inds)
   mask.prepend(lbTop, lbBottom, canvas)
 
-  let videos: HTMLVideoElement[] = []
-  const createVideos = () => {
-    if (videos.length) return
-    videos = tl.clips.map((clip, i) => {
-      const v = el('video', 'boot-video')
-      if (i === 0) v.id = 'boot-film'
-      v.muted = true
-      v.defaultMuted = true
-      v.playsInline = true
-      v.setAttribute('playsinline', '')
-      v.setAttribute('muted', '')
-      v.setAttribute('aria-hidden', 'true')
-      v.disablePictureInPicture = true
-      v.preload = 'auto'
-      v.poster = asset(`boot/${clip}.jpg`)
-      v.src = asset(`boot/${clip}.webm`)
-      mask.insertBefore(v, lbTop)
-      return v
-    })
-  }
+  // the film opens the cut (06 §8): every clip is created and starts buffering in act 0
+  const videos: HTMLVideoElement[] = tl.clips.map((clip, i) => {
+    const v = el('video', 'boot-video')
+    if (i === 0) v.id = 'boot-film'
+    v.dataset.clip = clip
+    v.muted = true
+    v.defaultMuted = true
+    v.playsInline = true
+    v.setAttribute('playsinline', '')
+    v.setAttribute('muted', '')
+    v.setAttribute('aria-hidden', 'true')
+    v.disablePictureInPicture = true
+    v.preload = 'auto'
+    v.poster = asset(`boot/${clip}.jpg`)
+    v.src = asset(`boot/${clip}.webm`)
+    mask.insertBefore(v, lbTop)
+    return v
+  })
   let active = -1
   const showClip = (i: number) => {
     if (i === active || !videos[i]) return
@@ -261,15 +258,11 @@ function createPainter(mask: HTMLElement, tl: Timeline, state: () => typeof INIT
     // a decode failure leaves the JPEG poster in place (05 §2.2)
     void v.play()?.catch(() => undefined)
   }
-  const holdFrame = () => {
+  const stopFilm = () => {
     for (const v of videos) v.pause()
-    if (active < 0 && videos[0]) {
-      videos[0].dataset.on = ''
-      active = 0
-    }
   }
 
-  // ---- logo matrix: the mark rasterised at one pixel per 12 px voxel (05 §2.3 act 1)
+  // ---- logo matrix: the mark rasterised at one pixel per 12 px voxel (05 §2.3, 06 §8 act 3)
   let lay = measure()
   let voxels: Voxel[] = []
   let logoImg: HTMLImageElement | null = null
@@ -288,19 +281,10 @@ function createPainter(mask: HTMLElement, tl: Timeline, state: () => typeof INIT
     mask.style.setProperty('--boot-logo-w', `${lw}px`)
     const lh = logoEl?.offsetHeight || Math.round((lw * 493) / 2846)
     const mh = markEl?.offsetHeight || lh
+    // the waiting frame puts the progress line under the mark (boot.css reads the half height)
+    mask.style.setProperty('--boot-mark-half', `${Math.round(mh / 2)}px`)
     // index.html centres the mark (logo over RELAY) 24 px above the middle; the logo is its top part
-    const mcx = w / 2
-    const mcy = h / 2 - MARK_LIFT
-    const logo = { left: Math.round(mcx - lw / 2), top: Math.round(mcy - mh / 2), w: lw, h: lh }
-    // badge: the logo scaled into the top letterbox, 24 px from the left edge
-    const lb = h * LETTERBOX
-    const sc = Math.min(BADGE_MAX_H, lb * 0.55) / Math.max(1, lh)
-    const lcy = logo.top + lh / 2
-    const tx = BADGE_LEFT + (lw * sc) / 2
-    const ty = lb / 2
-    mask.style.setProperty('--bm-s', String(sc))
-    mask.style.setProperty('--bm-x', `${tx - mcx}px`)
-    mask.style.setProperty('--bm-y', `${ty - (mcy + (lcy - mcy) * sc)}px`)
+    const logo = { left: Math.round(w / 2 - lw / 2), top: Math.round(h / 2 - MARK_LIFT - mh / 2), w: lw, h: lh }
     const wave = grid(w, h, WAVE_CELL)
     return { w, h, surf: surface(canvas, w, h), wave, keys: cellKeys(wave, w, h), logo }
   }
@@ -323,7 +307,7 @@ function createPainter(mask: HTMLElement, tl: Timeline, state: () => typeof INIT
         return { cell, start: starts[i], to, from: flightStart(to, centre, l.w, l.h, i + 1) }
       })
     } catch {
-      return [] // the crisp mark still cuts in at the end of act 1
+      return [] // the crisp mark still cuts in at the end of act 3
     }
   }
 
@@ -355,7 +339,7 @@ function createPainter(mask: HTMLElement, tl: Timeline, state: () => typeof INIT
     mask.removeEventListener('pointerdown', onPointer)
   }
 
-  // ---- readiness cells (act 3): g600 -> g50 with an 80 ms voxel flash
+  // ---- readiness cells (act 1): g600 -> g50 with an 80 ms voxel flash
   const stage = (n: number) => {
     cells.forEach((c, i) => {
       const on = n > i
@@ -370,54 +354,35 @@ function createPainter(mask: HTMLElement, tl: Timeline, state: () => typeof INIT
   // ---- frame loop
   let raf = 0
   let act: Act | null = null
-  let rolled = false
-  let heldAct: Act | null = null
   let snap: { canvas: HTMLCanvasElement; scale: number } | null = null
   let onDone: (() => void) | null = null
   let finished = false
 
-  const setMark = (m: 'word' | 'badge' | null) => {
-    if (m) mask.dataset.mark = m
-    else delete mask.dataset.mark
-  }
-  const roll = () => {
-    if (rolled) return
-    rolled = true
-    createVideos()
-    mask.dataset.rolled = ''
-    setMark('badge')
+  /** The complete mark: in act 3 it cuts in after the flash and RELAY tracks in; a skip shows it as it ends. */
+  const showMark = (instant: boolean) => {
+    if (mask.dataset.mark !== undefined) return
+    if (instant) mask.dataset.instant = ''
+    mask.dataset.mark = 'word'
   }
 
   const enter = (next: Act) => {
     act = next
     mask.dataset.act = next
-    if (next === 'assemble') createVideos()
-    if (next === 'cut' || next === 'film') {
-      roll()
-      showClip(0)
-    }
-    if (next === 'wait') {
-      roll()
-      holdFrame()
-      heldAct = 'wait'
-    }
-    if (next === 'failed') {
-      // the film stops at once and the failure layout takes over (05 §2.1)
-      holdFrame()
-      heldAct = 'failed'
-      setMark(rolled ? 'badge' : 'word')
-    }
+    if (next === 'assemble' || next === 'hold' || next === 'wait' || next === 'failed') stopFilm()
+    // reached without act 3 running to its end (a skip, a failure): the end of act 3 at once
+    if (next === 'hold' || next === 'wait' || next === 'failed') showMark(true)
     if (next === 'reveal') {
       unbindInput()
+      showMark(true)
       snap = snapshot()
-      for (const v of videos) v.pause()
+      stopFilm()
     }
     if (next !== 'reveal') snap = null
   }
 
   const frame = () => {
     raf = 0
-    // the frame clock moves the machine too, so no frame ever shows the waiting state between the film's end and
+    // the frame clock moves the machine too, so no frame ever shows the waiting state between the hold's end and
     // the gate timer
     dispatch('tick')
     if (finished) return
@@ -435,37 +400,6 @@ function createPainter(mask: HTMLElement, tl: Timeline, state: () => typeof INIT
 
   const paint = (surf: Surface, a: Act, t: number, revealAt: number | null) => {
     const { ctx } = surf
-    if (a === 'cold' || a === 'wait' || a === 'failed') return clear(surf)
-    if (a === 'assemble') {
-      clear(surf)
-      if (t >= marks.mark) {
-        if (mask.dataset.mark === undefined) setMark('word')
-        return
-      }
-      const size = LOGO_CELL - 1
-      if (t >= marks.landed) {
-        // the luminance flash: every voxel g50 for --boot-flash
-        ctx.fillStyle = colors.g50
-        ctx.beginPath()
-        for (const v of voxels) ctx.rect(v.to.x, v.to.y, size, size)
-        ctx.fill()
-        return
-      }
-      const fly = tl.tokens.voxelFly
-      for (const v of voxels) {
-        const p = (t - v.start) / fly
-        if (p <= 0) continue
-        const e = p >= 1 ? 1 : easeSpringSnappy(p)
-        ctx.fillStyle = v.cell.tone === 'red' ? colors.r500 : v.cell.tone === 'light' ? colors.g50 : colors.g800
-        ctx.fillRect(v.from.x + (v.to.x - v.from.x) * e, v.from.y + (v.to.y - v.from.y) * e, size, size)
-      }
-      return
-    }
-    if (a === 'cut') {
-      const { spread, cell } = waveTiming(lay.wave, tl.cut - tl.assemble)
-      paintWave(surf, lay.wave, lay.keys, t, tl.assemble, spread, cell, { cover: colors.g950, dark: colors.g800, light: colors.g50, clear: null })
-      return
-    }
     if (a === 'film') {
       clear(surf)
       const seg = tl.segments.findIndex((g) => t >= g.start && t < g.end)
@@ -489,14 +423,43 @@ function createPainter(mask: HTMLElement, tl: Timeline, state: () => typeof INIT
       }
       return
     }
+    if (a === 'cut') {
+      // the diagonal wave breaks the film into voxels; g950 stays behind it
+      const { spread, cell } = waveTiming(lay.wave, tl.cut - tl.film)
+      paintWave(surf, lay.wave, lay.keys, t, tl.film, spread, cell, { cover: null, dark: colors.g800, light: colors.g50, clear: colors.g950 })
+      return
+    }
+    if (a === 'assemble') {
+      clear(surf)
+      if (t >= marks.mark) return showMark(false)
+      const size = LOGO_CELL - 1
+      if (t >= marks.landed) {
+        // the luminance flash: every voxel g50 for --boot-flash
+        ctx.fillStyle = colors.g50
+        ctx.beginPath()
+        for (const v of voxels) ctx.rect(v.to.x, v.to.y, size, size)
+        ctx.fill()
+        return
+      }
+      const fly = tl.tokens.voxelFly
+      for (const v of voxels) {
+        const p = (t - v.start) / fly
+        if (p <= 0) continue
+        const e = p >= 1 ? 1 : easeSpringSnappy(p)
+        ctx.fillStyle = v.cell.tone === 'red' ? colors.r500 : v.cell.tone === 'light' ? colors.g50 : colors.g800
+        ctx.fillRect(v.from.x + (v.to.x - v.from.x) * e, v.from.y + (v.to.y - v.from.y) * e, size, size)
+      }
+      return
+    }
     if (a === 'reveal' && snap && revealAt !== null) {
       paintDissolve(surf, snap.canvas, snap.scale, lay.wave, lay.keys, t, revealAt, revealWave(tl), tl.tokens.revealCell)
       return
     }
+    // cold, hold, wait, failed: the crisp mark (DOM) on g950 or nothing
     clear(surf)
   }
 
-  /** The frame as it stands, flattened for act 5: background, film frame, letterbox, voxels and the mark. */
+  /** The frame as it stands, flattened for act 5: g950, the crisp mark and RELAY at their final spacing. */
   const snapshot = (): { canvas: HTMLCanvasElement; scale: number } => {
     const scale = Math.min(2, Math.max(1, devicePixelRatio || 1))
     const c = document.createElement('canvas')
@@ -507,29 +470,18 @@ function createPainter(mask: HTMLElement, tl: Timeline, state: () => typeof INIT
     x.scale(scale, scale)
     x.fillStyle = colors.g950
     x.fillRect(0, 0, lay.w, lay.h)
-    const v = videos[active]
-    if (rolled && v && v.readyState >= 2 && v.videoWidth > 0) {
-      const k = Math.max(lay.w / v.videoWidth, lay.h / v.videoHeight)
-      const dw = v.videoWidth * k
-      const dh = v.videoHeight * k
-      x.filter = heldAct ? 'brightness(0.4)' : 'none'
-      x.drawImage(v, (lay.w - dw) / 2, (lay.h - dh) / 2, dw, dh)
-      x.filter = 'none'
-    }
-    if (rolled) {
-      const lb = lay.h * LETTERBOX
-      x.fillStyle = colors.g950
-      x.fillRect(0, 0, lay.w, lb)
-      x.fillRect(0, lay.h - lb, lay.w, lb)
-    }
-    try {
-      x.drawImage(canvas, 0, 0, lay.w, lay.h)
-    } catch {
-      /* empty voxel layer */
-    }
-    if (logoImg && logoEl && mask.dataset.mark !== undefined) {
+    if (logoImg && logoEl) {
       const r = logoEl.getBoundingClientRect()
       x.drawImage(logoImg, r.left, r.top, r.width, r.height)
+    }
+    if (wordEl) {
+      const r = wordEl.getBoundingClientRect()
+      const cs = getComputedStyle(wordEl)
+      x.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`
+      x.letterSpacing = cs.letterSpacing === 'normal' ? '0px' : cs.letterSpacing
+      x.fillStyle = cs.color
+      x.textBaseline = 'middle'
+      x.fillText(wordEl.textContent ?? '', r.left, r.top + r.height / 2)
     }
     return { canvas: c, scale }
   }
@@ -548,7 +500,7 @@ function createPainter(mask: HTMLElement, tl: Timeline, state: () => typeof INIT
       v.load()
       v.remove()
     }
-    videos = []
+    videos.length = 0
     canvas.width = 0
     canvas.height = 0
     const done = onDone

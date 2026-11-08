@@ -41,7 +41,10 @@ export interface CopilotConfig {
   model: string
   hasKey: boolean
   keyHint: string | null
-  secureStorage: boolean
+  /** 06 §9: 'file' (default, AES-256-GCM in the app data folder) or the opt-in system 'keychain' */
+  keyStorage: CopilotKeyStorage
+  /** 'keychain': a key saved by an earlier version waits in the keychain and is not decrypted automatically */
+  keyMigration: 'keychain' | null
   configured: boolean
   /** which tool sets the agent gets (04 §6.2) */
   toolScope: CopilotToolScope
@@ -51,7 +54,9 @@ export interface CopilotConfig {
 
 export type CopilotToolScope = 'flight' | 'flight+device' | 'all'
 
-export type CopilotConfigInput = Partial<Pick<CopilotConfig, 'api' | 'baseUrl' | 'model' | 'toolScope' | 'opacity'>> & { apiKey?: string | null }
+export type CopilotKeyStorage = 'file' | 'keychain'
+
+export type CopilotConfigInput = Partial<Pick<CopilotConfig, 'api' | 'baseUrl' | 'model' | 'toolScope' | 'opacity' | 'keyStorage'>> & { apiKey?: string | null }
 
 export type CopilotEvent =
   | { type: 'busy'; busy: boolean }

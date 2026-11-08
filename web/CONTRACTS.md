@@ -393,7 +393,8 @@ loading; buttons keep `Spinner`.
   wave over that container when `trigger` changes (workspace switch in `App.tsx`, replay open in Records).
 - **`stage/StageLoading.tsx`** and **`stage/loading.ts`** (`useStageModel`, `markStageModelReady()`): the stage's
   model loader; the scene marks the model ready (GLB, fallback airframe or the no-WebGL notice).
-- **Opening**: `app/bootFilm.ts` (pure timeline, plan and act machine), `app/bootCinema.ts` (DOM layers
+- **Opening**: `app/bootFilm.ts` (pure timeline, plan and act machine; v0.4 order of 06 §8: cold, film, cut,
+  assemble, hold, then wait / reveal; `fullClips(n)`, `CLIPS`, `COOP_CLIPS`), `app/bootCinema.ts` (DOM layers
   `#boot-film`, `#boot-voxels` inside `#boot-mask`), `app/boot.css`. Durations are the `--boot-*` and `--voxel-*`
   tokens in `styles/motion/ext-tokens.css`; JS reads them with `ui/motion/tokens.ts` `msToken()`.
 - The pre-flight list's first poll (`control/PreflightList.tsx`) and a saved bench report loading

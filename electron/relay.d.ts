@@ -47,8 +47,14 @@ export interface CopilotConfig {
   hasKey: boolean;
   /** last four characters of the stored key, for recognition only */
   keyHint: string | null;
-  /** false when the OS offers no keychain: the key is stored in a 0600 file instead */
-  secureStorage: boolean;
+  /**
+   * Where the key is stored (06 §9): "file" (default) is copilot-secrets.json in the app data folder, AES-256-GCM
+   * with a per-installation key, readable only by the current user; "keychain" is the opt-in system keychain
+   * (Electron safeStorage), the only mode in which the shell ever calls safeStorage.
+   */
+  keyStorage: CopilotKeyStorage;
+  /** "keychain": a key saved by an earlier version waits in the keychain; it is never decrypted automatically. */
+  keyMigration: "keychain" | null;
   configured: boolean;
   /** which tool sets the agent gets (04 §6.2) */
   toolScope: CopilotToolScope;
@@ -56,8 +62,13 @@ export interface CopilotConfig {
   opacity: number;
 }
 
-/** apiKey: a string sets it, null or "" clears it, absent keeps the stored key. */
-export type CopilotConfigInput = Partial<Pick<CopilotConfig, "api" | "baseUrl" | "model" | "toolScope" | "opacity">> & { apiKey?: string | null };
+export type CopilotKeyStorage = "file" | "keychain";
+
+/**
+ * apiKey: a string sets it, null or "" clears it, absent keeps the stored key. keyStorage switches the storage
+ * and moves a stored key across ("keychain" with a pending migration keeps the earlier key: Keep using keychain).
+ */
+export type CopilotConfigInput = Partial<Pick<CopilotConfig, "api" | "baseUrl" | "model" | "toolScope" | "opacity" | "keyStorage">> & { apiKey?: string | null };
 
 export type CopilotEvent =
   | { type: "busy"; busy: boolean }
