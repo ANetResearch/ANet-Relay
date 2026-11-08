@@ -96,6 +96,11 @@ jobs:
         run: for f in electron/*.mjs electron/*.cjs scripts/*.mjs scripts/*.cjs; do node --check "$f"; done
       - name: Unit tests (node:test)
         run: node --test electron/test/*.test.mjs
+      # WP-4b: Copilot's tools offline (pi's faux provider; the tests that need a backend skip) and its guide
+      - name: Copilot tools (node:test, offline)
+        run: node --test electron/copilot/test/*.test.mjs
+      - name: Copilot programs guide matches docs/programs-guide.md
+        run: node scripts/programs-guide.mjs --check
       - name: Release notes section exists for package.json version
         run: node scripts/release-assets.mjs notes "$(node -p "require('./package.json').version")" "$RUNNER_TEMP/notes.md"
       - name: No paths or module names that collide on case-insensitive file systems

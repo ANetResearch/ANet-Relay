@@ -10,9 +10,11 @@ import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messag
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 
+import { PROGRAMS_GUIDE } from "./programs-guide.mjs";
 import { appTools } from "./tools-app.mjs";
 import { compactVehicle, defineTool, enc, flightHelpers, SESSION_NAME, text, Type, VID } from "./tools-common.mjs";
 import { dangerResolver, deviceTools } from "./tools-device.mjs";
+import { PROGRAM_DANGER, programTools } from "./tools-programs.mjs";
 
 export const APIS = ["openai-completions", "anthropic-messages", "openai-responses"];
 const PROVIDER = "relay-copilot";
@@ -30,6 +32,24 @@ const MOTION_TOOLS = new Set([
   "relay_refly",
 ]);
 export const TOOL_SCOPES = ["flight", "flight+device", "all"];
+// WP-4b (06 §5, §6): arming and manual modes for stick and program flight; approved like motion on a real aircraft.
+const RELAY_DANGER = { relay_arm: "arm", relay_mode: "motion" };
+export const FLIGHT_LEVELS = ["sticks", "full"];
+/** Flight tools an agent session may still use at agent_flight_level "sticks" (06 §5; as the flight MCP server). */
+export const STICKS_TOOLS = new Set([
+  "relay_fleet",
+  "relay_vehicle",
+  "relay_arm",
+  "relay_disarm",
+  "relay_mode",
+  "relay_land",
+  "relay_cancel",
+  "relay_release",
+  "relay_stop",
+  "relay_sticks_for",
+]);
+/** Device tools Relay refuses at "sticks" for every session (attitude and velocity targets fly for the agent). */
+const STICKS_HIDDEN_DEVICE = new Set(["device_attitude", "device_velocity"]);
 
 // ---------------------------------------------------------------------------
 // Model
@@ -183,6 +203,31 @@ export function relayTools(relay) {
         });
       },
     },
+    // WP-4b: stick and program flight start with a manual mode and arming (06 §5)
+    defineTool(
+      "relay_arm",
+      "Arm",
+      "Arm the motors (claims the aircraft first). For stick or program flight: set a manual mode with relay_mode first. A real aircraft waits for the operator's approval.",
+      Type.Object({ vehicle: VID }),
+      async (p) => {
+        await claimFor(p.vehicle);
+        return relay.call("POST", `/vehicles/${enc(p.vehicle)}/arm`, { arm: true, confirm: "ARM" });
+      },
+    ),
+    defineTool("relay_disarm", "Disarm", "Disarm the motors (refused while flying; use relay_land).", Type.Object({ vehicle: VID }), async (p) => {
+      await claimFor(p.vehicle);
+      return relay.call("POST", `/vehicles/${enc(p.vehicle)}/arm`, { arm: false });
+    }),
+    defineTool(
+      "relay_mode",
+      "Set flight mode",
+      "Switch the flight mode by name. Manual modes for sticks and programs: STABILIZE or ACRO (ArduPilot), MANUAL or STABILIZED (PX4). At the sticks flight level altitude, position and automatic modes are refused.",
+      Type.Object({ vehicle: VID, name: Type.String() }),
+      async (p) => {
+        await claimFor(p.vehicle);
+        return relay.call("POST", `/vehicles/${enc(p.vehicle)}/mode`, { name: p.name });
+      },
+    ),
     {
       name: "relay_takeoff",
       label: "Take off",
@@ -321,24 +366,40 @@ export function relayTools(relay) {
 // ---------------------------------------------------------------------------
 // Copilot
 
-/** The tool list for a scope setting (04 §6.2): flight, flight+device or all. */
-export function toolsFor(relay, scope = "all", danger = dangerResolver(relay)) {
-  const tools = relayTools(relay);
+/**
+ * The tool list for a scope setting (04 §6.2): flight, flight+device or all. Program tools are in every scope; at
+ * agent_flight_level "sticks" (06 §5) the tools Relay would refuse are left out.
+ */
+export function toolsFor(relay, scope = "all", danger = dangerResolver(relay), level = "full") {
+  const sticks = level !== "full";
+  const tools = relayTools(relay).filter((t) => !sticks || STICKS_TOOLS.has(t.name));
+  tools.push(...programTools(relay));
   if (scope === "flight") return tools;
-  tools.push(...deviceTools(relay, danger));
+  tools.push(...deviceTools(relay, danger).filter((t) => !sticks || !STICKS_HIDDEN_DEVICE.has(t.name)));
   if (scope === "flight+device") return tools;
   tools.push(...appTools(relay));
   return tools;
 }
 
-export function systemPrompt(lang, scope = "all") {
+export function systemPrompt(lang, scope = "all", level = "full") {
+  const sticks = level !== "full";
   const parts = [
     "You are Copilot, the assistant built into ANet Relay, a ground station for small quadcopters on a local network.",
     "Simulated aircraft have ids sim-N; real ones real-<ip>.",
     "Units: metres, seconds, degrees. Moves are relative to the aircraft's nose; yaw is positive clockwise (right).",
-    "Tool sets:",
-    "- relay_* (flight): read status and fly with takeoff, hover, move, yaw, land, whole sequences (relay_plan), timed stick pushes (relay_sticks_for) and flying a recorded flight again (relay_refly).",
   ];
+  if (sticks) {
+    parts.push(
+      "Flight level: the operator has set the agent flight level to sticks. You control flight only through sticks or onboard programs: high-level flight (take-off, hover, move, turn, goto, sequences, re-fly, altitude and position hold modes) is not available to you and Relay refuses it with sticks_only. For stable flight, write a program and deploy it; do not try to fly a closed loop with stick pushes.",
+    );
+  }
+  parts.push(
+    "Tool sets:",
+    sticks
+      ? "- relay_* (flight): read status, set a manual mode, arm and disarm, push the sticks for a few seconds (relay_sticks_for), land as a safety action, release the claim and stop."
+      : "- relay_* (flight): read status and fly with takeoff, hover, move, yaw, land, whole sequences (relay_plan), timed stick pushes (relay_sticks_for), arming, manual modes and flying a recorded flight again (relay_refly).",
+    "- program_*, challenge_*, job_status, duel_run, ladder, airframe_set (programs): write, check, test, judge and deploy onboard flight programs that fly the aircraft at 50 Hz, tune them live, read their status and log, run duels, and set simulator airframe defects. The guide at the end of these instructions explains how to write them.",
+  );
   if (scope !== "flight") {
     parts.push(
       "- device_* (device): the aircraft down to a single motor, actuator output, RC channel, parameter or MAVLink command: overview, messages, parameters, raw command catalogue and commands, motor test, actuator, RC override, attitude and velocity targets, message rates, reboot, calibration, home, termination, arm (also forced), modes.",
@@ -351,11 +412,14 @@ export function systemPrompt(lang, scope = "all") {
   }
   parts.push(
     "Rules:",
-    "- For several actions in a row (for example take off, hover, move, turn, land), plan them and call relay_plan once.",
+    sticks
+      ? "- To fly: claim, relay_mode to a manual mode (STABILIZE), relay_arm, then program_deploy a tested program; watch program_status and program_log and tune with program_params. relay_sticks_for is only for a short open-loop push."
+      : "- For several actions in a row (for example take off, hover, move, turn, land), plan them and call relay_plan once.",
+    "- Programs: write -> program_validate -> program_test -> challenge_submit or a simulator -> program_deploy -> program_params. Editing programs needs no approval; deploying or resuming one on a real aircraft waits for the operator. Releasing the claim, pushing sticks yourself or starting a skill ends your program.",
     "- Before flying, check relay_fleet or relay_vehicle when you are not sure which aircraft is meant or whether it is ready.",
     "- If the user did not name an aircraft, use the selected aircraft given in the message context; if none, ask.",
     "- A person can possess any aircraft at any time and always wins. If a tool reports possessed_by_human, stop and tell the user to release the aircraft first. Never retry around it.",
-    "- Real aircraft only move after the operator approves each command in the chat; this covers every motion tool and every device tool that can spin a motor, drive an output, override RC, reboot, calibrate, terminate, force-arm, write a parameter or fly a target. If they decline, do not insist. The approval is the confirmation: never ask the user to type a confirm word.",
+    "- Real aircraft only move after the operator approves each command in the chat; this covers every motion tool, arming, mode changes, program deployment and every device tool that can spin a motor, drive an output, override RC, reboot, calibrate, terminate, force-arm, write a parameter or fly a target. If they decline, do not insist. The approval is the confirmation: never ask the user to type a confirm word.",
   );
   if (scope !== "flight") {
     parts.push(
@@ -375,7 +439,7 @@ export function systemPrompt(lang, scope = "all") {
     "- Each message starts with a context line: the selected aircraft and the interface language. When the interface language is zh, answer in Simplified Chinese.",
     lang === "zh" ? "Answer in Simplified Chinese." : "Answer in the language the user writes in.",
   );
-  return parts.join("\n");
+  return `${parts.join("\n")}\n\n${PROGRAMS_GUIDE}`;
 }
 
 function summarise(name, args, danger) {
@@ -417,10 +481,14 @@ export function createCopilot({ relay, models, model, emit, lang = () => "en", s
   const approvals = new Map();
   let vehicleKinds = new Map();
   const danger = dangerResolver(relay);
+  // agent_flight_level (06 §5): "sticks" until Relay says otherwise; read again before every prompt
+  let flightLevel = "sticks";
 
   /** The approval level a tool call needs on a real aircraft, or null (04 §6.2). */
   const levelOf = async (name, args) => {
     if (MOTION_TOOLS.has(name)) return "motion";
+    if (RELAY_DANGER[name]) return RELAY_DANGER[name];
+    if (PROGRAM_DANGER[name]) return PROGRAM_DANGER[name];
     if (name.startsWith("device_")) return danger(name, args || {});
     return null;
   };
@@ -455,7 +523,7 @@ export function createCopilot({ relay, models, model, emit, lang = () => "en", s
     });
 
   const agent = new Agent({
-    initialState: { systemPrompt: systemPrompt(lang(), scope()), model, tools: toolsFor(relay, scope(), danger), thinkingLevel: "off" },
+    initialState: { systemPrompt: systemPrompt(lang(), scope(), flightLevel), model, tools: toolsFor(relay, scope(), danger, flightLevel), thinkingLevel: "off" },
     streamFn: models.streamSimple.bind(models),
     toolExecution: "sequential",
     identity: { attribution: null },
@@ -513,9 +581,34 @@ export function createCopilot({ relay, models, model, emit, lang = () => "en", s
     }
   });
 
+  /** The level Relay reports (a Relay without the setting flies everything); the last one read when unreachable. */
+  const readLevel = async () => {
+    try {
+      const settings = await relay.call("GET", "/settings");
+      const level = settings?.agent_flight_level;
+      return FLIGHT_LEVELS.includes(level) ? level : "full";
+    } catch {
+      return flightLevel;
+    }
+  };
+
+  /** Swap the tools and the system prompt when the operator changed the flight level between prompts. */
+  const applyLevel = (level, force = false) => {
+    if (level === flightLevel && !force) return;
+    flightLevel = level;
+    agent.state.tools = toolsFor(relay, scope(), danger, level);
+    const [head, ...rest] = agent.state.messages;
+    const prompt = systemPrompt(lang(), scope(), level);
+    agent.state.messages = head?.role === "system" ? [{ ...head, content: prompt }, ...rest] : agent.state.messages;
+  };
+
   return {
+    get flightLevel() {
+      return flightLevel;
+    },
     async prompt(userText, context = {}) {
       vehicleKinds = new Map();
+      applyLevel(await readLevel());
       // The window knows which aircraft is selected and which language is shown (GET /app/ui, 04 §3.2).
       let state = null;
       try {
@@ -536,7 +629,7 @@ export function createCopilot({ relay, models, model, emit, lang = () => "en", s
     reset() {
       this.abort();
       agent.reset();
-      agent.state.tools = toolsFor(relay, scope(), danger);
+      applyLevel(flightLevel, true);
     },
     approve(id, ok) {
       const resolve = approvals.get(id);

@@ -87,7 +87,7 @@ test("every scope has well-formed, uniquely named tools with a display label", (
     assert.equal(new Set(tools.map((t) => t.name)).size, tools.length, `${scope}: duplicate names`);
     for (const t of tools) {
       assert.ok(t.name && t.label && t.description && t.parameters && t.execute, t.name);
-      assert.match(t.name, /^(relay|device|app)_[a-z_]+$/);
+      assert.match(t.name, /^((relay|device|app|program|challenge|job|duel|airframe)_[a-z_]+|ladder)$/);
       assert.ok(labels.includes(`${t.name}:`), `${t.name} has no entry in web/src/copilot/toolLabels.ts`);
     }
   }
@@ -342,6 +342,7 @@ test("window placement: default bottom-right, restore within the visible display
 });
 
 test("copilot flies the bench routine on a simulator as one plan", { skip: !OPERATOR }, async () => {
+  await operator("PUT", "/settings", { agent_flight_level: "full" }); // 06 §5: high-level skills need "full"
   await operator("DELETE", "/sims");
   await operator("POST", "/sims", { count: 1, autopilot: "px4", position: false });
   await new Promise((r) => setTimeout(r, 3000));

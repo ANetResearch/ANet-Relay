@@ -19,6 +19,7 @@ sys.path.insert(0, str(REPO / "sdk" / "python"))
 import anet_relay_app_mcp as app_mcp  # noqa: E402
 import anet_relay_device_mcp as device_mcp  # noqa: E402
 import anet_relay_mcp as flight_mcp  # noqa: E402
+import relay_mcp_programs as programs_mcp  # noqa: E402
 
 PNG = "iVBORw0KGgo="
 
@@ -94,7 +95,7 @@ def stub():
             self.end_headers()
             self.wfile.write(data)
 
-        do_GET = do_POST = do_PUT = do_DELETE = _serve
+        do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = _serve
 
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -168,7 +169,8 @@ def test_prefixes_and_counts(stub):
     assert len(names[flight_mcp]) == 20 and {"relay_sticks_for", "relay_refly"} <= set(names[flight_mcp])
     assert all(n.startswith("relay_") for n in names[flight_mcp])
     assert all(n.startswith("device_") for n in names[device_mcp])
-    assert all(n.startswith("app_") for n in names[app_mcp])
+    # WP-4b: the program tools keep the names of the 06 §6 table
+    assert all(n.startswith("app_") or n in programs_mcp.PROGRAM_TOOL_NAMES for n in names[app_mcp])
     ui = {
         "app_set_language",
         "app_set_workspace",
@@ -584,3 +586,231 @@ def test_flight_tools_follow_the_agent_flight_level(stub):
     assert len(rpc(server, "tools/list")["result"]["tools"]) == len(every)  # the last level read
     fresh = make(flight_mcp, stub)
     assert {t["name"] for t in rpc(fresh, "tools/list")["result"]["tools"]} == flight_mcp.STICKS_TOOL_NAMES
+
+
+# ---------------------------------------------------------------------------- WP-4b: program tools (06 §6)
+
+CONTRACT_PROGRAM_TOOLS = {
+    "program_list",
+    "program_get",
+    "program_create",
+    "program_update",
+    "program_validate",
+    "program_test",
+    "program_deploy",
+    "program_stop",
+    "program_resume",
+    "program_params",
+    "program_status",
+    "program_log",
+    "challenge_list",
+    "challenge_submit",
+    "job_status",
+    "duel_run",
+    "ladder",
+    "airframe_set",
+}
+
+PROGRAM_REST = [
+    ("program_list", {}, "GET", "/programs", None),
+    ("program_validate", {"program": "p1", "source": "x"}, "POST", "/programs/p1/validate", {"source": "x"}),
+    ("program_test", {"program": "p1", "rev": 2}, "POST", "/programs/p1/test", {"rev": 2}),
+    (
+        "program_create",
+        {"name": "Mine", "copy_of": "hover_trim"},
+        "POST",
+        "/programs",
+        {"name": "Mine", "copy_of": "hover_trim"},
+    ),
+    (
+        "program_update",
+        {"program": "p1", "source": "s", "note": "rewrite"},
+        "PUT",
+        "/programs/p1",
+        {"source": "s", "note": "rewrite"},
+    ),
+    ("program_log", {"vehicle": "sim-1", "after": 3}, "GET", "/vehicles/sim-1/program/log", None),
+    ("program_stop", {"vehicle": "sim-1"}, "POST", "/vehicles/sim-1/program/stop", {}),
+    ("program_resume", {"vehicle": "sim-1"}, "POST", "/vehicles/sim-1/program/resume", {}),
+    (
+        "program_params",
+        {"vehicle": "sim-1", "params": {"kp": 0.3}},
+        "PATCH",
+        "/vehicles/sim-1/program/params",
+        {"kp": 0.3},
+    ),
+    (
+        "airframe_set",
+        {"vehicle": "sim-1", "preset": "rough", "seed": 4},
+        "PUT",
+        "/sims/sim-1/airframe",
+        {"preset": "rough", "seed": 4},
+    ),
+    ("challenge_list", {}, "GET", "/challenges", None),
+    ("job_status", {"job": "j1"}, "GET", "/jobs/j1", None),
+    ("ladder", {}, "GET", "/ladder", None),
+    (
+        "duel_run",
+        {"programs": ["hunter_easy", "hunter_hard"], "rounds": 3, "wait": False},
+        "POST",
+        "/duels",
+        {"programs": ["hunter_easy", "hunter_hard"], "rounds": 3},
+    ),
+]
+
+
+def test_app_server_lists_the_program_tools(stub):
+    names = {t.name for t in app_mcp.build_tools()}
+    assert CONTRACT_PROGRAM_TOOLS | {"program_guide"} <= names
+    assert "program_guide" in app_mcp.INSTRUCTIONS
+    server = make(app_mcp, stub)
+    listed = {t["name"]: t for t in rpc(server, "tools/list")["result"]["tools"]}
+    assert listed["program_get"]["annotations"]["readOnlyHint"] is True
+    assert listed["program_deploy"]["annotations"]["destructiveHint"] is True
+
+
+@pytest.mark.parametrize(
+    ("tool", "args", "method", "path", "body"), PROGRAM_REST, ids=[c[0] for c in PROGRAM_REST]
+)
+def test_program_tool_requests(stub, tool, args, method, path, body):
+    server = make(app_mcp, stub)
+    stub.responses["/programs"] = {
+        "programs": [],
+        "program": {"id": "p1", "rev": 1},
+        "validation": {"ok": True},
+    }
+    stub.responses["/programs/p1"] = {
+        "program": {"id": "p1", "rev": 2, "source": "a"},
+        "validation": {"ok": True},
+    }
+    result = call(server, tool, args)
+    assert result["isError"] is False, result
+    req = last(stub)
+    assert (req["method"], req["path"], req["body"]) == (method, path, body)
+    assert req["session"] == "tok1"
+    if tool == "program_log":
+        assert req["query"] == {"after": ["3"], "limit": ["100"]}
+    if tool in ("program_stop", "program_resume", "program_params"):
+        assert any(r["path"] == "/vehicles/sim-1/claim" for r in stub.requests), "claimed first"
+
+
+def test_program_get_numbers_the_source_and_reads_old_revisions(stub):
+    server = make(app_mcp, stub)
+    stub.responses["/programs/p1"] = {
+        "program": {
+            "id": "p1",
+            "name": "Hover",
+            "rev": 2,
+            "source": "def step(obs, ctx):\n    pass",
+            "tests": [],
+        }
+    }
+    stub.responses["/programs/p1/revisions"] = {
+        "revisions": [
+            {"rev": 1, "source": "old", "params": {"a": 1}, "author": "mcp-app", "note": "first", "t": 1},
+            {"rev": 2, "source": "x", "params": {}, "author": "operator", "note": "edit", "t": 2},
+        ]
+    }
+    got = text(call(server, "program_get", {"program": "p1"}))
+    assert got["source_numbered"] == "1| def step(obs, ctx):\n2|     pass" and got["lines"] == 2
+    assert [r["rev"] for r in got["revisions"]] == [2, 1] and "source" not in got["revisions"][0]
+    old = text(call(server, "program_get", {"program": "p1", "rev": 1, "numbered": False}))
+    assert (old["source"], old["rev"], old["params"]) == ("old", 1, {"a": 1})
+    missing = call(server, "program_get", {"program": "p1", "rev": 7})
+    assert missing["isError"] is True and text(missing)["error"] == "revision_not_found"
+    assert programs_mcp.numbered("\n".join(f"l{i}" for i in range(10))).split("\n")[9] == "10| l9"
+
+
+def test_program_update_with_a_patch_returns_the_new_numbered_source(stub):
+    server = make(app_mcp, stub)
+    stub.responses["/programs/p1"] = {
+        "program": {"id": "p1", "rev": 3, "source": "a\nb"},
+        "validation": {"ok": True},
+    }
+    patch = [{"start": 2, "end": 2, "text": "c"}]
+    out = text(call(server, "program_update", {"program": "p1", "patch": patch, "note": "trim"}))
+    assert last(stub)["body"] == {"patch": patch, "note": "trim"}
+    assert out["source_numbered"] == "1| a\n2| b" and out["program"]["rev"] == 3
+
+
+def test_program_deploy_claims_sets_a_manual_mode_and_arms(stub):
+    server = make(app_mcp, stub)
+    stub.responses["/vehicles/sim-1"] = {
+        "id": "sim-1",
+        "autopilot": "ardupilot",
+        "mode": "ALT_HOLD",
+        "armed": False,
+    }
+    airframe = {"preset": "typical", "seed": 5}
+    args = {"vehicle": "sim-1", "program": "hover_trim", "arm": True, "seed": 7, "airframe": airframe}
+    assert call(server, "program_deploy", args)["isError"] is False
+    sent = [(r["method"], r["path"], r["body"]) for r in stub.requests if r["method"] != "GET"]
+    assert sent == [
+        ("POST", "/vehicles/sim-1/claim", {}),
+        ("POST", "/vehicles/sim-1/mode", {"name": "STABILIZE"}),
+        ("POST", "/vehicles/sim-1/arm", {"arm": True, "confirm": None}),
+        (
+            "POST",
+            "/vehicles/sim-1/program",
+            {"program": "hover_trim", "mode": "pilot", "seed": 7, "airframe": airframe},
+        ),
+    ]
+    stub.requests.clear()
+    stub.responses["/vehicles/sim-1"] = {"id": "sim-1", "possession": {"input": "keyboard"}}
+    blocked = call(server, "program_deploy", {"vehicle": "sim-1", "program": "hover_trim"})
+    assert blocked["isError"] is True and text(blocked)["error"] == "possessed_by_human"
+    assert not [r for r in stub.requests if r["method"] == "POST"], "nothing sent while a person flies it"
+    stub.responses["/vehicles/sim-1"] = {"id": "sim-1", "claim": {"session_id": "other", "name": "mcp"}}
+    taken = call(server, "program_deploy", {"vehicle": "sim-1", "program": "hover_trim"})
+    assert text(taken)["error"] == "claimed_by_other"
+
+
+def test_program_status_and_guide(stub):
+    server = make(app_mcp, stub)
+    stub.responses["/vehicles/sim-1"] = {
+        "id": "sim-1",
+        "program": {"id": "hover_trim", "status": "running", "fps": 50},
+        "controller": "program",
+        "sim": {"hover_assist": False, "airframe": {"preset": "typical", "seed": 2}},
+    }
+    status = text(call(server, "program_status", {"vehicle": "sim-1"}))
+    assert status["program"]["status"] == "running" and status["controller"] == "program"
+    assert status["sim"] == {"hover_assist": False, "airframe": {"preset": "typical", "seed": 2}}
+    guide = text(call(server, "program_guide"))["guide"]
+    assert guide == (REPO / "docs" / "programs-guide.md").read_text("utf-8").strip()
+    assert "Sticks(" in guide and "PID(" in guide
+
+
+def test_challenge_submit_waits_for_the_job(stub):
+    server = make(app_mcp, stub)
+    stub.responses["/challenges/hover/submit"] = {"job": {"id": "j1", "state": "queued"}}
+    stub.responses["/jobs/j1"] = {"id": "j1", "state": "done", "result": {"score": 91, "passed": True}}
+    out = text(call(server, "challenge_submit", {"challenge": "hover", "program": "hover_trim"}))
+    assert out["state"] == "done" and out["result"]["score"] == 91
+    submit = next(r for r in stub.requests if r["path"] == "/challenges/hover/submit")
+    assert submit["body"] == {"program": "hover_trim"}
+
+
+def test_judge_tools_without_the_judge_api(stub):
+    server = make(app_mcp, stub)
+    for path in ("/challenges", "/challenges/hover/submit", "/jobs/j1", "/duels", "/ladder"):
+        stub.fail[path] = (404, {"code": "not_found", "message_en": "Nothing is available at this path."})
+    for tool, args in [
+        ("challenge_list", {}),
+        ("challenge_submit", {"challenge": "hover", "program": "p"}),
+        ("job_status", {"job": "j1"}),
+        ("duel_run", {"programs": ["a", "b"]}),
+        ("ladder", {}),
+    ]:
+        result = call(server, tool, args)
+        assert result["isError"] is True and text(result)["error"] == "judge_unavailable", tool
+        assert "judge API" in text(result)["message"]
+    del stub.fail["/challenges"]  # the judge exists: an unknown job keeps its own error
+    assert text(call(server, "job_status", {"job": "j1"}))["error"] == "not_found"
+
+
+def test_flight_server_points_to_the_program_tools_at_sticks(stub):
+    stub.responses["/settings"] = {"agent_flight_level": "sticks"}
+    server = make(flight_mcp, stub)
+    instructions = rpc(server, "initialize", {"protocolVersion": "2025-06-18"})["result"]["instructions"]
+    assert "program_deploy" in instructions and "anet-relay-app" in instructions

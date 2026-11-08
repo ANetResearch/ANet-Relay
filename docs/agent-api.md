@@ -24,6 +24,8 @@ with RelayClient() as relay:                # http://127.0.0.1:8765, or $RELAY_A
     relay.land("sim-1")
 ```
 
+> The high-level skills above need the agent flight level `full` (Settings → Safety, operator only). At the default level, `sticks`, an agent flies with sticks and onboard programs only: see [Agent flight level](#agent-flight-level) and the [program workflow](#program-workflow).
+
 3. Or connect a language model through MCP (section 8): one server each for flight, device-level and application control.
 
 The six examples in `sdk/python/examples/` run against simulators:
@@ -64,6 +66,17 @@ An agent should therefore treat `possessed_by_human` and `claim_suspended` as "p
 | 3 | skills `goto`, `rtl`, ring courses; closed-loop `move` | `position` (a fresh local position estimate) |
 
 Every vehicle reports `capabilities: {manual, althold, position}`. A missing capability fails with `capability_missing` or `no_position_estimate`. Simulators have all three. Real aircraft report `position` only with a local position source such as optical flow, motion capture or UWB.
+
+### Agent flight level
+
+Setting `agent_flight_level` (design 06 §5) decides what agent sessions may fly; only the operator changes it (Settings → Safety, or `PUT /settings` with the operator token). The operator in the window is never limited.
+
+| Level | Agent sessions may |
+|---|---|
+| `sticks` (default) | Push sticks (WebSocket stream, `POST /vehicles/{id}/sticks`, the `sticks` skill), arm and disarm, switch to a manual mode (ArduPilot STABILIZE / ACRO / DRIFT, PX4 MANUAL / STABILIZED / ACRO), fire, deploy and run onboard programs, and the safety actions: emergency stop and `land` (its events carry `safety`) |
+| `full` | Everything in this guide, as in 0.3 |
+
+At `sticks` the skills `takeoff`, `hold`, `move`, `yaw`, `goto`, `rtl`, `velocity` and `attitude`, plans that contain them, re-fly as a plan or a path, altitude, position and automatic modes, the flight commands of the device interface and RC overrides above channel 4 return 403 `sticks_only` with `detail.level = "sticks"` and `detail.action`. The flight MCP server lists only the tools that still work (13 of 20; it reads the setting on every `tools/list`), and Copilot drops the same tools and tells its model to write programs. Stable flight at this level is the job of an onboard program: the agent works at its own pace on the program, its parameters and its results, and the program closes the 50 Hz loop.
 
 ## 3. Frames and units
 
@@ -289,6 +302,71 @@ Presets, generated deterministically from a seed (0 – 2^31−1): `ideal` (all 
 
 The snapshot carries only `vehicle.sim.airframe = {preset, seed}`: the values are never in the snapshot or in a program's observation; they show in flight. Event `sim_airframe_changed` (`data.preset`, `data.seed`, `data.by`). Simulators answer `SCALED_IMU` (board FRD specific force in mG, rates in mrad/s) when asked with `SET_MESSAGE_INTERVAL` or `REQUEST_MESSAGE`; it is in no stream group.
 
+### Onboard programs
+
+An onboard program (design 06 §2) is a restricted Python program with `PARAMS`, `init(ctx)` and `step(obs, ctx) -> Sticks` that Relay runs in an isolated program host at 50 Hz on the aircraft's stick path. It sees only what the aircraft measures (`obs`: attitude, rates, accelerations, barometric height, optional position, battery, motor output, arena state, contacts) and outputs the four sticks and the trigger. [`programs-guide.md`](programs-guide.md) is the compact reference for writing one (the same text is in Copilot's instructions and in the MCP tool `program_guide`); `programs.md` is the full documentation.
+
+| Method and path | Who | Purpose |
+|---|---|---|
+| `GET /programs` | – | Built-in examples (`hover_trim`, `liftoff`, `patrol`, `hunter_easy`, `hunter_medium`, `hunter_hard`; read-only) and stored programs |
+| `POST /programs` | session or operator | `{name, source?, description?, params?, tests?, note?, copy_of?}` → `{program, validation}` |
+| `GET /programs/{pid}` · `GET /programs/{pid}/revisions` | – | One program (`source`, `params`, `tests`, `rev`); the last 50 revisions, newest first, with author and note |
+| `PUT /programs/{pid}` | session or operator | `{source}` or `{patch: [{start, end, text}]}` (1-based, inclusive, numbered against the current revision; `end = start - 1` inserts), plus `name`, `description`, `params`, `tests`, `note`: a new revision; returns `{program, validation}` |
+| `DELETE /programs/{pid}` | session or operator | Delete a stored program |
+| `POST /programs/{pid}/validate` | session or operator | `{source?}`: language check only, `{ok, errors: [{line, col, code, message_en, message_zh}], params, param_ranges}` |
+| `POST /programs/{pid}/test` | session or operator | `{rev?, source?, tests?, seed?}`: run the unit tests, `{results, passed, total}` |
+| `POST /vehicles/{id}/program` | controller or operator | `{program, rev?, params?, mode: pilot \| copilot, sensors?, arena?, seed?, airframe?}`: deploy; the program holds the sticks as `PROGRAM · <name>` |
+| `POST /vehicles/{id}/program/stop` · `.../resume` | controller or operator | Stop; resume a paused program |
+| `PATCH /vehicles/{id}/program/params` | controller or operator | `{name: value}`: live parameters, type and range from `PARAMS` and `PARAM_RANGES` |
+| `GET /vehicles/{id}/program/log?after=&limit=` | – | Log ring (500 lines): `{lines: [{seq, t, level, text}], last_seq}` |
+| `POST /vehicles/{id}/program/allow` | operator | `{allow, confirm: "PROGRAM"}`: allow programs on a real aircraft (reset when the link drops) |
+
+The snapshot carries `vehicle.program` (`{id, name, rev, state, status: running | paused | faulted | stopped, fps, faults, last_error, mode, ...}`) and `programs_allowed`. Rules that always hold: a person who possesses the aircraft pauses a `pilot` program and releasing never resumes it; emergency stop, link loss and a crash stop it; the claim ending, the session's own sticks and any skill or plan supersede it; stale sticks time out after 0.8 s as before. Real aircraft accept a program only while the operator's **Allow programs on this aircraft** switch is on and preflight passes, and their `fire` output is ignored.
+
+### Challenges, duels and the ladder
+
+Challenges (design 06 §3.2) are fixed scenarios judged in a headless evaluator faster than real time, with visible and hidden seeds whose airframes differ; duels pit programs against each other and keep an Elo ladder.
+
+| Method and path | Purpose |
+|---|---|
+| `GET /challenges` | The challenges: `liftoff`, `hover`, `heading`, `square`, `rings`, `pursuit`, `duel_easy`, `duel_medium`, `duel_hard` |
+| `POST /challenges/{id}/submit` | `{program, rev?}` → an evaluation job |
+| `GET /jobs/{id}` | `{state, progress, result: {score, passed, metrics, seeds, trace_id}}` |
+| `POST /duels` | `{programs: [2..8 ids], rounds, seed, scenario?}` → an evaluation job |
+| `GET /ladder` · `GET /traces/{id}` | The Elo ladder; one judged round's trace (10 Hz, every aircraft) |
+
+The SDK, the MCP tools and Copilot report `judge_unavailable` on a Relay that does not serve these paths yet.
+
+### Program workflow
+
+The loop an agent goes through, here with the SDK at the default `sticks` level (the MCP tools and Copilot's tools have the same names: `program_create`, `program_update`, `program_validate`, `program_test`, `challenge_submit`, `program_deploy`, `program_params`, ...):
+
+```python
+with RelayClient() as relay:
+    relay.open_session("my-agent")
+    # 1. write: start from the built-in hover_trim
+    pid = relay.program_create("My hover", copy_of="hover_trim", note="start")["program"]["id"]
+    relay.program_update(pid, patch=[{"start": 5, "end": 5, "text": 'PARAMS = {"target_alt": 1.2, "kp": 0.25, "kd": 0.18, "ki": 0.12, "hover": 0.55, "climb_limit": 0.5}'}], note="higher, heavier")
+    # 2. validate: language rules, line and column of each problem
+    assert relay.program_validate(pid)["ok"]
+    # 3. test: the unit tests in the program host
+    print(relay.program_test(pid))
+    # 4. submit to a challenge (headless, hidden seeds)
+    print(relay.challenge_submit("hover", pid)["result"])
+    # 5. deploy on a simulator with physical flight and a rough airframe
+    relay.claim("sim-1")
+    relay.sim_assist("sim-1", False)
+    relay.mode("sim-1", "STABILIZE")
+    relay.arm("sim-1")
+    relay.program_deploy("sim-1", pid, airframe={"preset": "rough", "seed": 7})
+    # 6. watch and tune live; stop when done
+    print(relay.program_status("sim-1"), relay.program_log("sim-1")["lines"][-5:])
+    relay.program_params("sim-1", ki=0.2)
+    relay.program_stop("sim-1")
+```
+
+Every edit is a new revision with its author (`operator` or the session name) and note, so a result can always be traced to the code that produced it. Tune parameters live first; change code when the structure is wrong; resubmit to the challenge, whose hidden seeds catch a program tuned to one airframe.
+
 ### LAN arena
 
 The arena (05 §7) lets Relay terminals on the same broadcast domain see each other's simulated aircraft, fire virtual rounds at them, and score hits. It is joined from the window (top bar **Arena**, setting `peer_enabled`) and uses one UDP socket of its own (setting `peer_port`, default 47114, multicast `239.255.71.14` with TTL 1 plus subnet broadcast). Nothing received from the network reaches a control path: no stick, arm, claim, parameter, skill, plan or device call is ever driven by a peer packet. **Real aircraft never join the arena and are never affected by virtual rounds**: only simulators are shared, can fire and can be hit.
@@ -369,6 +447,7 @@ Each event is `{seq, t, kind, vehicle, session, text_en, text_zh, data}`. The ki
 | `device_command` / `motor_test` / `motor_test_stopped` / `actuator_set` / `rc_override` / `message_interval` / `home_set` / `rebooting` / `calibration_started` / `terminated` | Device-level operations |
 | `app_command` | An interface action run by a session or the operator (`data.action`, `data.by`) |
 | `procedure_started` / `procedure_step` / `procedure_waiting` / `procedure_finished` / `procedure_aborted` | Bench procedures, with `data.run_id`, `data.step`, `data.verdict` or `data.reason` |
+| `program_started` / `program_stopped` / `program_paused` / `program_resumed` / `program_faulted` / `program_host_restarted` / `program_gate` | Onboard programs: deployment, stop and its reason, possession pauses, faults, host restarts, the real-aircraft switch |
 
 The full list is in `web/src/api/schema.json` (`EventKind`). Errors share one body and keep their `code` stable across versions:
 
@@ -387,19 +466,23 @@ The full list is in `web/src/api/schema.json` (`EventKind`). Errors share one bo
 | 503 | `link_not_ready`, `backend_busy`, `ui_unavailable`, `judge_unavailable` |
 | 504 | `ui_timeout` |
 
+Onboard programs and the agent flight level add: 403 `sticks_only`; 400 `program_invalid`, `program_param_invalid`; 404 `program_not_found`, `revision_not_found`; 409 `program_readonly`, `program_load_failed`, `no_program`, `program_not_paused`, `programs_not_allowed`; 503 `program_host_unavailable`. The clients add `judge_unavailable` (404) for a Relay without the judge API.
+
 ## 8. MCP servers
 
 Relay ships three stdio Model Context Protocol servers (JSON-RPC 2.0, standard library only; protocol versions 2024-11-05 to 2025-11-25). Connect any one of them or all three:
 
 | Server | File | Tools | Scope |
 |---|---|---|---|
-| `anet-relay` | `mcp/anet_relay_mcp.py` | 20 `relay_*` | Flight: fleet, claims, arm, mode, skills, plans, timed sticks, re-fly, courses, stop |
+| `anet-relay` | `mcp/anet_relay_mcp.py` | 20 `relay_*` (13 at the `sticks` level) | Flight: fleet, claims, arm, mode, skills, plans, timed sticks, re-fly, courses, stop |
 | `anet-relay-device` | `mcp/anet_relay_device_mcp.py` | 36 `device_*` | Device level: overview, MAVLink messages, parameter reads and writes, raw commands, single-motor tests, actuators, RC override, message rates, reboot, calibration, home, attitude and velocity control, flight termination, bench procedures and their reports |
-| `anet-relay-app` | `mcp/anet_relay_app_mcp.py` | 41 `app_*` | Application control: app and window state, controllers, language, workspace, selection, inspector, dialogs, screenshots, network scan, connecting and removing aircraft, simulators, settings, alerts, records and export, re-fly sources, possession, the Copilot window, stop-all |
+| `anet-relay-app` | `mcp/anet_relay_app_mcp.py` | 42 `app_*` and 19 program tools | Application control: app and window state, controllers, language, workspace, selection, inspector, dialogs, screenshots, network scan, connecting and removing aircraft, simulators, settings, alerts, records and export, re-fly sources, possession, the Copilot window, stop-all; onboard programs: `program_guide`, `program_*`, `challenge_list`, `challenge_submit`, `job_status`, `duel_run`, `ladder`, `airframe_set` |
 
 Each server opens an agent session named by `--name` (defaults `mcp`, `mcp-device` and `mcp-app`) at start, renews its lease and closes it when the client disconnects. After a Relay restart it opens a new session on the next call; claims must then be made again. Claims belong to a session: fly an aircraft with the claim tool of the same server (`relay_claim` or `device_claim`). Arguments are checked before anything reaches Relay; missing or unknown ones come back as `invalid arguments`. Failures come back as tool results with `isError: true` and the error code, so a model can react (for example, wait on `possessed_by_human`).
 
 The application server's tools work while `agents_app_control` is on; they need no operator token. `--operator-token` (or `RELAY_OPERATOR_TOKEN`) is only for calls made as the operator and is normally not needed.
+
+The application server's program tools that act on an aircraft (`program_deploy`, `program_stop`, `program_resume`, `program_params`) claim it for that server's session; if the flight server's session holds the claim, release it there first (`relay_release_claim`). `program_deploy` with `arm: true` switches to a manual mode and arms before it deploys (a real aircraft also needs `confirm: "ARM"`).
 
 **Claude Desktop** (`claude_desktop_config.json`):
 
@@ -468,6 +551,10 @@ If Relay is not on port 8765, add `"--base", "http://127.0.0.1:<port>"`. The des
 | `message_interval(id, message, hz)` · `request_message(id, message)` · `reboot(id, confirm)` · `calibrate(id, sensor, confirm)` · `set_home(id, here, lat, lon, alt)` · `terminate(id, confirm)` | Message rates, reboot, calibration, home, flight termination |
 | `procedures()` · `procedure_start(id, procedure, hover_s, skip, auto_answer)` · `procedure(id)` · `procedure_answer(id, step, answer, confirm)` · `procedure_abort(id)` · `wait_procedure(id, timeout, waiting=True)` · `test_runs(id)` · `test_run(run_id)` · `test_run_export(run_id, fmt)` | Bench procedures and reports |
 | `arena()` · `fire(id, seconds)` | LAN arena view and the trigger of a simulator |
+| `program_list()` · `program_get(pid)` · `program_revisions(pid)` · `program_create(name, source, description, params, tests, note, copy_of)` · `program_update(pid, source, patch, note, ...)` · `program_delete(pid)` · `program_validate(pid, source)` · `program_test(pid, rev, source, tests, seed)` | Onboard programs: store, revisions, validation and unit tests |
+| `program_deploy(id, pid, rev, params, mode, sensors, arena, seed, airframe)` · `program_stop(id)` · `program_resume(id)` · `program_params(id, **values)` · `program_status(id)` · `program_log(id, after, limit)` · `program_allow(id, allow, confirm)` | Running programs (`program_allow` needs the operator token) |
+| `challenge_list()` · `challenge_submit(challenge, pid, rev, wait=True)` · `job_status(job)` · `wait_job(job)` · `duel_run(pids, rounds, seed, scenario, wait=True)` · `ladder()` · `trace(id)` | Judge, duels and the ladder; `judge_unavailable` without the judge API |
+| `airframe_get(id)` · `airframe_set(id, preset, params, seed)` | Simulator airframe defects |
 | `app()` · `ui_state()` · `gamepads()` · `app_actions()` · `ui(action, **args)` | App and window state, interface actions |
 | `scan_network(networks)` · `connect_vehicle(host, port)` · `remove_vehicle(id)` · `add_sims(count, autopilot, hover_assist)` · `remove_sims(ids)` · `sim_assist(id, on)` · `settings()` · `update_settings(**patch)` · `ack_alert(id)` · `stop_all()` | App operations: made as the session when one is open, otherwise with the operator token |
 
@@ -490,3 +577,4 @@ The desktop app includes Copilot, a small agent built on [pi](https://github.com
 - **Setup:** Settings → Copilot: interface type (`openai-completions` for OpenAI-compatible endpoints, also `anthropic-messages` and `openai-responses`), base URL, model ID, API key, tool scope and window opacity (60–100 %). **Test connection** sends one short request. The key is encrypted with the operating system keychain (Electron `safeStorage`) in the app data directory and never returns to the interface; the endpoint receives only the conversation and tool results.
 - **Tool scope:** `flight` (status, skills, plans, timed sticks, re-fly, stop), `flight+device` (adds the device-level tools) and `all` (the default; adds application control: language, workspace, selection, network scan, simulators, settings, controllers, records, window and screenshots). The tools map one to one onto the endpoints of section 5.
 - **Safety:** every motion command and device write on a real aircraft (take-off, move, turn, hover, land, plans, re-fly, motor tests, actuators, reboot, calibration, termination and others) shows an approval card in the chat, and nothing is sent until the operator approves (120 s without an answer counts as declined); the floating window shows itself and flashes when an approval is waiting. The approval stands in for the confirm word; Copilot never fills one in on its own. Possession and stop work on Copilot exactly as on any other agent.
+- **Programs and the flight level:** Copilot reads `agent_flight_level` before every message. At `sticks` (the default) it has no take-off, move, turn, hover, plan or re-fly tools and its instructions say that high-level flight is unavailable and that stable flight needs a program; at `full` it has them again. In every tool scope it has the program tools (`program_list`, `program_get`, `program_create`, `program_update`, `program_validate`, `program_test`, `program_deploy`, `program_stop`, `program_resume`, `program_params`, `program_status`, `program_log`, `challenge_list`, `challenge_submit`, `job_status`, `duel_run`, `ladder`, `airframe_set`) plus `relay_arm`, `relay_disarm` and `relay_mode`, and its instructions end with [`programs-guide.md`](programs-guide.md). Writing and editing programs needs no approval; deploying or resuming a program on a real aircraft, arming it and changing its mode wait for the operator's approval like every other motion.

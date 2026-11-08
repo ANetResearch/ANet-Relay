@@ -13,4 +13,9 @@ describe('tool labels', () => {
     expect(toolLabel('relay_land', 'en')).toBe('Land')
     expect(toolLabel('mystery_tool', 'en')).toBe('mystery_tool')
   })
+  it('names the program tools (WP-4b)', () => {
+    expect(toolLabel('program_deploy', 'zh')).toBe('部署程序')
+    expect(toolLabel('challenge_submit', 'en')).toBe('Submit to challenge')
+    expect(toolLabel('airframe_set', 'zh')).toBe('设置机体')
+  })
 })

@@ -788,6 +788,241 @@ class RelayClient:
     def remove_sims(self, ids: list[str] | None = None) -> list[str]:
         return self._app("DELETE", "/sims", query={"id": ids} if ids else None)["removed"]
 
+    # ------------------------------------------------------------------ onboard programs (06 §2, §3, §6)
+    # WP-4b: the same operations as the Copilot program tools and the app MCP server. Store writes, validation
+    # and tests need the open session (or the operator token); deploying, stopping, resuming and tuning need
+    # control of the aircraft (the claim) or the operator.
+
+    def _either(self, method: str, path: str, body: Any = None, query: dict | None = None) -> Any:
+        """As the open session, otherwise with the operator token."""
+        return self.request(method, path, body, auth="session" if self._token else "operator", query=query)
+
+    def program_list(self) -> list[dict]:
+        """Built-in examples (read-only) and stored programs: ``[{id, name, builtin, rev, test_count}]``."""
+        return self._get("/programs")["programs"]
+
+    def program_get(self, program_id: str) -> dict:
+        """One program with ``source``, ``params``, ``tests`` and its current ``rev``."""
+        return self._get(f"/programs/{_q(program_id)}")["program"]
+
+    def program_revisions(self, program_id: str) -> list[dict]:
+        """Up to the last 50 revisions, newest first: ``[{rev, source, params, author, note, t}]``."""
+        return self._get(f"/programs/{_q(program_id)}/revisions")["revisions"]
+
+    def program_create(
+        self,
+        name: str,
+        source: str | None = None,
+        description: str | None = None,
+        params: dict | None = None,
+        tests: list[dict] | None = None,
+        note: str | None = None,
+        copy_of: str | None = None,
+    ) -> dict:
+        """Create a program (or a copy of ``copy_of``); returns ``{program, validation}``."""
+        body = _drop_none(
+            name=name,
+            source=source,
+            description=description,
+            params=params,
+            tests=tests,
+            note=note,
+            copy_of=copy_of,
+        )
+        return self._either("POST", "/programs", body)
+
+    def program_update(
+        self,
+        program_id: str,
+        source: str | None = None,
+        patch: list[dict] | None = None,
+        note: str | None = None,
+        name: str | None = None,
+        description: str | None = None,
+        params: dict | None = None,
+        tests: list[dict] | None = None,
+    ) -> dict:
+        """A new revision from the whole ``source`` or a line ``patch`` ``[{start, end, text}]`` (1-based,
+        inclusive, numbered against the current revision; ``end = start - 1`` inserts). Returns
+        ``{program, validation}``."""
+        body = _drop_none(
+            source=source,
+            patch=patch,
+            note=note,
+            name=name,
+            description=description,
+            params=params,
+            tests=tests,
+        )
+        return self._either("PUT", f"/programs/{_q(program_id)}", body)
+
+    def program_delete(self, program_id: str) -> dict:
+        return self._either("DELETE", f"/programs/{_q(program_id)}")
+
+    def program_validate(self, program_id: str, source: str | None = None) -> dict:
+        """Language check only: ``{ok, errors: [{line, col, code, message_en, message_zh}], params, ...}``."""
+        return self._either("POST", f"/programs/{_q(program_id)}/validate", _drop_none(source=source))
+
+    def program_test(
+        self,
+        program_id: str,
+        rev: int | None = None,
+        source: str | None = None,
+        tests: list[dict] | None = None,
+        seed: int | None = None,
+    ) -> dict:
+        """Run the unit tests (06 §3.1): ``{program, results, passed, total}``."""
+        body = _drop_none(rev=rev, source=source, tests=tests, seed=seed)
+        return self._either("POST", f"/programs/{_q(program_id)}/test", body)
+
+    def program_deploy(
+        self,
+        vehicle_id: str,
+        program_id: str,
+        rev: int | None = None,
+        params: dict | None = None,
+        mode: str = "pilot",
+        sensors: dict | None = None,
+        arena: dict | None = None,
+        seed: int | None = None,
+        airframe: dict | None = None,
+    ) -> dict:
+        """Run a revision on an aircraft at 50 Hz (06 §2.6); returns ``{id, program}`` (the run view).
+
+        ``mode`` is ``pilot`` or ``copilot``. Simulators also take ``sensors`` ``{baro, position, contacts}``,
+        ``arena`` ``{radius, floor, ceiling}``, ``seed`` and ``airframe`` ``{preset | params, seed?}``. A real
+        aircraft needs the operator's ``Allow programs`` switch (``programs_not_allowed``) and preflight.
+        """
+        body = _drop_none(
+            program=program_id,
+            rev=rev,
+            params=params,
+            mode=mode,
+            sensors=sensors,
+            arena=arena,
+            seed=seed,
+            airframe=airframe,
+        )
+        return self._either("POST", f"/vehicles/{vehicle_id}/program", body)
+
+    def program_stop(self, vehicle_id: str) -> dict:
+        return self._either("POST", f"/vehicles/{vehicle_id}/program/stop", {})
+
+    def program_resume(self, vehicle_id: str) -> dict:
+        """Resume a paused program (possession pauses it; releasing never resumes it by itself)."""
+        return self._either("POST", f"/vehicles/{vehicle_id}/program/resume", {})
+
+    def program_params(self, vehicle_id: str, params: dict | None = None, **values: Any) -> dict:
+        """Live parameters of the running program: ``program_params("sim-1", kp=0.3)``."""
+        patch = {**(params or {}), **values}
+        return self._either("PATCH", f"/vehicles/{vehicle_id}/program/params", patch)
+
+    def program_status(self, vehicle_id: str) -> dict | None:
+        """The run view ``{id, name, rev, state, status, fps, faults, last_error, mode, ...}`` or None."""
+        return self.vehicle(vehicle_id).get("program")
+
+    def program_log(self, vehicle_id: str, after: int = 0, limit: int = 500) -> dict:
+        """Log lines with ``seq > after``: ``{id, program, lines: [{seq, t, level, text}], last_seq}``."""
+        return self._get(f"/vehicles/{vehicle_id}/program/log", after=after, limit=limit)
+
+    def program_allow(self, vehicle_id: str, allow: bool = True, confirm: str | None = "PROGRAM") -> dict:
+        """Operator only: ``Allow programs on this aircraft`` (real aircraft; reset when the link drops)."""
+        return self._op("POST", f"/vehicles/{vehicle_id}/program/allow", {"allow": allow, "confirm": confirm})
+
+    # judge (06 §3.2-§3.4): headless evaluation of challenges and duels, run as jobs
+
+    def _judge(self, method: str, path: str, body: Any = None, query: dict | None = None) -> Any:
+        """A judge call; a Relay without the judge API raises ``judge_unavailable``, not ``not_found``."""
+        try:
+            return self._either(method, path, body, query)
+        except RelayError as exc:
+            if exc.code != "not_found":
+                raise
+            present = False
+            if path != "/challenges":
+                try:
+                    self._get("/challenges")
+                    present = True
+                except RelayError as probe:
+                    present = probe.code != "not_found"
+            if present:
+                raise
+            raise RelayError(
+                "judge_unavailable",
+                404,
+                "This Relay has no judge API (challenges, jobs, duels, ladder); it comes with Relay 0.4.0.",
+                "此 Relay 没有评测接口（题目、评测任务、对抗、排名），该接口随 Relay 0.4.0 提供。",
+            ) from exc
+
+    def challenge_list(self) -> Any:
+        """The challenges with scenario, pass condition, best score and status."""
+        return self._judge("GET", "/challenges")
+
+    def challenge_submit(
+        self,
+        challenge_id: str,
+        program_id: str,
+        rev: int | None = None,
+        wait: bool = True,
+        timeout: float = 300.0,
+    ) -> dict:
+        """Judge a revision; with ``wait`` returns the finished job ``{state, progress, result}``."""
+        body = _drop_none(program=program_id, rev=rev)
+        job = self._judge("POST", f"/challenges/{_q(challenge_id)}/submit", body)
+        return self.wait_job(_job_id(job), timeout) if wait and _job_id(job) is not None else job
+
+    def job_status(self, job_id: str) -> dict:
+        job = self._judge("GET", f"/jobs/{_q(job_id)}")
+        return job.get("job", job) if isinstance(job, dict) else job
+
+    def wait_job(self, job_id: str, timeout: float = 300.0, interval: float = 0.5) -> dict:
+        """Poll an evaluation job until it is no longer queued or running."""
+        end = time.monotonic() + timeout
+        while True:
+            job = self.job_status(job_id)
+            if job.get("state") not in ("queued", "running", "pending"):
+                return job
+            if time.monotonic() >= end:
+                raise RelayError("timeout", 0, f"job {job_id} did not finish in {timeout:g} s", detail=job)
+            time.sleep(interval)
+
+    def duel_run(
+        self,
+        programs: list[str],
+        rounds: int | None = None,
+        seed: int | None = None,
+        scenario: dict | None = None,
+        wait: bool = True,
+        timeout: float = 600.0,
+    ) -> dict:
+        """2 to 8 programs against each other; the result has the rounds and the Elo table."""
+        body = _drop_none(programs=list(programs), rounds=rounds, seed=seed, scenario=scenario)
+        job = self._judge("POST", "/duels", body)
+        return self.wait_job(_job_id(job), timeout) if wait and _job_id(job) is not None else job
+
+    def ladder(self) -> Any:
+        """The Elo ladder of all duels so far."""
+        return self._judge("GET", "/ladder")
+
+    def trace(self, trace_id: str) -> Any:
+        """The downsampled trace (10 Hz, every aircraft) of one judged round, for replay."""
+        return self._judge("GET", f"/traces/{_q(trace_id)}")
+
+    # simulator airframe defects (06 §4)
+
+    def airframe_get(self, vehicle_id: str) -> dict:
+        """``{id, preset, seed, params, active, hover_throttle, limits}`` of a simulator."""
+        return self._either("GET", f"/sims/{vehicle_id}/airframe")
+
+    def airframe_set(
+        self, vehicle_id: str, preset: str | None = None, params: dict | None = None, seed: int | None = None
+    ) -> dict:
+        """Fit defects to a simulator: ``preset`` ideal | typical | rough (with ``seed``), or ``params`` for a
+        custom airframe. They act with hover assist off. ``sim_only`` for a real aircraft."""
+        return self._either(
+            "PUT", f"/sims/{vehicle_id}/airframe", _drop_none(preset=preset, params=params, seed=seed)
+        )
+
     # ------------------------------------------------------------------ operator helpers (operator token)
 
     def possess(self, vehicle_id: str, input: str = "keyboard", pad: int | None = None) -> dict:
@@ -795,6 +1030,26 @@ class RelayClient:
 
     def release(self, vehicle_id: str) -> dict:
         return self._op("POST", f"/vehicles/{vehicle_id}/release")
+
+
+def _q(value: str) -> str:
+    return urllib.parse.quote(str(value), safe="")
+
+
+def _drop_none(**values: Any) -> dict:
+    return {k: v for k, v in values.items() if v is not None}
+
+
+def _job_id(job: Any) -> str | None:
+    if not isinstance(job, dict):
+        return None
+    inner = job.get("job")
+    if isinstance(inner, dict) and inner.get("id") is not None:
+        return str(inner["id"])
+    for key in ("job_id", "id"):
+        if job.get(key) is not None:
+            return str(job[key])
+    return None
 
 
 class _WebSocket:

@@ -59,7 +59,8 @@ STICKS_INSTRUCTIONS = (
     "PX4 MANUAL, STABILIZED), relay_arm, then relay_sticks_for to push the sticks for a few seconds. "
     "Takeoff, hold, move, yaw, goto, plans and re-fly are refused with sticks_only at this level; "
     "relay_land stays available as a safety action and relay_stop cuts the motors in an emergency. "
-    "For closed-loop flight, deploy an onboard program (POST /vehicles/{id}/program). "
+    "For closed-loop flight, write and deploy an onboard program with the anet-relay-app server's program "
+    "tools (program_guide, program_create, program_test, program_deploy). "
     "A person can take over (possess) any aircraft at any time; control calls then fail with "
     "possessed_by_human. Real aircraft need confirm='ARM' to arm and must pass preflight checks."
 )

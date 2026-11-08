@@ -100,7 +100,9 @@ test('copilot: settings, a sequence on a simulator, approval for a real aircraft
   await page.screenshot({ path: path.join(shots, '01-settings.png') })
   await page.keyboard.press('Escape')
 
-  // a sequence on a simulator, flown by the copilot session
+  // a sequence on a simulator, flown by the copilot session; sequences need the agent flight level "full"
+  // (06 §5: at the default "sticks" Copilot has no take-off or sequence tools and writes programs instead)
+  await rest(r, 'PUT', '/settings', { agent_flight_level: 'full' })
   await rest(r, 'POST', '/sims', { count: 1, autopilot: 'px4', position: false })
   await page.locator('[data-fleet-card="sim-1"]').click()
   await expect(cp.getByText('Selected: SIM-1')).toBeVisible({ timeout: 10000 })
