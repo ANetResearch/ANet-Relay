@@ -2,6 +2,7 @@
 world, COLLIDE out and in with its checks (forged, stale, far, rate), the reply and ram credit, and 0.4 peers
 that never collide."""
 
+import math
 from typing import ClassVar
 
 import pytest
@@ -79,8 +80,12 @@ def test_version_2_peers_become_moving_spheres_and_0_4_peers_do_not(svc, stepper
     peers, _sent, session = lan
     p = here(svc)
     far = (p[0] + 3.0, p[1], p[2])
-    feed(svc, peers, state(1, 1000, [peer_aircraft(far, (0.0, 1.0, 0.0))]))
-    feed(svc, peers, state(1, 1000, [peer_aircraft(far, (0.0, 1.0, 0.0))], OLD, None), "10.9.9.10")
+    before = (far[0], far[1] - 0.05, far[2])  # 50 ms earlier at 1 m/s: a track, so it is collidable
+    feed(svc, peers, state(1, 950, [peer_aircraft(before, (0.0, 1.0, 0.0))]))
+    stepper.run(0.02, [session])
+    feed(svc, peers, state(2, 1000, [peer_aircraft(far, (0.0, 1.0, 0.0))]))
+    for seq, mono, q in ((1, 950, before), (2, 1000, far)):
+        feed(svc, peers, state(seq, mono, [peer_aircraft(q, (0.0, 1.0, 0.0))], OLD, None), "10.9.9.10")
     stepper.run(0.1, [session])
     ext = svc.arena.collisions.external
     assert list(ext) == [f"{PEER:016x}/sim-1"]  # the 0.4 peer's aircraft never collide
@@ -106,6 +111,8 @@ def test_a_fast_remote_aircraft_crashes_ours_and_the_peer_hears_about_it(svc, st
     (c,) = sent["collide"]
     assert c.to_instance == PEER and c.target == 1 and c.own == 1 and c.crashed and not c.reply
     assert c.closing >= 2.0
+    # our velocity from before the contact (a hover), not the bounce it took: the peer's rule needs it
+    assert max(abs(x) for x in c.v) < 0.3 and v.driver.sim.quad.s.v[0] > 1.0
     events = [e for e in svc.events.after(0, 5000) if e["kind"] == "collision"]
     (e,) = events
     assert (
@@ -143,6 +150,12 @@ def test_a_slow_touch_bounces_without_a_crash(svc, stepper, lan):
 def _peer_near(svc, stepper, peers, session, offset=(0.3, 0.0, 0.0), velocity=(-2.5, 0.0, 0.0)):
     p = here(svc)
     q = tuple(p[i] + offset[i] for i in range(3))
+    # two STATEs 50 ms apart that fly the claimed velocity: a continuous track
+    q0 = tuple(q[i] - velocity[i] * 0.05 for i in range(3))
+    feed(
+        svc, peers, state(0, 950, [peer_aircraft(q0, velocity)])
+    )  # sequence numbers 2 and up are the COLLIDEs'
+    stepper.run(0.01, [session])
     feed(svc, peers, state(1, 1000, [peer_aircraft(q, velocity)]))
     svc.arena.collisions._pairs.clear()
     # keep it from being swept by our own test: it stays where it is, as far as our tick knows
@@ -245,7 +258,9 @@ def test_wp_a_world_takes_the_bodies_and_reports_contacts(svc, stepper, lan):
     svc.world = World()
     try:
         p = here(svc)
-        feed(svc, peers, state(1, 1000, [peer_aircraft((p[0] + 3.0, p[1], p[2]), (0.0, 0.0, 0.0))]))
+        feed(svc, peers, state(1, 950, [peer_aircraft((p[0] + 3.0, p[1], p[2]), (0.0, 0.0, 0.0))]))
+        stepper.run(0.05, [session])
+        feed(svc, peers, state(2, 1000, [peer_aircraft((p[0] + 3.0, p[1], p[2]), (0.0, 0.0, 0.0))]))
         stepper.run(0.05, [session])
         world = svc.world
         assert list(world.external) == [f"{PEER:016x}/sim-1"] and world.on_external_contact is not None
@@ -268,3 +283,133 @@ def test_the_shared_collision_rules_are_used():
     )
     with pytest.raises(ImportError):
         __import__("relay.peers.collide_fallback")
+
+
+# ---------------------------------------------------------------------------- review fixes (v0.5.0)
+
+
+def test_the_receiver_sees_the_true_closing_speed_from_the_senders_approach(svc, stepper, lan, monkeypatch):
+    """Two terminals' view of one 2.5 m/s ram: the sender's COLLIDE carries its approach, so both crash."""
+    peers, sent, session = lan
+    monkeypatch.setattr(svc.world, "_externals", lambda *a: None)
+    _peer_near(svc, stepper, peers, session)
+    arena = svc.arena
+    key = f"{PEER:016x}/sim-1"
+    # as the sender's world reports it: the impulse is applied already, the approach is passed alongside
+    arena.collisions.on_contact(key, "sim-1", here(svc), 2.5, True, (0.0, 0.0, 0.0))
+    (out,) = sent["collide"]
+    assert out.v == pytest.approx((0.0, 0.0, 0.0), abs=1e-6)
+    arena.collisions._pairs.clear()
+    point = frame.to_arena(0, here(svc))
+    seat_v = frame.vec_to_arena(0, (-2.5, 0.0, 0.0))
+    feed(svc, peers, wire.encode_collide(2, PEER, 1000, collide(svc, contact=9, v=seat_v, point=point)))
+    stepper.run(0.02, [session])
+    assert svc.vehicles["sim-1"].driver.sim.quad.s.crashed  # 2.5 m/s, not the 0.75 a post-bounce speed gives
+
+
+def test_a_crash_shortly_after_a_bounce_still_reaches_the_peer(svc, stepper, lan, monkeypatch):
+    peers, sent, session = lan
+    monkeypatch.setattr(svc.world, "_externals", lambda *a: None)
+    _peer_near(svc, stepper, peers, session)
+    key = f"{PEER:016x}/sim-1"
+    col_ = svc.arena.collisions
+    col_.on_contact(key, "sim-1", here(svc), 1.0, False)  # a graze
+    col_.on_contact(key, "sim-1", here(svc), 1.0, False)  # still touching
+    assert len(sent["collide"]) == 1
+    col_.on_contact(key, "sim-1", here(svc), 3.0, True)  # 0.3 s later it comes back at 3 m/s
+    assert len(sent["collide"]) == 2 and sent["collide"][1].crashed
+    col_.on_contact(key, "sim-1", here(svc), 3.0, True)
+    assert len(sent["collide"]) == 2
+
+
+def test_a_peer_crash_after_a_registered_bounce_is_applied_here(svc, stepper, lan, monkeypatch):
+    peers, _sent, session = lan
+    monkeypatch.setattr(svc.world, "_externals", lambda *a: None)
+    _peer_near(svc, stepper, peers, session)
+    key = f"{PEER:016x}/sim-1"
+    svc.arena.collisions._pairs[("sim-1", key)] = (svc.clock() - 0.4, False)  # our own graze 0.4 s ago
+    point = frame.to_arena(0, here(svc))
+    seat_v = frame.vec_to_arena(0, (-2.5, 0.0, 0.0))
+    data = collide(svc, contact=11, flags=wire.COLLIDE_CRASHED, v=seat_v, point=point)
+    feed(svc, peers, wire.encode_collide(2, PEER, 1000, data))
+    stepper.run(0.02, [session])
+    assert svc.vehicles["sim-1"].driver.sim.quad.s.crashed
+    assert svc.arena.board.lines["sim-1"].rams == 1
+
+
+def test_a_claimed_speed_alone_never_crashes_our_aircraft(svc, stepper, lan, monkeypatch):
+    """A peer shows a hovering aircraft by ours and claims 150 m/s in a COLLIDE, or 200 m/s in a STATE."""
+    peers, sent, session = lan
+    _peer_near(svc, stepper, peers, session, offset=(0.3, 0.0, 0.0), velocity=(0.0, 0.0, 0.0))
+    s = svc.vehicles["sim-1"].driver.sim.quad.s
+    point = frame.to_arena(0, here(svc))
+    claim = frame.vec_to_arena(0, (-150.0, 0.0, 0.0))
+    forged = collide(svc, contact=12, flags=wire.COLLIDE_CRASHED, v=claim, point=point)
+    monkeypatch.setattr(svc.world, "_externals", lambda *a: None)
+    feed(svc, peers, wire.encode_collide(2, PEER, 1000, forged))
+    stepper.run(0.02, [session])
+    assert not s.crashed
+    (reply,) = sent["collide"]  # checked and applied as the bounce it can only have been
+    assert reply.reply and not reply.crashed and reply.closing < 2.0
+    # the STATE claim of a stationary track is held to the track: no ram from a standing sphere
+    monkeypatch.undo()
+    key = f"{PEER:016x}/sim-1"
+    q = svc.arena.collisions._tracks[key].samples[-1][1]  # it stays where it was
+    feed(svc, peers, state(3, 1050, [peer_aircraft(q, (-200.0, 0.0, 0.0))]))
+    stepper.run(0.02, [session])
+    body = svc.arena.collisions.external.get(key)
+    assert body is not None and math.hypot(*body.v) <= col.VEL_TOL + 1e-3
+    stepper.run(0.3, [session])
+    assert not s.crashed
+
+
+def test_a_jump_makes_the_aircraft_untouchable_for_a_moment(svc, stepper, lan, monkeypatch):
+    peers, sent, session = lan
+    monkeypatch.setattr(svc.world, "_externals", lambda *a: None)
+    p = here(svc)
+    far = (p[0] + 30.0, p[1], p[2])
+    for seq, mono in ((0, 900), (1, 950)):
+        feed(svc, peers, state(seq, mono, [peer_aircraft(far, (0.0, 0.0, 0.0))]))
+        stepper.run(0.01, [session])
+    key = f"{PEER:016x}/sim-1"
+    assert key in svc.arena.collisions.external
+    near = (p[0] + 0.3, p[1], p[2])  # 30 m in 50 ms: a teleport onto our aircraft
+    feed(svc, peers, state(2, 1000, [peer_aircraft(near, (-2.5, 0.0, 0.0))]))
+    stepper.run(0.01, [session])
+    feed(svc, peers, state(3, 1050, [peer_aircraft(near, (-2.5, 0.0, 0.0))]))
+    stepper.run(0.01, [session])
+    assert key not in svc.arena.collisions.external
+    data = collide(
+        svc, contact=13, flags=wire.COLLIDE_CRASHED, t_ms=1050, v=frame.vec_to_arena(0, (-2.5, 0.0, 0.0))
+    )
+    feed(svc, peers, wire.encode_collide(4, PEER, 1050, data))
+    stepper.run(0.02, [session])
+    assert svc.arena.collisions.counters["untracked"] == 1
+    assert not svc.vehicles["sim-1"].driver.sim.quad.s.crashed and not sent["collide"]
+    for k in range(12):  # after the hold the track is a track again
+        feed(svc, peers, state(5 + k, 1100 + 50 * k, [peer_aircraft(near, (0.0, 0.0, 0.0))]))
+        stepper.run(0.05, [session])
+    assert key in svc.arena.collisions.external
+
+
+def test_a_restarted_peer_numbers_its_contacts_afresh(svc, stepper, lan, monkeypatch):
+    peers, _sent, session = lan
+    monkeypatch.setattr(svc.world, "_externals", lambda *a: None)
+    monkeypatch.setattr(svc.world, "apply_contact", lambda *a: None)
+    _peer_near(svc, stepper, peers, session)
+    point = frame.to_arena(0, here(svc))
+    data = collide(svc, contact=1, flags=wire.COLLIDE_CRASHED, point=point)
+    feed(svc, peers, wire.encode_collide(2, PEER, 1000, data))
+    stepper.run(0.02, [session])
+    assert svc.arena.board.lines["sim-1"].rams == 1
+    svc.arena.collisions.forget_peer(PEER)  # it left (BYE or timeout) and comes back with the same id
+    assert not any(k[0] == PEER for k in svc.arena.collisions._seen)
+    svc.arena.collisions._pairs.clear()
+    p = here(svc)
+    for seq, mono in ((10, 1050), (11, 1100)):  # its aircraft again, a fresh track
+        feed(svc, peers, state(seq, mono, [peer_aircraft((p[0] + 0.3, p[1], p[2]), (0.0, 0.0, 0.0))]))
+        stepper.run(0.01, [session])
+    again = collide(svc, contact=1, t_ms=1100, flags=wire.COLLIDE_CRASHED, point=point)
+    feed(svc, peers, wire.encode_collide(20, PEER, 1100, again))
+    stepper.run(0.02, [session])
+    assert svc.arena.board.lines["sim-1"].rams == 2

@@ -8,7 +8,8 @@ at a time, and after each step sweeps every aircraft's segment (previous centre 
 * the solid rings of the active ring courses (tori),
 * ``external``: the remote aircraft of the LAN arena, which the arena fills every tick in this terminal's
   local frame (``ExternalBody``, the segment it covers during the tick); only the local aircraft responds
-  and ``on_external_contact`` is called so the arena can tell the other terminal (``COLLIDE``).
+  and ``on_external_contact`` is called so the arena can tell the other terminal (``COLLIDE``), with the
+  local aircraft's velocity from before the contact (the peer applies the same rule to its own aircraft).
 
 The ground is judged by ``physics.Quad`` itself at the same rate. Contact rules and volumes are those of
 ``sim.collide``. Real aircraft are never bodies here. Coordinates are the fleet's world ENU frame (the
@@ -74,7 +75,8 @@ class Contact:
 @dataclass
 class World:
     external: dict[str, ExternalBody] = field(default_factory=dict)
-    on_external_contact: Callable[[str, str, Vec3, float, bool], None] | None = None
+    # (remote key, local id, point, closing speed, crashed, local velocity before the contact)
+    on_external_contact: Callable[[str, str, Vec3, float, bool, Vec3], None] | None = None
     fixed_rings: list[tuple[str, dict[str, Any]]] = field(default_factory=list)  # e.g. the evaluator's course
     enabled: bool = True
     contacts: dict[str, Contact] = field(default_factory=dict)
@@ -296,7 +298,7 @@ class World:
                 self.apply_contact(body, dv, n, point, closing, e.key, e.label, crash, t)  # type: ignore[arg-type]
                 self._report(reports, body, e.key, e.label, point, closing, crashed, "craft", t, remote=True)  # type: ignore[arg-type]
                 if self.on_external_contact is not None:  # crashed: this contact wrecked ours (ram credit)
-                    self.on_external_contact(e.key, body.id, point, closing, bool(crashed))  # type: ignore[arg-type]
+                    self.on_external_contact(e.key, body.id, point, closing, bool(crashed), va)  # type: ignore[arg-type]
 
 
 def _unit(v: Vec3) -> Vec3 | None:

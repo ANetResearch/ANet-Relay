@@ -117,7 +117,9 @@ def test_external_bodies_move_only_the_local_aircraft():
     sim = flying("a", (0.0, 0.0, 2.0), (1.5, 0.0, 0.0))
     seen = []
     world = World()
-    world.on_external_contact = lambda key, vid, _p, v_rel, crashed: seen.append((key, vid, v_rel, crashed))
+    world.on_external_contact = lambda key, vid, _p, v_rel, crashed, v: seen.append(
+        (key, vid, v_rel, crashed, v)
+    )
 
     def remote(w, t):  # a remote aircraft hovering 0.6 m east, refreshed every tick like the arena does
         at = (0.6, 0.0, 2.0)
@@ -127,6 +129,7 @@ def test_external_bodies_move_only_the_local_aircraft():
     report = reports[0]
     assert report["b"] == "peer-a/sim-1" and report["b_label"] == "Alpha / SIM-1" and report["crashed"] == []
     assert seen and seen[0][0] == "peer-a/sim-1" and seen[0][1] == "sim-1" and seen[0][3] is False
+    assert seen[0][4][0] > 1.0  # the velocity from before the contact (the peer's rule needs the approach)
     # an equal-mass half of the impulse: the remote terminal applies the other half to its own aircraft, so
     # here (where the remote one does not move) the local aircraft bumps again, ever more softly
     assert all(later["v_rel"] < report["v_rel"] for later in reports[1:])
