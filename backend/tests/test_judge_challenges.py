@@ -280,3 +280,12 @@ def test_challenge_results_validate_against_the_schema():
     )
     # hover_trim holds no heading: unequal motors turn it away
     assert not out["passed"] and out["metrics"]["max_error_deg"] > 10.0
+
+
+def test_a_program_that_hangs_is_interrupted_and_faulted():
+    loop = "def step(obs, ctx):\n    while True:\n        pass\n"
+    out = worker.execute(spec("liftoff", custom(loop), seeds=[1]))
+    (trace,) = out["traces"]
+    faults = [e for e in trace["events"] if e["kind"] == "program_faulted"]
+    assert not out["passed"] and faults and faults[0]["reason"] == "faults"
+    assert trace["aircraft"][0]["frames"][-1][2] == 0.0  # it never left the ground

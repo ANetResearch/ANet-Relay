@@ -4,8 +4,9 @@ The fleet is the live one with nothing attached: ``listen=False`` (no MAVLink so
 ``History(None)`` (nothing on disk), an injected clock that the evaluator advances in 5 ms ticks as fast as
 the machine allows, and ``InProcessHost`` (the evaluator is itself an isolated process, see ``worker``).
 Everything else is the code that flies in real time: the simulated autopilot with its airframe defects, the
-stick path with its 0.8 s timeout, the arena's guns, bullets and hits, the fleet's ring-course judge and the
-program host's engine with its per-step interrupt. Nothing here reads the wall clock into the simulation, so
+stick path with its 0.8 s timeout, the arena's guns, bullets and hits, the ring-course judge and the program
+host's engine with its per-step interrupt (``JudgeHost`` widens that wall-time limit to ``STEP_LIMIT_MS`` so
+a loaded machine cannot change a result). Nothing here reads the wall clock into the simulation, so
 the same scenario, seeds and program revisions give the same result.
 
 A run: the simulators are added with their airframes and spawns, a ``judge`` session claims them, the fleet
@@ -43,6 +44,7 @@ TRACE_EVERY = 20  # ticks: 10 Hz trace frames
 RENEW_EVERY = 100  # ticks: the judge session's lease
 PROGRESS_EVERY = 200  # ticks: one simulated second
 OUT_MARGIN_M = 0.5
+STEP_LIMIT_MS = 50.0
 TRACE_VERSION = 1
 TRACE_FIELDS = ("x", "y", "z", "roll", "pitch", "yaw", "throttle", "hp", "flags")
 FLAG_ARMED, FLAG_AIRBORNE, FLAG_DOWN, FLAG_CRASHED, FLAG_OUT = 1, 2, 4, 8, 16
@@ -52,6 +54,14 @@ TRACE_EVENTS = {
     "program_faulted": "program_faulted",
     "program_stopped": "program_stopped",
 }
+
+
+class JudgeHost(InProcessHost):
+    """The program engine with a wall-time step limit wide enough that a busy machine (a step pre-empted by
+    the scheduler) never changes a run; a program that loops is still interrupted, after ``STEP_LIMIT_MS``."""
+
+    def step(self, items: list[tuple[str, dict[str, Any]]], deadline_s: float, hard_ms: float) -> Any:
+        return super().step(items, deadline_s, max(hard_ms, STEP_LIMIT_MS))
 
 
 class Cancelled(Exception):
@@ -149,7 +159,7 @@ class Headless:
         )
         self.svc.settings.agent_flight_level = "sticks"
         self.svc.airframe_seed_source = lambda: int(scenario.seed) % 1_000_000
-        self.svc.programs.host_factory = InProcessHost
+        self.svc.programs.host_factory = JudgeHost
         self.svc._next["snapshot"] = math.inf  # nobody reads the snapshot of a headless fleet
         self.svc.arena.instance = 1
         self.svc.arena.fly_budget_s = math.inf
