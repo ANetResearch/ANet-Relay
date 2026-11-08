@@ -124,7 +124,7 @@ Python 3 语法的子集，部署前由 AST 白名单校验：
 | `liftoff` | 油门搜索起飞 |
 | `patrol` | 无定位源的定时转向巡逻 |
 | `hunter_easy` / `hunter_medium` / `hunter_hard` | 三档对抗机器人状态机：搜索 → 接近 → 射击 → 规避；目标快速逼近时闪避（`dodge_s`、`threat_dist`、`threat_closing`） |
-| `rammer` | 撞击对手、从不开火：爬升 → 搜索 → 追击（对最近目标做比例导引）→ 撞击 → 恢复；模拟器报告碰撞时读取 `obs.collision` |
+| `rammer` | 撞击对手、从不开火：爬升 → 搜索 → 追击（对最近目标做比例导引，并在垂直于视线的方向上蛇形机动，使不做提前量的射手打偏）→ 撞击（进入 `ram_dist` 后全力加速）→ `obs.collision` 报告接触后恢复 |
 
 示例只读；复制后即可修改。
 

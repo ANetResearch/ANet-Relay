@@ -4,7 +4,8 @@
 # push along the line of sight that grows to full when the target is close. Accelerations become tilt
 # through the stick map (full stick = 35 degrees). Height follows the target on the barometer. After a
 # contact (obs.collision) the rammer levels out and holds its height before it looks for the next target.
-# It never fires.
+# On the way in it weaves across the line of sight (a square wave of sideways push) so that a gunner that
+# does not lead its shots misses; inside ram_dist it stops weaving and pushes straight in. It never fires.
 
 import math
 
@@ -14,13 +15,15 @@ PARAMS = {
     "kd": 0.18,
     "ki": 0.12,
     "nav_gain": 3.0,
-    "push": 2.5,
-    "ram_push": 5.0,
+    "push": 4.0,
+    "ram_push": 7.0,
     "ram_dist": 2.5,
-    "max_tilt": 0.6,
+    "max_tilt": 0.8,
     "yaw_gain": 0.02,
     "search_yaw": 0.35,
     "recover_s": 1.5,
+    "weave": 5.0,
+    "weave_s": 0.5,
     "team": "",
 }
 
@@ -66,22 +69,31 @@ def altitude(obs, ctx, want, tilt):
     return clamp(level + p["kp"] * error - p["kd"] * obs.vz, 0.0, 1.0)
 
 
-def pn_accel(c, ctx, push):
-    """Desired horizontal acceleration (forward, right) in m/s^2: PN sideways plus a push along the sight."""
+def pn_accel(c, ctx, push, weave=0.0):
+    """Desired horizontal acceleration (forward, right) in m/s^2: PN sideways plus a push along the sight,
+    plus ``weave`` across it."""
     fwd, right = c.rel[0], c.rel[1]
     r2 = max(0.01, fwd * fwd + right * right)
     r = math.sqrt(r2)
     los_rate = (fwd * c.vrel[1] - right * c.vrel[0]) / r2  # rad/s, positive turning from nose to right
     vc = max(0.5, closing(c))
-    side = ctx.params["nav_gain"] * vc * los_rate
+    side = ctx.params["nav_gain"] * vc * los_rate + weave
     ux, uy = fwd / r, right / r  # along the line of sight
     px, py = -uy, ux  # the way the line of sight turns
     return push * ux + side * px, push * uy + side * py
 
 
-def sticks_for(obs, ctx, c, push):
+def weave_accel(ctx):
+    """Sideways push of the weave: +weave and -weave in turn, each for weave_s."""
     p = ctx.params
-    ax, ay = pn_accel(c, ctx, push)
+    if p["weave"] <= 0 or p["weave_s"] <= 0:
+        return 0.0
+    return p["weave"] if int(ctx.t / p["weave_s"]) % 2 == 0 else -p["weave"]
+
+
+def sticks_for(obs, ctx, c, push, weave=0.0):
+    p = ctx.params
+    ax, ay = pn_accel(c, ctx, push, weave)
     pitch = clamp(ax / TILT_FULL, -p["max_tilt"], p["max_tilt"])
     roll = clamp(ay / TILT_FULL, -p["max_tilt"], p["max_tilt"])
     tilt = math.radians(35.0) * math.sqrt(pitch * pitch + roll * roll)
@@ -121,7 +133,7 @@ def pursue(obs, ctx):
         return Sticks(throttle=altitude(obs, ctx, ctx.params["cruise_alt"], 0.0)), "search"
     if c.dist < ctx.params["ram_dist"] and closing(c) > 0.0:
         return sticks_for(obs, ctx, c, ctx.params["ram_push"]), "ram"
-    return sticks_for(obs, ctx, c, ctx.params["push"]), None
+    return sticks_for(obs, ctx, c, ctx.params["push"], weave_accel(ctx)), None
 
 
 def ram(obs, ctx):

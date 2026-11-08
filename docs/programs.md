@@ -164,7 +164,7 @@ Observation fields left out hover level at 1 m. Optional: `mem`, `state` (the st
 | `liftoff` | Take-off by throttle search |
 | `patrol` | Timed-turn patrol without a position source |
 | `hunter_easy` / `hunter_medium` / `hunter_hard` | Arena hunters at three levels: search → approach → fire → evade, with a dodge when a contact closes fast (`dodge_s`, `threat_dist`, `threat_closing`) |
-| `rammer` | Ram an opponent, never fire: climb → search → pursue (proportional navigation on the nearest contact) → ram → recover; reads `obs.collision` when the simulator reports one |
+| `rammer` | Ram an opponent, never fire: climb → search → pursue (proportional navigation on the nearest contact, weaving across the line of sight so that a gunner without lead misses) → ram (full push inside `ram_dist`) → recover after `obs.collision` reports the contact |
 
 Examples are read only; duplicate one to change it.
 

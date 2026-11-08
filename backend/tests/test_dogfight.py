@@ -263,7 +263,11 @@ def test_smoke_duel_rammer_against_hunter_easy_runs_to_completion():
     states = next(a for a in trace["aircraft"] if a["program"] == "rammer")["states"]
     assert [s for _t, s in states][:2] == ["climb", "pursue"]
     assert not any(s["shooter"] == rammer["id"] for s in trace["shots"])
-    # collisions come from WP-A's collision world: with it, a ram shows in the trace; without it, none
+    # the collision world (07 §2): on this seed the rammer weaves through the gunfire and rams; at 2 m/s
+    # or more both aircraft go down, so the round is a draw
+    (ram,) = [e for e in trace["events"] if e["kind"] == "collision"]
+    assert ram["v_rel"] >= 2.0 and set(ram["crashed"]) == {"sim-1", "sim-2"}
+    assert rnd["winner"] is None
     kinds = {e["kind"] for e in trace["events"]}
     assert kinds <= {
         "hit",
@@ -288,7 +292,8 @@ def test_ram_easy_runs_and_the_rammer_reaches_the_target():
     assert set(metrics) >= {"rammed_s", "v_rel", "closest_m", "liftoff_s", "crashed"}
     assert metrics["closest_m"] < 1.0  # proportional navigation brings it onto the target
     assert not out["trace"]["shots"]  # no gun in this challenge
-    if metrics["rammed_s"] is not None:  # with WP-A's collisions the target goes down
-        assert result["passed"] and result["score"] >= 60.0
-    else:
-        assert not result["passed"] and result["score"] <= 40.0
+    # the collision world wrecks the target (and the rammer) at 2 m/s or more
+    assert metrics["rammed_s"] is not None and metrics["v_rel"] >= 2.0
+    assert result["passed"] and result["score"] >= 60.0
+    kinds = [e["kind"] for e in out["trace"]["events"]]
+    assert "collision" in kinds and kinds.count("crash") == 2
