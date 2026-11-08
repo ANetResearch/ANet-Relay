@@ -62,6 +62,7 @@ from .drivers.mavlink import MavlinkDriver
 from .drivers.sim import SimDriver
 from .errors import RelayError, err
 from .events import EventBus
+from .fleet_airframe import AirframeOps  # WP-2a airframe defects (06 §4)
 from .fleet_device import DeviceOps
 from .fleet_sim import SimOps
 from .flighthealth import FlightHealth
@@ -337,7 +338,7 @@ class Vehicle:
         return auth.controller(self.auth, claim is not None and sessions.alive(claim.session_id))
 
 
-class FleetService(DeviceOps, SimOps, ProcedureOps):
+class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps):
     def __init__(
         self,
         settings: Settings | None = None,
@@ -1282,6 +1283,7 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
         flavour: str = ARDUPILOT,
         position: bool = True,
         hover_assist: bool | None = None,
+        airframe: dict[str, Any] | None = None,  # WP-2a {preset | params, seed?}; None: sim_airframe_default
     ) -> list[str]:
         if flavour not in (ARDUPILOT, PX4):
             raise err("invalid_request", reason="autopilot must be ardupilot or px4")
@@ -1294,6 +1296,7 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
                 raise err("sim_limit", limit=SIM_LIMIT)
             added = []
             now = self.clock()
+            frame = self._resolve_airframe(airframe) if airframe else None  # WP-2a: one body, same airframe
             for _ in range(count):
                 n = next(i for i in range(1, SIM_LIMIT + 1) if f"sim-{i}" not in existing)
                 vid = f"sim-{n}"
@@ -1304,6 +1307,7 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
                     position_hz=SIM_POSITION_HZ,
                     name=vid,
                     **self._sim_options(hover_assist),  # WP-C: hover assist and turbulence (05 §5)
+                    airframe=frame or self._resolve_airframe(None),  # WP-2a: setting default, fresh seed each
                 )
                 v = Vehicle(vid, "sim", f"SIM-{n}", SimDriver(autopilot))
                 self._attach(v)
@@ -1316,7 +1320,11 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
                 self.events.emit(
                     "sim_added",
                     vid,
-                    data={"autopilot": flavour, "hover_assist": autopilot.hover_assist},
+                    data={
+                        "autopilot": flavour,
+                        "hover_assist": autopilot.hover_assist,
+                        "airframe": autopilot.airframe.ref(),  # WP-2a
+                    },
                     labels={"vehicle": v.label},
                 )
             return added

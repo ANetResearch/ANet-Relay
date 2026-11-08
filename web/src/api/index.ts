@@ -7,6 +7,9 @@ export type { RelayEvent, EventKind } from './events'
 export { PROCEDURE_EVENTS, isProcedureEvent } from './events'
 // LAN arena (05 §7.5, WP-D)
 export type { ArenaView } from './types'
+// WP-2a: simulator airframe defects (06 §4)
+export type { SimAirframe, AirframeParams, AirframeRef } from './types'
+export type { AirframeBody } from './rest'
 export { api, request, setTransport, httpTransport, RelayApiError, toApiError } from './rest'
 export type { RestTransport, Method, Auth, StickFrame, PossessInput, Ok, SkillName, PlanAction, PlanStep } from './rest'
 export { env, readEnv, setEnv, normalizeApiBase, streamUrlFor } from './env'

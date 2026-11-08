@@ -245,11 +245,49 @@ class CourseRunView(_Model):
     rings: list[Ring] = Field(description="rings placed in the vehicle's position frame")
 
 
+# WP-2a airframe defects (06 §4) ---------------------------------------------------------------------
+
+AirframePreset = Literal["ideal", "typical", "rough", "custom"]
+
+
+class AirframeRef(_Model):
+    """The snapshot's view of a simulator airframe: preset and seed only, never the values (06 §4)."""
+
+    preset: AirframePreset
+    seed: int
+
+
+class AirframeParams(_Model):
+    mass_kg: float = Field(description="airframe mass without payload, kg")
+    payload_kg: float = Field(description="payload, kg; take-off weight is mass_kg + payload_kg")
+    cg_offset_cm: list[float] = Field(description="[forward, right] centre-of-gravity offset, cm")
+    level_trim_deg: list[float] = Field(description="[roll, pitch] level calibration error, deg")
+    motor_gain: list[float] = Field(description="efficiency deviation of motors 1-4 (0.05 = +5 %)")
+    prop_damage: float = Field(description="damage of one propeller 0..1 (thrust loss, vibration)")
+    damaged_prop: int = Field(description="the damaged propeller's motor number 1-4")
+    imu_noise: float = Field(description="attitude, rate and acceleration noise multiplier")
+
+
+class SimAirframe(_Model):
+    """GET / PUT /sims/{vid}/airframe: the full values (operator or controller)."""
+
+    id: str
+    preset: AirframePreset
+    seed: int
+    params: AirframeParams
+    active: bool = Field(description="the defects act now (hover assist off)")
+    hover_throttle: float | None = Field(
+        description="level hover throttle 0..1 out of ground effect at full battery; null: cannot lift"
+    )
+    limits: dict[str, list[float]] = Field(description="[min, max] of every parameter")
+
+
 class SimView(_Model):
     """Simulator flight model (05 §5.2, WP-C); null on real aircraft."""
 
     hover_assist: bool = Field(description="altitude and position hold available; false: physical flight")
     turbulence: float = Field(description="turbulence strength 0..1 (acts only with hover assist off)")
+    airframe: AirframeRef  # WP-2a (06 §4)
 
 
 class ProcedureBrief(_Model):
@@ -393,6 +431,7 @@ EventKind = Literal[
     "refly_finished",
     "refly_failed",
     "sim_assist_changed",
+    "sim_airframe_changed",  # WP-2a (06 §4)
     # bench procedures (WP-B, 05 §4.4)
     "procedure_started",
     "procedure_step",
@@ -697,6 +736,31 @@ class SimsBody(_Body):
         default=None,
         description="false: physical flight, no altitude or position hold; omitted: setting sim_hover_assist",
     )
+    airframe: AirframeBody | None = Field(  # WP-2a
+        default=None, description="airframe defects for every new simulator; omitted: sim_airframe_default"
+    )
+
+
+class AirframeParamsBody(_Body):
+    """Any subset of the airframe values (WP-2a, 06 §4); ranges as in ``SimAirframe.limits``."""
+
+    mass_kg: float | None = None
+    payload_kg: float | None = None
+    cg_offset_cm: list[float] | None = None
+    level_trim_deg: list[float] | None = None
+    motor_gain: list[float] | None = None
+    prop_damage: float | None = None
+    damaged_prop: int | None = None
+    imu_noise: float | None = None
+
+
+class AirframeBody(_Body):
+    """``{preset | params, seed?}`` (WP-2a, 06 §4): a generated preset from a seed (fresh when omitted), or
+    values overlaid on the named preset or on the current airframe, which makes it ``custom``."""
+
+    preset: AirframePreset | None = None
+    params: AirframeParamsBody | None = None
+    seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
 
 
 class SimAssistBody(_Body):
@@ -745,4 +809,5 @@ EXPORTED = {
     "SessionOpened": SessionOpened,
     "ArenaView": ArenaView,
     "ArenaMessage": ArenaMessage,
+    "SimAirframe": SimAirframe,  # WP-2a
 }

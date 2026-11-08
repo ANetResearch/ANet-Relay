@@ -8,6 +8,8 @@ import { useRelay } from '@/store/relay'
 import { useBoot } from '@/app/boot'
 // WP-D: LAN arena stand-in (&arena=1 starts it enabled)
 import { startArenaFixture } from './arenaFixture'
+// WP-2a: airframe routes stand-in
+import { startAirframeFixture } from './airframeFixture'
 
 type V = Vehicle
 
@@ -65,7 +67,7 @@ function base(over: Partial<V> & Pick<V, 'id' | 'label' | 'kind'>): V {
     course: null,
     procedure: null, // bench procedure (WP-B)
     record_session: null,
-    sim: sim ? { hover_assist: true, turbulence: 0.3 } : null,
+    sim: sim ? { hover_assist: true, turbulence: 0.3, airframe: { preset: 'typical', seed: 4242 } } : null, // WP-2a airframe
     ...over,
   }
 }
@@ -196,6 +198,11 @@ export function startFixture(name: FixtureName): () => void {
 
   // WP-D: arena stand-in
   const arena = startArenaFixture()
+  // WP-2a: airframe stand-in; a change updates the snapshot reference and emits the event
+  const airframe = startAirframeFixture((id, preset, seed) => {
+    mutate(id, (x) => (x.sim ? { ...x, sim: { ...x.sim, airframe: { preset, seed } } } : x))
+    emit('sim_airframe_changed', id, { preset, seed, by: 'operator' })
+  })
 
   const transport: RestTransport = {
     async request(method, path, body) {
@@ -218,6 +225,8 @@ export function startFixture(name: FixtureName): () => void {
         emit('stop_all', null)
         return { ok: true }
       }
+      const frame = airframe.handle(method, path, body, (id) => fleet.vehicles.find((x) => x.id === id)?.sim?.hover_assist ?? true) // WP-2a
+      if (frame) return frame
       const assist = path.match(/^\/sims\/([^/]+)\/assist$/)
       if (assist && method === 'POST') {
         const id = decodeURIComponent(assist[1])

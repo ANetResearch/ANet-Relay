@@ -20,6 +20,7 @@ export interface RelaySchema {
   SessionOpened: SessionOpened
   ArenaView: ArenaView
   ArenaMessage: ArenaMessage
+  SimAirframe: SimAirframe
   UiState: UiState
   UiCommandMessage: UiCommandMessage
   UiStateMessage: UiStateMessage
@@ -453,6 +454,17 @@ export interface SimView {
    * turbulence strength 0..1 (acts only with hover assist off)
    */
   turbulence: number
+  airframe: AirframeRef
+}
+/**
+ * The snapshot's view of a simulator airframe: preset and seed only, never the values (06 §4).
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "AirframeRef".
+ */
+export interface AirframeRef {
+  preset: 'ideal' | 'typical' | 'rough' | 'custom'
+  seed: number
 }
 /**
  * The aircraft's bench procedure run, current or last (WP-B, 05 §4.4).
@@ -550,6 +562,7 @@ export interface Event {
     | 'refly_finished'
     | 'refly_failed'
     | 'sim_assist_changed'
+    | 'sim_airframe_changed'
     | 'procedure_started'
     | 'procedure_step'
     | 'procedure_waiting'
@@ -772,6 +785,70 @@ export interface ArenaLocal {
 export interface ArenaMessage {
   type: 'arena'
   data: ArenaView
+}
+/**
+ * GET / PUT /sims/{vid}/airframe: the full values (operator or controller).
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "SimAirframe".
+ */
+export interface SimAirframe {
+  id: string
+  preset: 'ideal' | 'typical' | 'rough' | 'custom'
+  seed: number
+  params: AirframeParams
+  /**
+   * the defects act now (hover assist off)
+   */
+  active: boolean
+  /**
+   * level hover throttle 0..1 out of ground effect at full battery; null: cannot lift
+   */
+  hover_throttle: number | null
+  /**
+   * [min, max] of every parameter
+   */
+  limits: {
+    [k: string]: number[] | undefined
+  }
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "AirframeParams".
+ */
+export interface AirframeParams {
+  /**
+   * airframe mass without payload, kg
+   */
+  mass_kg: number
+  /**
+   * payload, kg; take-off weight is mass_kg + payload_kg
+   */
+  payload_kg: number
+  /**
+   * [forward, right] centre-of-gravity offset, cm
+   */
+  cg_offset_cm: number[]
+  /**
+   * [roll, pitch] level calibration error, deg
+   */
+  level_trim_deg: number[]
+  /**
+   * efficiency deviation of motors 1-4 (0.05 = +5 %)
+   */
+  motor_gain: number[]
+  /**
+   * damage of one propeller 0..1 (thrust loss, vibration)
+   */
+  prop_damage: number
+  /**
+   * the damaged propeller's motor number 1-4
+   */
+  damaged_prop: number
+  /**
+   * attitude, rate and acceleration noise multiplier
+   */
+  imu_noise: number
 }
 /**
  * What the Relay window currently shows (04 §3.1).

@@ -102,6 +102,8 @@ class Settings:
     # WP-C simulator flight model (05 §5): the hover-assist default for new simulators and turbulence 0..1.
     sim_hover_assist: bool = True
     sim_turbulence: float = 0.3
+    # WP-2a airframe defects (06 §4): the preset new simulators take (ideal | typical | rough), new seed each.
+    sim_airframe_default: str = "typical"
 
     RESTART_FIELDS: ClassVar[tuple[str, ...]] = ("listen_port",)
     READ_ONLY: ClassVar[dict[str, float]] = {"stick_timeout_s": STICK_TIMEOUT_S}
@@ -163,6 +165,8 @@ class Settings:
             return "possess_mode"
         if not 0.0 <= self.sim_turbulence <= 1.0:  # WP-C
             return "sim_turbulence"
+        if self.sim_airframe_default not in ("ideal", "typical", "rough"):  # WP-2a
+            return "sim_airframe_default"
         if not 1 <= self.retention_days <= 3650:
             return "retention_days"
         for name in ("listen_port", "bridge_port"):
