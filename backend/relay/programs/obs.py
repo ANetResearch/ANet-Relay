@@ -14,6 +14,11 @@ assigns teams (``ProgramService.teams``).
 
 Body accelerations come from ``SCALED_IMU`` (mG) or ``HIGHRES_IMU`` (m/s²) when the aircraft streams one, as
 specific force in (forward, right, up): about +9.81 on ``az`` at rest.
+
+Simulator airframe defects (06 §4, WP-2a) reach a program only through physics: the simulator's ATTITUDE is
+the board's estimate (level error, IMU noise), SCALED_IMU carries the mount error and vibration noise, the
+throttle and the motion follow mass, centre of gravity and motor gains. The builder never reads the airframe
+or ``vehicle.sim`` (its keys are those of ``host.TEST_DEFAULTS``), so the values have to be flown out.
 """
 
 from __future__ import annotations

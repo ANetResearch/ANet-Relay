@@ -246,7 +246,10 @@ def test_message_rates_follow_the_program(svc, stepper):
 
 def test_observation_fields(svc, stepper):
     (a, b), session, agent = boot(svc, stepper, count=2)
-    svc.programs.deploy(a, agent, {"program": "hover_trim", "sensors": {"position": "uwb"}, "seed": 3})
+    ideal = {"preset": "ideal"}  # WP-2a: no mount error, so the resting accelerometer reads level
+    svc.programs.deploy(
+        a, agent, {"program": "hover_trim", "sensors": {"position": "uwb"}, "seed": 3, "airframe": ideal}
+    )
     stepper.run(1.0, renew=[session])
     v = svc.vehicles[a]
     run = svc.programs.runs[a]
@@ -280,7 +283,8 @@ def test_same_seed_same_flight(svc, stepper, clock):
         svc.possess(vid, "keyboard")
         svc.arm(vid, Actor.operator("keyboard"), True)
         svc.release(vid)
-        svc.programs.deploy(vid, OP, {"program": "hover_trim", "seed": 11})
+        airframe = {"preset": "typical", "seed": 5}  # WP-2a: the airframe is part of the scenario (06 §3.4)
+        svc.programs.deploy(vid, OP, {"program": "hover_trim", "seed": 11, "airframe": airframe})
         stepper.run(5.0)
         results.append(round(z(svc, vid), 6))
         svc.remove_sims([vid])

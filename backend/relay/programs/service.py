@@ -353,6 +353,7 @@ class ProgramService:
             sensors=body.get("sensors"),
             arena=body.get("arena"),
             seed=body.get("seed"),
+            airframe=body.get("airframe"),  # WP-2a seam (06 §3.3)
         )
 
     def deploy_source(
@@ -368,8 +369,14 @@ class ProgramService:
         sensors: Any = None,
         arena: Any = None,
         seed: Any = None,
+        airframe: Any = None,
     ) -> dict[str, Any]:
-        """Deploy source directly (scenarios and evaluators); ``program`` needs ``id`` and ``name``."""
+        """Deploy source directly (scenarios and evaluators); ``program`` needs ``id`` and ``name``.
+
+        ``airframe`` (simulators only, 06 §3.3 / §4): ``{preset | params, seed?}`` fitted to the simulator
+        before the program starts, as ``PUT /sims/{vid}/airframe`` would. The program never sees the values:
+        defects reach ``obs`` only through the simulated sensors (ATTITUDE, SCALED_IMU, throttle, motion).
+        """
         if mode not in MODES:
             raise err("invalid_request", reason="mode must be pilot or copilot")
         result = validator.validate(source)
@@ -390,6 +397,8 @@ class ProgramService:
             seed = secrets.randbelow(2**31)
         elif isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**63:
             raise err("invalid_request", reason="seed must be a non-negative integer")
+        if airframe is not None and not isinstance(airframe, dict):
+            raise err("invalid_request", reason="airframe must be an object")
         self._ensure_host()
 
         def run() -> dict[str, Any]:
@@ -400,6 +409,11 @@ class ProgramService:
                 self._check_real(v)
             if v.kind == "sim" and v.state["crashed"]:
                 raise err("crashed")
+            fit = None
+            if airframe is not None:  # WP-2a: resolve (and reject) before anything changes
+                if v.kind != "sim":
+                    raise err("sim_only")
+                fit = self.fleet._resolve_airframe(airframe, v.driver.sim.airframe)
             if self.host is None or not self.host.alive:
                 raise err("program_host_unavailable", reason="restarting")
             now = self.fleet.clock()
@@ -419,6 +433,8 @@ class ProgramService:
                     reason=str(reply.get("error") or "unknown"),
                     problems=reply.get("problems") or [],
                 )
+            if fit is not None:
+                self.fleet._apply_airframe(v, fit, actor)
             # the program is now the stick source: stop skills, plans and earlier sticks
             self.fleet._stop_skill(v, "superseded by a program", "被机载程序取代")
             self.fleet._cancel_plan(v, "superseded by a program", "被机载程序取代")

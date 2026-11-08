@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import socket
 import sys
 from pathlib import Path
@@ -86,6 +87,8 @@ def svc(clock: FakeClock):
         history=History(None),
         operator_token="op-token",
     )
+    # WP-2a: new simulators take the typical airframe; seed them repeatably so flights replay exactly
+    service.airframe_seed_source = itertools.count(1).__next__
     yield service
     service.shutdown()
 

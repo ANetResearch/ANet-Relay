@@ -85,19 +85,23 @@ class AirframeOps:
 
         def run() -> dict[str, Any]:
             v = self._airframe_vehicle(vid, actor, app_control)
-            sim = v.driver.sim
-            af = self._resolve_airframe(spec, sim.airframe)
-            sim.set_airframe(af)
-            self.events.emit(
-                "sim_airframe_changed",
-                v.id,
-                data={"preset": af.preset, "seed": af.seed, "by": actor.kind},
-                labels={
-                    "vehicle": v.label,
-                    "preset_en": PRESET_EN[af.preset],
-                    "preset_zh": PRESET_ZH[af.preset],
-                },
-            )
+            self._apply_airframe(v, self._resolve_airframe(spec, v.driver.sim.airframe), actor)
             return self._airframe_view(v)
 
         return self.call(run)
+
+    def _apply_airframe(self, v: Any, af: Airframe, actor: Actor) -> None:
+        """Fit ``af`` to simulator ``v`` and report it (fleet thread; the caller checked permission).
+
+        Also the seam for scenarios: a program deployment's ``airframe`` (06 §3.3) lands here."""
+        v.driver.sim.set_airframe(af)
+        self.events.emit(
+            "sim_airframe_changed",
+            v.id,
+            data={"preset": af.preset, "seed": af.seed, "by": actor.kind},
+            labels={
+                "vehicle": v.label,
+                "preset_en": PRESET_EN[af.preset],
+                "preset_zh": PRESET_ZH[af.preset],
+            },
+        )

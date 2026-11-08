@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .schemas import AirframeBody  # WP-2a
+
 
 class _Body(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -92,6 +94,10 @@ class DeployBody(_Body):
     sensors: Sensors | None = Field(default=None, description="simulator scenario sensors (06 §3.3)")
     arena: ArenaBox | None = None
     seed: int | None = Field(default=None, ge=0, description="ctx.rng and sensor noise; random when omitted")
+    # WP-2a (06 §3.3, §4): simulator airframe for this run; never visible to the program
+    airframe: AirframeBody | None = Field(
+        default=None, description="simulators only: airframe defects fitted before the program starts"
+    )
 
 
 class AllowBody(_Body):
