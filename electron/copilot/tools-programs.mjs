@@ -123,7 +123,7 @@ export function programTools(relay) {
     defineTool(
       "program_get",
       "Read program",
-      "Read a program: source, PARAMS, unit tests and the recent revisions (author, note). The source comes as source_numbered, each line prefixed with its number and '| ' for line patches; those prefixes are not part of the code. numbered: false returns the plain source. rev reads an older revision.",
+      "Read a program: source, PARAMS, unit tests and the recent revisions, newest first (author, note). The source comes as source_numbered, each line prefixed with its number and '| ' for line patches; those prefixes are not part of the code. numbered: false returns the plain source. rev reads an older revision.",
       Type.Object({ program: PID, rev: opt(Type.Integer({ minimum: 1 })), numbered: opt(Type.Boolean()) }),
       async (p) => {
         const { program } = await call("GET", `/programs/${enc(p.program)}`);
@@ -143,7 +143,10 @@ export function programTools(relay) {
           ...body,
           params,
           tests: program.tests,
-          revisions: revisions.slice(-REVISIONS_SHOWN).map((r) => ({ rev: r.rev, author: r.author, note: r.note, t: r.t })),
+          revisions: [...revisions]
+            .sort((a, b) => b.rev - a.rev)
+            .slice(0, REVISIONS_SHOWN)
+            .map((r) => ({ rev: r.rev, author: r.author, note: r.note, t: r.t })),
         };
       },
     ),

@@ -236,7 +236,7 @@ test("program_get numbers the source for line patches; an older revision can be 
   const current = out(await tools.program_get.execute("1", { program: "p1" }));
   assert.equal(current.source_numbered, "1| def step(obs, ctx):\n2|     return Sticks()");
   assert.equal(current.lines, 2);
-  assert.deepEqual(current.revisions.map((r) => r.rev), [1, 2]);
+  assert.deepEqual(current.revisions.map((r) => r.rev), [2, 1], "newest first");
   assert.ok(!("source" in current.revisions[0]), "revisions come without their source");
   const old = out(await tools.program_get.execute("2", { program: "p1", rev: 1, numbered: false }));
   assert.equal(old.source, "old");
