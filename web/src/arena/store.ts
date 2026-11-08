@@ -94,21 +94,10 @@ export function watchArenaEvents(): () => void {
 
 // ---------------------------------------------------------------- v0.5 view fields (WP-C)
 
-/**
- * v0.5 additions to the arena stream view (07 §4, WP-B): the running match and `board_rev`, an integer that changes
- * whenever the leaderboard changes, so the window refetches GET /arena/leaderboard only then. Read tolerantly: an
- * older backend sends neither, and the generated ArenaView type gains them only once the schema is regenerated.
- */
-export interface ArenaViewV5 {
-  match?: { id?: unknown; started_at?: unknown; ends_at?: unknown; running?: unknown } | null
-  board_rev?: number | null
-}
-
-const v5 = (v: ArenaView | null): ArenaViewV5 => (v ?? {}) as ArenaViewV5
-
-/** The board revision of the view (null when the backend sends none). */
+/** The board revision of the view (07 §4): it changes whenever the leaderboard changes, so the window refetches
+ * GET /arena/leaderboard only then. Null without a view (or from a backend that sends none). */
 export function boardRevOf(v: ArenaView | null): number | null {
-  const r = v5(v).board_rev
+  const r = v?.board_rev
   return typeof r === 'number' && Number.isFinite(r) ? r : null
 }
 
@@ -117,8 +106,8 @@ export function useBoardSignal(): string {
   return useArena((s) => {
     const v = s.view
     if (!v) return ''
-    const m = v5(v).match
-    return `${v.enabled ? 1 : 0}|${boardRevOf(v) ?? ''}|${m ? `${String(m.id ?? '')}:${m.running === true ? 1 : 0}:${String(m.ends_at ?? '')}` : ''}`
+    const m = v.match ?? null
+    return `${v.enabled ? 1 : 0}|${boardRevOf(v) ?? ''}|${m ? `${m.id}:${m.running ? 1 : 0}:${m.ends_at}` : ''}`
   })
 }
 

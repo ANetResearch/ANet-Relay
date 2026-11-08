@@ -6,7 +6,7 @@ export type { ProcedureOptions } from './rest'
 export type { RelayEvent, EventKind } from './events'
 export { PROCEDURE_EVENTS, isProcedureEvent } from './events'
 // LAN arena (05 §7.5, WP-D)
-export type { ArenaView } from './types'
+export type { ArenaView, ArenaMatch } from './types'
 // WP-2a: simulator airframe defects (06 §4)
 export type { SimAirframe, AirframeParams, AirframeRef } from './types'
 export type { AirframeBody } from './rest'

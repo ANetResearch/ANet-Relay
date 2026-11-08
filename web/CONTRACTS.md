@@ -459,7 +459,7 @@ loading; buttons keep `Spinner`.
   `crash {vehicle, point, reason}`; `traceImpacts` kinds `hit | explosion | spark | dust` (a shoot-down is an explosion).
 - **Leaderboard** (`arena/LeaderboardPanel.tsx`, mounted by `ArenaHud` in place of the v0.4 scoreboard, which stays as
   the fallback when `GET /arena/leaderboard` answers 404): `arena/board.ts` refetches on `board_rev` / `match` changes of
-  the arena view (`useBoardSignal`, read tolerantly from `ArenaViewV5`) and on a tab switch; `arena/leaderboard.ts`
+  the arena view (`useBoardSignal`, from the generated `ArenaView.match` and `board_rev`) and on a tab switch; `arena/leaderboard.ts`
   normalises, sorts and formats. REST helpers in `arena/api.ts` (`leaderboard`, `matchStart`, `matchStop`, `dogfight`,
   `dogfightStart`, `dogfightStop`).
 - **Dogfight dialog** (`arena/DogfightDialog.tsx`, `openDogfightDialog()`), from the chevron menu beside the top-bar

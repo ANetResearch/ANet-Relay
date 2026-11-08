@@ -5,7 +5,7 @@
 // board_rev) and the events the stage turns into voxel effects, and it answers the leaderboard, match and dogfight
 // scenario routes. `&t0=<s>` starts the loop at that second (screenshots of a given moment). The choreography is a
 // pure function of the loop time (dogfightAt; dogfightFixture.test.ts). Nothing here exists in production builds.
-import { RelayApiError, type ArenaView, type Vehicle } from '@/api'
+import { RelayApiError, type ArenaMatch, type ArenaView, type Vehicle } from '@/api'
 import { fx } from '@/arena/fx'
 import { useArena } from '@/arena/store'
 import type { BoardBy } from '@/arena/leaderboard'
@@ -250,7 +250,7 @@ function localVehicle(host: DogfightHost, c: CraftState, now: number, startedAt:
   })
 }
 
-function boardBody(by: BoardBy, rows: Obj[], match: Obj | null): Obj {
+function boardBody(by: BoardBy, rows: Obj[], match: ArenaMatch | null): Obj {
   return { by, match, rows }
 }
 
@@ -268,7 +268,7 @@ export function startDogfightFixture(host: DogfightHost): { vehicles(now: number
     const e = now - t0
     return { loop: Math.floor(e / DF_PERIOD), t: e - Math.floor(e / DF_PERIOD) * DF_PERIOD }
   }
-  const match = (now: number): Obj => ({ id: `m-${Math.round(matchStart)}`, started_at: matchStart, ends_at: matchStart + MATCH_S, running: running && now < matchStart + MATCH_S })
+  const match = (now: number): ArenaMatch => ({ id: (Math.round(matchStart) % 0xffffffff).toString(16).padStart(8, '0'), started_at: matchStart, ends_at: matchStart + MATCH_S, running: running && now < matchStart + MATCH_S })
   const hp = new Map<string, number>()
 
   const vehicles = (now: number) => {
