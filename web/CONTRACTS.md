@@ -421,7 +421,10 @@ loading; buttons keep `Spinner`.
   tab, challenge, Run-tab aircraft, judge and duel jobs). `isDirty(state)`, `testsOf(program)`.
 - **API:** `lab/api.ts` `labApi.*` covers the WP-1 program routes and the WP-2b routes (`/challenges`,
   `/challenges/{id}/submit`, `/jobs/{id}`, `/duels`, `/ladder`, `/traces/{id}`). WP-2b bodies go through
-  `normChallenges`, `normJob`, `normLadder`; the expected shapes are in the file header. `RestTransport` methods now
+  `normChallenges`, `normJob`, `normLadder`; the backend shapes (`schemas_judge.py`) are in the file header.
+  `lab/trace.ts fromJudgeTrace` converts the evaluator's version 1 trace for `parseTrace`. WP-5:
+  `lab/judgeWire.test.ts` checks both against `lab/fixtures/judge-bodies.json`, written from real responses by
+  `backend/tools/judge_fixture.py` (rerun it when a judge response shape changes). `RestTransport` methods now
   include `PATCH` (live parameters).
 - **Replay of several aircraft:** `useReplay` gains `crafts: ReplayCraft[] | null` (`{id, label, sim, frame, program,
   state, hp}`). While set, the stage places every craft by `frame.x/y/z` (`stage/live.ts`), `Fleet` mounts one

@@ -84,6 +84,27 @@ test('copilot: settings, a sequence on a simulator, approval for a real aircraft
   const { page } = r
   const shots = path.join(ARTIFACTS, 'copilot')
 
+  // 06 §9: count every safeStorage (system keychain) call in the main process from here on
+  const spied = await r.app.evaluate(({ safeStorage }) => {
+    const g = globalThis as unknown as { __keychainCalls: string[] }
+    g.__keychainCalls = []
+    const target = safeStorage as unknown as Record<string, unknown>
+    let n = 0
+    for (const k of ['isEncryptionAvailable', 'isAsyncEncryptionAvailable', 'encryptString', 'decryptString', 'encryptStringAsync', 'decryptStringAsync', 'getSelectedStorageBackend', 'setUsePlainTextEncryption']) {
+      const f = target[k]
+      if (typeof f !== 'function') continue
+      try {
+        Object.defineProperty(target, k, { configurable: true, writable: true, value: (...a: unknown[]) => (g.__keychainCalls.push(k), (f as (...x: unknown[]) => unknown).apply(safeStorage, a)) })
+        n++
+      } catch {
+        // not replaceable: the count below then fails the test rather than passing unchecked
+      }
+    }
+    return n
+  })
+  expect(spied).toBeGreaterThan(0)
+  const keychainCalls = () => r.app.evaluate(() => (globalThis as unknown as { __keychainCalls: string[] }).__keychainCalls)
+
   // settings: endpoint, model and key; the key never comes back to the renderer
   await page.locator('[data-copilot-toggle]').click()
   const cp = await copilotPage(r.app)
@@ -97,6 +118,15 @@ test('copilot: settings, a sequence on a simulator, approval for a real aircraft
   const cfg = await page.evaluate(() => (window as unknown as { relay: { copilot: { getConfig(): Promise<Record<string, unknown>> } } }).relay.copilot.getConfig())
   expect(cfg).toMatchObject({ baseUrl: llm.url, model: 'fake-model', hasKey: true, keyHint: 'abcd', keyStorage: 'file', keyMigration: null })
   expect(JSON.stringify(cfg)).not.toContain('sk-test')
+  // the key went to the app data folder (AES-256-GCM, owner-only files), not to the system keychain
+  await expect(page.locator('[data-copilot-keychain]')).toHaveAttribute('aria-checked', 'false')
+  await expect(page.locator('[data-copilot-key-storage="file"]')).toBeVisible()
+  const secrets = path.join(r.dataDir, 'copilot-secrets.json')
+  expect(fs.existsSync(secrets)).toBe(true)
+  expect(fs.readFileSync(secrets, 'utf8')).not.toContain('sk-test')
+  if (process.platform !== 'win32') expect(fs.statSync(secrets).mode & 0o777).toBe(0o600)
+  expect(JSON.parse(fs.readFileSync(path.join(r.dataDir, 'copilot.json'), 'utf8')).keyEnc).toBeUndefined()
+  expect(await keychainCalls()).toEqual([])
   await page.screenshot({ path: path.join(shots, '01-settings.png') })
   await page.keyboard.press('Escape')
 
@@ -112,6 +142,8 @@ test('copilot: settings, a sequence on a simulator, approval for a real aircraft
   await cp.screenshot({ path: path.join(shots, '02-running.png') })
   await expect(cp.locator('[data-tool="relay_plan"][data-state="ok"]')).toBeVisible({ timeout: 90000 })
   await expect(cp.getByText('Finished. The sequence was flown')).toBeVisible({ timeout: 15000 })
+  // building the agent and running it read the key from the file store, still without the keychain
+  expect(await keychainCalls()).toEqual([])
   const events = await rest<{ events: { kind: string; data?: Record<string, unknown> }[] }>(r, 'GET', '/events?after=0&limit=1000&tail=true')
   expect(events.events.some((e) => e.kind === 'plan_finished')).toBe(true)
   expect(events.events.some((e) => e.kind === 'claim_started' && e.data?.name === 'copilot')).toBe(true)

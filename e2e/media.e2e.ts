@@ -27,6 +27,8 @@ test('README media', async () => {
   let r: RelayApp | undefined
   try {
     r = await launchApp({ size: { width: 1600, height: 900 } })
+    // these scripted agents fly with skills: agent flight level full (06 §5; the default sticks refuses them)
+    await rest(r, 'PUT', '/settings', { agent_flight_level: 'full' })
     const app = r
     // full-quality stage even on a software renderer (stage/scene/gpu.ts capture mode)
     await app.page.evaluate(() => localStorage.setItem('relay.stage.gl', 'hq'))

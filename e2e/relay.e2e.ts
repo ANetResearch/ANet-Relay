@@ -62,6 +62,8 @@ test('03 §14 scenario: boot, possess, relay hand-back, gamepad, course, scan, b
 
     await test.step('boot sequence', async () => {
       r = await launchApp({ size: { width: 1440, height: 900 }, bridgePort, scan: `127.0.0.0/29:${httpPort}` })
+      // these scripted agents fly with skills: agent flight level full (06 §5; the default sticks refuses them)
+      await rest(r, 'PUT', '/settings', { agent_flight_level: 'full' })
       await shot(r.page, 'boot')
       await expect(r.page.locator('[data-fleet-panel]')).toBeVisible({ timeout: 30000 })
       await expect(r.page.getByText('No aircraft yet')).toBeVisible()

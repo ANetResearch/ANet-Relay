@@ -185,6 +185,8 @@ for (const size of SIZES) {
         const appHttp = await freeTcpPort()
         const r = await launch({ bridgePort, listenPort, httpPort: appHttp, scan: `127.0.0.0/30:${httpPort}` })
         await until(async () => (await fetch(`${r.apiBase}/health`)).ok, 'backend health', 30000)
+        // these scripted agents fly with skills: agent flight level full (06 §5; the default sticks refuses them)
+        await rest(r, 'PUT', '/settings', { agent_flight_level: 'full' })
         const { page } = r
         const card = (id: string) => page.locator(`[data-fleet-card="${id}"]`)
         const fleet = async () => rest<{ vehicles: { id: string; label: string; armed: boolean; controller: string; host: string | null; skill: { id: number; state: string } | null; position: { x: number; y: number; z: number } | null }[]; safety_volume: { x: number; y: number; z: number } }>(r, 'GET', '/fleet', undefined, 'none')
