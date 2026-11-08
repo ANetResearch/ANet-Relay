@@ -144,6 +144,26 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     "peer_left": ("{callsign} left the arena.", "{callsign} 已离开联机场地。"),
     "arena_hit": ("{vehicle} {detail}.", "{vehicle} {detail}。"),
     "arena_down": ("{vehicle} {detail}.", "{vehicle} {detail}。"),
+    # WP-1 onboard programs (06 §2.6); {detail} is filled from detail_en / detail_zh
+    "program_started": (
+        "{vehicle} started program {name} (revision {rev}).",
+        "{vehicle} 开始运行程序 {name}（版本 {rev}）。",
+    ),
+    "program_stopped": (
+        "{vehicle} program {name} stopped: {detail}.",
+        "{vehicle} 的程序 {name} 已停止：{detail}。",
+    ),
+    "program_paused": (
+        "{vehicle} program {name} paused: {detail}.",
+        "{vehicle} 的程序 {name} 已暂停：{detail}。",
+    ),
+    "program_resumed": ("{vehicle} resumed program {name}.", "{vehicle} 恢复运行程序 {name}。"),
+    "program_faulted": (
+        "{vehicle} program {name} faulted: {detail}. Control returned to the safety layer.",
+        "{vehicle} 的程序 {name} 故障：{detail}。控制已交还安全层。",
+    ),
+    "program_host_restarted": ("The program host was restarted: {reason}.", "程序宿主已重启：{reason}。"),
+    "program_gate": ("{vehicle}: onboard programs {detail}.", "{vehicle}：机载程序{detail}。"),
 }
 
 INPUT_LABELS = {"keyboard": ("keyboard", "键盘"), "screen": ("on-screen sticks", "屏幕摇杆")}

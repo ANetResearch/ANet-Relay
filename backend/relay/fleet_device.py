@@ -13,7 +13,10 @@ from collections.abc import Callable
 from typing import Any
 
 from . import authority as auth
-from . import device
+from . import (
+    device,
+    flight_level,  # WP-1 (06 §5)
+)
 from .authority import Actor
 from .errors import err
 from .mav import decode, modes
@@ -315,6 +318,8 @@ class DeviceOps:
         timeout = _number(timeout_s, "timeout_s", 0.1, 10.0)
         cmd = entry["id"]
 
+        flight_level.check_command(self.settings, actor, entry["name"])  # WP-1 (06 §5): sticks_only
+
         def send(v: Any, now: float) -> dict[str, Any]:
             self._gate(v, actor)
             self._require_link(v)
@@ -327,6 +332,7 @@ class DeviceOps:
             if cmd in (M.MAV_CMD_DO_MOTOR_TEST, M.MAV_CMD_ACTUATOR_TEST):
                 self._raw_motor_limits(v, cmd, values)
             if cmd in MOTION_COMMANDS:
+                self.programs.on_superseded(v)  # WP-1
                 self._stop_skill(v, "superseded by a raw command", "被原始命令取代")
             if use_int:
                 v.driver.command_int(cmd, 0 if frame is None else int(frame), tuple(values))
@@ -546,6 +552,7 @@ class DeviceOps:
             ax[key] = _number(value, key, 0.0 if key == "throttle" else -1.0, 1.0)
         if not chans and not ax:
             raise err("invalid_request", reason="give channels or axes")
+        flight_level.check_rc(self.settings, actor, chans, ax)  # WP-1 (06 §5): stick channels only
 
         def run() -> dict[str, Any]:
             v = self._vehicle(vid)
@@ -555,6 +562,7 @@ class DeviceOps:
                 raise err("invalid_request", reason="PX4 manual control carries channels 1 to 10")
             now = self.clock()
             first = v.rc_frame is None
+            self.programs.on_superseded(v)  # WP-1: an RC override replaces the program
             self._stop_skill(v, "superseded by an RC override", "被遥控通道覆盖取代")
             v.sticks = None
             v.rc_frame = {"channels": chans, "axes": ax, "t": now}

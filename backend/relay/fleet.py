@@ -25,7 +25,14 @@ from typing import Any, TypeVar
 
 from . import authority as auth
 from . import course as coursemod
-from . import device, plans, preflight, refly, skills
+from . import (
+    device,
+    flight_level,  # WP-1: agent flight level (06 §5)
+    plans,
+    preflight,
+    refly,
+    skills,
+)
 from .alerts import AlertBook, Condition
 from .authority import Actor, Authority
 from .config import (
@@ -75,6 +82,7 @@ from .model import INPUT_KINDS, Calibration, Capability, Confirmed, Signs, Stick
 from .netinfo import local_networks, on_bridge_ap, scan_hosts
 from .peers.game import Arena
 from .procedures import ProcedureOps
+from .programs.service import ProgramService  # WP-1: onboard programs (06 §2)
 from .sessions import Session, SessionManager
 from .sim.autopilot import ARDUPILOT, PX4, SimAutopilot
 
@@ -199,6 +207,9 @@ class Vehicle:
         self.timesync_at = 0.0
         self.created = 0.0
         self.clock: Callable[[], float] = time.monotonic
+        # WP-1 onboard programs (06 §2.6): the current or last program run, and the real-aircraft gate
+        self.program: Any = None
+        self.programs_allowed = False
 
     # Host protocol for skills ---------------------------------------------------
 
@@ -333,6 +344,8 @@ class Vehicle:
         return max(1, math.ceil(voltage / 4.35))
 
     def controller(self, sessions: SessionManager) -> str:
+        if self.program is not None and self.auth.possession is None and self.program.flying:
+            return "program"  # WP-1: a pilot-mode program holds the sticks (06 §2.6)
         claim = self.auth.claim
         return auth.controller(self.auth, claim is not None and sessions.alive(claim.session_id))
 
@@ -404,6 +417,8 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
         # LAN arena (05 §7, WP-D): its own UDP socket and rules; peers never enter self.vehicles
         self.arena = Arena(self, network=listen)
         self.arena.apply_settings()
+        # WP-1 onboard programs (06 §2): store, program host and the 50 Hz program tick
+        self.programs = ProgramService(self)
         self._build_snapshot(self.clock())
 
     # ====================================================================== lifecycle
@@ -432,6 +447,7 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
         if self.link is not None:
             self.link.close()
         self.arena.close()
+        self.programs.close()  # WP-1
         self.history.close()
 
     def _shutdown_vehicles(self) -> None:
@@ -527,6 +543,10 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
             log.exception("arena tick failed")
         if now >= self._next["stick"]:
             self._next["stick"] = max(self._next["stick"] + 1.0 / STICK_HZ, now)
+            try:
+                self.programs.tick(now)  # WP-1: programs write their sticks before they are sent
+            except Exception:
+                log.exception("program tick failed")
             for v in list(self.vehicles.values()):
                 self._stick_tick(v, now)
                 self._device_tick(v, now)
@@ -720,6 +740,7 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
             return
         v.crash_event = True
         self.events.emit("crashed", v.id, data={"text": text}, labels={"vehicle": v.label})
+        self.programs.on_vehicle_stop(v, "crashed")  # WP-1
         self._abort_course(v, "crashed", now)
         if v.skill is not None and v.skill.active:
             v.skill.stop("crashed", "坠毁")
@@ -758,9 +779,11 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
         elif state == "lost":
             self.events.emit("link_lost", v.id, labels=labels)
             self._stop_control(v, "link lost", now)
+            self.programs.on_link(v, state)  # WP-1: the real-aircraft program gate resets
             self._abort_course(v, "link_lost", now)
         elif state == "offline":
             self.events.emit("vehicle_offline", v.id, labels=labels)
+            self.programs.on_link(v, state)  # WP-1
             self._close_segment(v, wall)
             if v.record_session is not None:
                 self.history.end_session(v.record_session, wall)
@@ -1052,6 +1075,8 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
             who = v.auth.possession.source
         elif controller == "agent" and v.auth.claim is not None:
             who = v.auth.claim.name
+        elif controller == "program" and v.program is not None:
+            who = v.program.name  # WP-1: the timeline shows PROGRAM · <name>
         current = v.segment
         if current is not None and (current[0], current[1]) == (controller, who):
             return
@@ -1138,6 +1163,7 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
 
     def _stop_control(self, v: Vehicle, reason: str, now: float) -> None:
         """Stop every stick source on this vehicle (skill, explicit sticks)."""
+        self.programs.on_vehicle_stop(v, reason)  # WP-1: link loss, removal, reset and shutdown stop programs
         self._stop_skill(v, reason, reason)
         v.sticks = None
         v.rc_frame = None
@@ -1173,6 +1199,7 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
                 if v.motor_seq is not None or now < v.motor_until:
                     self._stop_motors(v)
                 v.stop_seq = {"until": now + STOP_THROTTLE_S}
+        self.programs.on_authority(v, outcome)  # WP-1: possession pauses, stop and claim end stop programs
         self._update_segment(v, v.controller(self.sessions), wall)
 
     def _possess_mode(self, v: Vehicle, now: float) -> None:
@@ -1562,6 +1589,7 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
                 source="human" if actor.kind == "operator" else "agent",
                 conn=conn,
             )
+            self.programs.on_session_sticks(v, actor)  # WP-1: a session's sticks supersede its program
             if v.skill is not None and v.skill.active:
                 if actor.kind == "session":
                     self._stop_skill(v, "superseded by sticks", "被杆量指令取代")
@@ -1667,6 +1695,7 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
             self._require_link(v)
             if name not in modes.available_modes(v.autopilot):
                 raise err("unknown_mode", mode=name, modes=modes.available_modes(v.autopilot))
+            flight_level.check_mode(self.settings, actor, v.autopilot, name)  # WP-1 (06 §5)
             self._stop_skill(v, "mode changed by controller", "控制者切换了模式")
             v.driver.set_mode(name)
 
@@ -1693,13 +1722,15 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
             raise err("unknown_skill", skill=name, skills=list(skills.SKILL_NAMES))
         params = dict(params or {})
 
+        safety = flight_level.check_skill(self.settings, actor, name)  # WP-1 (06 §5): 403 sticks_only
+
         def run() -> dict[str, Any]:
             v = self._vehicle(vid)
             self._check_control(v, actor)
             self._require_link(v)
             prepared, target_local = self._prepare_skill(v, name, params)
             self._cancel_plan(v, "superseded by a skill", "被单独的技能取代")
-            skill = self._start_skill(v, name, prepared, target_local)
+            skill = self._start_skill(v, name, prepared, target_local, safety=safety)
             return {"id": vid, "skill": skill.view()}
 
         return self.call(run)
@@ -1820,8 +1851,10 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
         name: str,
         params: dict[str, Any],
         target_local: tuple[float, float, float] | None,
+        safety: bool = False,
     ) -> skills.Skill:
         now = self.clock()
+        self.programs.on_superseded(v)  # WP-1: a skill, plan or re-fly replaces the program
         self._stop_skill(v, "superseded", "被新技能取代")
         v.sticks = None
         v.rc_frame = None
@@ -1830,12 +1863,10 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
         self._skill_seq += 1
         skill.id = self._skill_seq
         v.skill = skill
-        self.events.emit(
-            "skill_started",
-            v.id,
-            data={"skill": name, "skill_id": skill.id, "params": _public(skill.params)},
-            labels={"vehicle": v.label, "skill": name},
-        )
+        data = {"skill": name, "skill_id": skill.id, "params": _public(skill.params)}
+        if safety:
+            data["safety"] = True  # WP-1 (06 §5): land kept as a safety action at the sticks level
+        self.events.emit("skill_started", v.id, data=data, labels={"vehicle": v.label, "skill": name})
         return skill
 
     # ====================================================================== plans
@@ -1850,6 +1881,7 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
         max_steps: int = plans.MAX_STEPS,
     ) -> dict[str, Any]:
         normalised = plans.normalise_steps(steps, max_steps)
+        flight_level.check_plan(self.settings, actor, normalised)  # WP-1 (06 §5)
 
         def run() -> dict[str, Any]:
             v = self._vehicle(vid)
@@ -1889,8 +1921,10 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
             if plan is None or not plan.running:
                 raise err("no_plan")
             self._cancel_plan(v, "cancelled", "已取消")
-            # Keep the aircraft where it is: hold in the stick mode with neutral sticks.
-            if v.armed and v.airborne() and v.capabilities.althold:
+            # Keep the aircraft where it is: hold in the stick mode with neutral sticks. At the sticks flight
+            # level (WP-1, 06 §5) Relay does not fly a hold for the agent; the autopilot's failsafe applies.
+            held = not flight_level.limited(self.settings, actor)
+            if held and v.armed and v.airborne() and v.capabilities.althold:
                 prepared, _ = self._prepare_skill(v, "hold", {})
                 self._start_skill(v, "hold", prepared, None)
             return {"id": vid, "plan": plan.view()}
@@ -2003,6 +2037,11 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
             mode = found["recommended"] or ""
         if not mode or found.get(mode) is None:
             raise err("refly_unavailable", mode=mode or "auto", reason="the record holds nothing to fly")
+        if flight_level.limited(self.settings, actor):  # WP-1 (06 §5): only recorded sticks in manual modes
+            rows = refly.stick_rows(detail) if mode == "sticks" else None
+            recorded = [rows["mode"], *(m for _, m in rows["modes"])] if rows else []
+            autopilot = rows["autopilot"] if rows else None
+            flight_level.check_refly(self.settings, actor, mode, autopilot, recorded)
 
         def run() -> dict[str, Any]:
             v = self._vehicle(vid)
@@ -2496,6 +2535,7 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
 
     def get_settings(self) -> dict[str, Any]:
         data = self.settings.to_dict()
+        data["flight_level"] = flight_level.view(self.settings)  # WP-1 (06 §5), read only
         data["restart_fields"] = list(Settings.RESTART_FIELDS)
         # read only: where records, settings and logs live (shown in Settings > Data)
         data["data_dir"] = str(self.data_dir) if self.data_dir is not None else None
@@ -2783,6 +2823,9 @@ class FleetService(DeviceOps, SimOps, ProcedureOps):
             "course": None if v.course is None else v.course.view(now),
             "record_session": v.record_session,
             "procedure": self._procedure_brief(v),  # bench procedure (WP-B, 05 §4.4)
+            # WP-1 onboard programs (06 §2.6)
+            "program": self.programs.view(v),
+            "programs_allowed": v.kind == "sim" or v.programs_allowed,
         }
 
     def _build_snapshot(self, now: float) -> None:

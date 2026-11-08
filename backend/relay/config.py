@@ -102,6 +102,9 @@ class Settings:
     # WP-C simulator flight model (05 §5): the hover-assist default for new simulators and turbulence 0..1.
     sim_hover_assist: bool = True
     sim_turbulence: float = 0.3
+    # WP-1 (06 §5): what agent sessions may fly. "sticks": sticks, manual modes, programs and safety
+    # actions only; "full": the v0.3 high-level skills as well. Only the operator changes it.
+    agent_flight_level: str = "sticks"
 
     RESTART_FIELDS: ClassVar[tuple[str, ...]] = ("listen_port",)
     READ_ONLY: ClassVar[dict[str, float]] = {"stick_timeout_s": STICK_TIMEOUT_S}
@@ -116,7 +119,8 @@ class Settings:
         out = copy.deepcopy(self)
         for key, value in patch.items():
             # read-only fields echoed by GET /settings are ignored, not rejected
-            if key in self.READ_ONLY or key in ("restart_fields", "data_dir") or value is None:
+            echoed = ("restart_fields", "data_dir", "flight_level")  # flight_level: WP-1, read only
+            if key in self.READ_ONLY or key in echoed or value is None:
                 continue
             if key == "safety_volume":
                 if not isinstance(value, dict):
@@ -163,6 +167,8 @@ class Settings:
             return "possess_mode"
         if not 0.0 <= self.sim_turbulence <= 1.0:  # WP-C
             return "sim_turbulence"
+        if self.agent_flight_level not in ("sticks", "full"):  # WP-1
+            return "agent_flight_level"
         if not 1 <= self.retention_days <= 3650:
             return "retention_days"
         for name in ("listen_port", "bridge_port"):

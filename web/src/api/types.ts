@@ -27,6 +27,12 @@ export interface RelaySchema {
   ProcedureCatalogue: ProcedureCatalogue
   ProcedureRun: ProcedureRun
   TestRuns: TestRuns
+  ProgramSummary: ProgramSummary
+  Program: Program
+  ProgramRevision: ProgramRevision
+  ProgramValidation: Validation
+  ProgramTestResults: TestResults
+  ProgramLog: ProgramLog
 }
 /**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
@@ -122,7 +128,7 @@ export interface Vehicle {
   capabilities: Capabilities
   claim: ClaimView | null
   possession: PossessionView | null
-  controller: 'none' | 'human' | 'agent'
+  controller: 'none' | 'human' | 'agent' | 'program'
   sticks: SticksView | null
   skill: SkillView | null
   plan: PlanView | null
@@ -134,6 +140,11 @@ export interface Vehicle {
   record_session: number | null
   sim: SimView | null
   procedure: ProcedureBrief | null
+  program: ProgramRunView | null
+  /**
+   * real aircraft: the operator allowed programs (reset when the link drops)
+   */
+  programs_allowed: boolean
 }
 /**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
@@ -291,7 +302,7 @@ export interface SticksView {
   yaw: number
   throttle: number
   age_s: number
-  source: 'human' | 'agent'
+  source: 'human' | 'agent' | 'program'
 }
 /**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
@@ -472,6 +483,79 @@ export interface ProcedureBrief {
   total: number
 }
 /**
+ * The program deployed on an aircraft, running or last run (WP-1, 06 §2.6).
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ProgramRunView".
+ */
+export interface ProgramRunView {
+  /**
+   * program id
+   */
+  id: string
+  name: string
+  rev: number
+  /**
+   * ctx.state, at most 32 characters
+   */
+  state: string
+  status: 'running' | 'paused' | 'faulted' | 'stopped'
+  /**
+   * why it is paused, stopped or faulted (a code)
+   */
+  reason: string | null
+  mode: 'pilot' | 'copilot'
+  /**
+   * frames run in the last second (50 when healthy)
+   */
+  fps: number
+  frames: number
+  /**
+   * failed frames since deployment
+   */
+  faults: number
+  /**
+   * frames over the 2 ms soft budget
+   */
+  overruns: number
+  last_error: string | null
+  params: {}
+  seed: number
+  /**
+   * ATTITUDE reached 40 Hz after the rate request; null: not yet
+   */
+  rates_ok: boolean | null
+  sm: ProgramStateMachine | null
+  /**
+   * sequence of the newest log line (GET .../program/log?after=)
+   */
+  log_seq: number
+  owner: ProgramOwner
+  started_at: number
+}
+/**
+ * A program's ``StateMachine`` as the inspector shows it (WP-1, 06 §2.3).
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ProgramStateMachine".
+ */
+export interface ProgramStateMachine {
+  state: string
+  transitions: number
+  /**
+   * seconds in the current state
+   */
+  state_s: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ProgramOwner".
+ */
+export interface ProgramOwner {
+  kind: 'operator' | 'session'
+  name: string
+}
+/**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
  * via the `definition` "Alert".
  */
@@ -559,6 +643,13 @@ export interface Event {
     | 'peer_left'
     | 'arena_hit'
     | 'arena_down'
+    | 'program_started'
+    | 'program_stopped'
+    | 'program_paused'
+    | 'program_resumed'
+    | 'program_faulted'
+    | 'program_host_restarted'
+    | 'program_gate'
   vehicle: string | null
   session: string | null
   text_en: string
@@ -1093,4 +1184,134 @@ export interface TestRunCounts {
   warn: number
   fail: number
   skipped: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ProgramSummary".
+ */
+export interface ProgramSummary {
+  id: string
+  name: string
+  name_zh: string
+  description: string
+  description_zh: string
+  builtin: boolean
+  rev: number
+  author: string | null
+  created: number
+  updated: number
+  /**
+   * number of unit tests
+   */
+  test_count: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "Program".
+ */
+export interface Program {
+  id: string
+  name: string
+  name_zh: string
+  description: string
+  description_zh: string
+  builtin: boolean
+  rev: number
+  author: string | null
+  created: number
+  updated: number
+  /**
+   * number of unit tests
+   */
+  test_count: number
+  source: string
+  params: {}
+  tests: {}[]
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ProgramRevision".
+ */
+export interface ProgramRevision {
+  rev: number
+  source: string
+  params: {}
+  author: string
+  note: string
+  t: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "Validation".
+ */
+export interface Validation {
+  ok: boolean
+  errors: ValidationProblem[]
+  params: {}
+  param_ranges: {
+    [k: string]: number[] | undefined
+  }
+  has_init: boolean
+  has_step: boolean
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ValidationProblem".
+ */
+export interface ValidationProblem {
+  line: number
+  col: number
+  end_line: number
+  end_col: number
+  code: string
+  message_en: string
+  message_zh: string
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TestResults".
+ */
+export interface TestResults {
+  program: string
+  results: TestResult[]
+  passed: number
+  total: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TestResult".
+ */
+export interface TestResult {
+  name: string
+  passed: boolean
+  /**
+   * roll, pitch, yaw, throttle, fire
+   */
+  out: {} | null
+  state: string | null
+  error: string | null
+  /**
+   * [{field, expected, actual}]
+   */
+  failures: {}[]
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ProgramLog".
+ */
+export interface ProgramLog {
+  id: string
+  program: string
+  lines: ProgramLogLine[]
+  last_seq: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ProgramLogLine".
+ */
+export interface ProgramLogLine {
+  seq: number
+  t: number
+  level: 'log' | 'error' | 'event'
+  text: string
 }

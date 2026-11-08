@@ -378,7 +378,7 @@ class Arena:
             and not gun.down
             and v.armed
             and v.airborne()
-            and v.controller(self.fleet.sessions) in ("human", "agent")
+            and v.controller(self.fleet.sessions) in ("human", "agent", "program")  # program: WP-1
             and not v.driver.sim.quad.s.crashed
         )
 

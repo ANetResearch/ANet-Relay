@@ -28,7 +28,9 @@ OP = "sdk-op"
 
 @pytest.fixture(scope="module")
 def base():
-    svc = FleetService(Settings(), None, operator_token=OP, listen=False, history=History(None))
+    svc = FleetService(
+        Settings(agent_flight_level="full"), None, operator_token=OP, listen=False, history=History(None)
+    )
     port = free_tcp_port()
     server = uvicorn.Server(uvicorn.Config(create_app(svc), host="127.0.0.1", port=port, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)

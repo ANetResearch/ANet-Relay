@@ -67,6 +67,24 @@
     },
     "TestRuns": {
       "$ref": "#/$defs/TestRuns"
+    },
+    "ProgramSummary": {
+      "$ref": "#/$defs/ProgramSummary"
+    },
+    "Program": {
+      "$ref": "#/$defs/Program"
+    },
+    "ProgramRevision": {
+      "$ref": "#/$defs/ProgramRevision"
+    },
+    "ProgramValidation": {
+      "$ref": "#/$defs/Validation"
+    },
+    "ProgramTestResults": {
+      "$ref": "#/$defs/TestResults"
+    },
+    "ProgramLog": {
+      "$ref": "#/$defs/ProgramLog"
     }
   },
   "required": [
@@ -90,7 +108,13 @@
     "UiResultMessage",
     "ProcedureCatalogue",
     "ProcedureRun",
-    "TestRuns"
+    "TestRuns",
+    "ProgramSummary",
+    "Program",
+    "ProgramRevision",
+    "ProgramValidation",
+    "ProgramTestResults",
+    "ProgramLog"
   ],
   "additionalProperties": false,
   "$defs": {
@@ -940,7 +964,14 @@
             "peer_joined",
             "peer_left",
             "arena_hit",
-            "arena_down"
+            "arena_down",
+            "program_started",
+            "program_stopped",
+            "program_paused",
+            "program_resumed",
+            "program_faulted",
+            "program_host_restarted",
+            "program_gate"
           ],
           "type": "string"
         },
@@ -2397,6 +2428,402 @@
       "title": "ProcedureSuggestion",
       "type": "object"
     },
+    "Program": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "name_zh": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "description_zh": {
+          "type": "string"
+        },
+        "builtin": {
+          "type": "boolean"
+        },
+        "rev": {
+          "type": "integer"
+        },
+        "author": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created": {
+          "type": "number"
+        },
+        "updated": {
+          "type": "number"
+        },
+        "test_count": {
+          "description": "number of unit tests",
+          "type": "integer"
+        },
+        "source": {
+          "type": "string"
+        },
+        "params": {
+          "type": "object"
+        },
+        "tests": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "name_zh",
+        "description",
+        "description_zh",
+        "builtin",
+        "rev",
+        "author",
+        "created",
+        "updated",
+        "test_count",
+        "source",
+        "params",
+        "tests"
+      ],
+      "title": "Program",
+      "type": "object"
+    },
+    "ProgramLog": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "program": {
+          "type": "string"
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/$defs/ProgramLogLine"
+          },
+          "type": "array"
+        },
+        "last_seq": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "program",
+        "lines",
+        "last_seq"
+      ],
+      "title": "ProgramLog",
+      "type": "object"
+    },
+    "ProgramLogLine": {
+      "properties": {
+        "seq": {
+          "type": "integer"
+        },
+        "t": {
+          "type": "number"
+        },
+        "level": {
+          "enum": [
+            "log",
+            "error",
+            "event"
+          ],
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seq",
+        "t",
+        "level",
+        "text"
+      ],
+      "title": "ProgramLogLine",
+      "type": "object"
+    },
+    "ProgramOwner": {
+      "properties": {
+        "kind": {
+          "enum": [
+            "operator",
+            "session"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "title": "ProgramOwner",
+      "type": "object"
+    },
+    "ProgramRevision": {
+      "properties": {
+        "rev": {
+          "type": "integer"
+        },
+        "source": {
+          "type": "string"
+        },
+        "params": {
+          "type": "object"
+        },
+        "author": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "t": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "rev",
+        "source",
+        "params",
+        "author",
+        "note",
+        "t"
+      ],
+      "title": "ProgramRevision",
+      "type": "object"
+    },
+    "ProgramRunView": {
+      "description": "The program deployed on an aircraft, running or last run (WP-1, 06 §2.6).",
+      "properties": {
+        "id": {
+          "description": "program id",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "rev": {
+          "type": "integer"
+        },
+        "state": {
+          "description": "ctx.state, at most 32 characters",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "running",
+            "paused",
+            "faulted",
+            "stopped"
+          ],
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "why it is paused, stopped or faulted (a code)"
+        },
+        "mode": {
+          "enum": [
+            "pilot",
+            "copilot"
+          ],
+          "type": "string"
+        },
+        "fps": {
+          "description": "frames run in the last second (50 when healthy)",
+          "type": "number"
+        },
+        "frames": {
+          "type": "integer"
+        },
+        "faults": {
+          "description": "failed frames since deployment",
+          "type": "integer"
+        },
+        "overruns": {
+          "description": "frames over the 2 ms soft budget",
+          "type": "integer"
+        },
+        "last_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "params": {
+          "type": "object"
+        },
+        "seed": {
+          "type": "integer"
+        },
+        "rates_ok": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "ATTITUDE reached 40 Hz after the rate request; null: not yet"
+        },
+        "sm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProgramStateMachine"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "log_seq": {
+          "description": "sequence of the newest log line (GET .../program/log?after=)",
+          "type": "integer"
+        },
+        "owner": {
+          "$ref": "#/$defs/ProgramOwner"
+        },
+        "started_at": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "rev",
+        "state",
+        "status",
+        "reason",
+        "mode",
+        "fps",
+        "frames",
+        "faults",
+        "overruns",
+        "last_error",
+        "params",
+        "seed",
+        "rates_ok",
+        "sm",
+        "log_seq",
+        "owner",
+        "started_at"
+      ],
+      "title": "ProgramRunView",
+      "type": "object"
+    },
+    "ProgramStateMachine": {
+      "description": "A program's ``StateMachine`` as the inspector shows it (WP-1, 06 §2.3).",
+      "properties": {
+        "state": {
+          "type": "string"
+        },
+        "transitions": {
+          "type": "integer"
+        },
+        "state_s": {
+          "description": "seconds in the current state",
+          "type": "number"
+        }
+      },
+      "required": [
+        "state",
+        "transitions",
+        "state_s"
+      ],
+      "title": "ProgramStateMachine",
+      "type": "object"
+    },
+    "ProgramSummary": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "name_zh": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "description_zh": {
+          "type": "string"
+        },
+        "builtin": {
+          "type": "boolean"
+        },
+        "rev": {
+          "type": "integer"
+        },
+        "author": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created": {
+          "type": "number"
+        },
+        "updated": {
+          "type": "number"
+        },
+        "test_count": {
+          "description": "number of unit tests",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "name_zh",
+        "description",
+        "description_zh",
+        "builtin",
+        "rev",
+        "author",
+        "created",
+        "updated",
+        "test_count"
+      ],
+      "title": "ProgramSummary",
+      "type": "object"
+    },
     "PromptAnswer": {
       "properties": {
         "id": {
@@ -2766,7 +3193,8 @@
         "source": {
           "enum": [
             "human",
-            "agent"
+            "agent",
+            "program"
           ],
           "type": "string"
         }
@@ -2780,6 +3208,91 @@
         "source"
       ],
       "title": "SticksView",
+      "type": "object"
+    },
+    "TestResult": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "out": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "roll, pitch, yaw, throttle, fire"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "failures": {
+          "description": "[{field, expected, actual}]",
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "passed",
+        "out",
+        "state",
+        "error",
+        "failures"
+      ],
+      "title": "TestResult",
+      "type": "object"
+    },
+    "TestResults": {
+      "properties": {
+        "program": {
+          "type": "string"
+        },
+        "results": {
+          "items": {
+            "$ref": "#/$defs/TestResult"
+          },
+          "type": "array"
+        },
+        "passed": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "program",
+        "results",
+        "passed",
+        "total"
+      ],
+      "title": "TestResults",
       "type": "object"
     },
     "TestRunCounts": {
@@ -3280,6 +3793,83 @@
       "title": "UiWindow",
       "type": "object"
     },
+    "Validation": {
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "errors": {
+          "items": {
+            "$ref": "#/$defs/ValidationProblem"
+          },
+          "type": "array"
+        },
+        "params": {
+          "type": "object"
+        },
+        "param_ranges": {
+          "additionalProperties": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        },
+        "has_init": {
+          "type": "boolean"
+        },
+        "has_step": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok",
+        "errors",
+        "params",
+        "param_ranges",
+        "has_init",
+        "has_step"
+      ],
+      "title": "Validation",
+      "type": "object"
+    },
+    "ValidationProblem": {
+      "properties": {
+        "line": {
+          "type": "integer"
+        },
+        "col": {
+          "type": "integer"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "end_col": {
+          "type": "integer"
+        },
+        "code": {
+          "type": "string"
+        },
+        "message_en": {
+          "type": "string"
+        },
+        "message_zh": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "line",
+        "col",
+        "end_line",
+        "end_col",
+        "code",
+        "message_en",
+        "message_zh"
+      ],
+      "title": "ValidationProblem",
+      "type": "object"
+    },
     "Vehicle": {
       "properties": {
         "id": {
@@ -3574,7 +4164,8 @@
           "enum": [
             "none",
             "human",
-            "agent"
+            "agent",
+            "program"
           ],
           "type": "string"
         },
@@ -3660,6 +4251,22 @@
             }
           ],
           "default": null
+        },
+        "program": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProgramRunView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "programs_allowed": {
+          "default": true,
+          "description": "real aircraft: the operator allowed programs (reset when the link drops)",
+          "type": "boolean"
         }
       },
       "required": [
@@ -3709,7 +4316,9 @@
         "course",
         "record_session",
         "sim",
-        "procedure"
+        "procedure",
+        "program",
+        "programs_allowed"
       ],
       "title": "Vehicle",
       "type": "object"

@@ -255,4 +255,7 @@ def put_settings(request: Request, body: dict[str, Any]) -> dict[str, Any]:
     grant = body.get("agents_app_control")
     if grant is not None and grant != svc.settings.agents_app_control and not caller(request).operator:
         raise RelayError("operator_required")  # only the person at the window grants or withdraws app control
+    level = body.get("agent_flight_level")  # WP-1 (06 §5): the agent flight level is the operator's too
+    if level is not None and level != svc.settings.agent_flight_level and not caller(request).operator:
+        raise RelayError("operator_required")
     return svc.update_settings(body)

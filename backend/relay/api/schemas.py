@@ -143,7 +143,7 @@ class SticksView(_Model):
     yaw: float
     throttle: float
     age_s: float
-    source: Literal["human", "agent"]
+    source: Literal["human", "agent", "program"]  # program: WP-1 onboard program
 
 
 class SkillView(_Model):
@@ -263,6 +263,43 @@ class ProcedureBrief(_Model):
     total: int
 
 
+class ProgramStateMachine(_Model):
+    """A program's ``StateMachine`` as the inspector shows it (WP-1, 06 §2.3)."""
+
+    state: str
+    transitions: int
+    state_s: float = Field(description="seconds in the current state")
+
+
+class ProgramOwner(_Model):
+    kind: Literal["operator", "session"]
+    name: str
+
+
+class ProgramRunView(_Model):
+    """The program deployed on an aircraft, running or last run (WP-1, 06 §2.6)."""
+
+    id: str = Field(description="program id")
+    name: str
+    rev: int
+    state: str = Field(description="ctx.state, at most 32 characters")
+    status: Literal["running", "paused", "faulted", "stopped"]
+    reason: str | None = Field(description="why it is paused, stopped or faulted (a code)")
+    mode: Literal["pilot", "copilot"]
+    fps: float = Field(description="frames run in the last second (50 when healthy)")
+    frames: int
+    faults: int = Field(description="failed frames since deployment")
+    overruns: int = Field(description="frames over the 2 ms soft budget")
+    last_error: str | None
+    params: dict[str, Any]
+    seed: int
+    rates_ok: bool | None = Field(description="ATTITUDE reached 40 Hz after the rate request; null: not yet")
+    sm: ProgramStateMachine | None
+    log_seq: int = Field(description="sequence of the newest log line (GET .../program/log?after=)")
+    owner: ProgramOwner
+    started_at: float
+
+
 class Vehicle(_Model):
     id: str
     kind: Literal["real", "sim"]
@@ -299,7 +336,7 @@ class Vehicle(_Model):
     capabilities: Capabilities
     claim: ClaimView | None
     possession: PossessionView | None
-    controller: Literal["none", "human", "agent"]
+    controller: Literal["none", "human", "agent", "program"]  # program: WP-1
     sticks: SticksView | None
     skill: SkillView | None
     plan: PlanView | None
@@ -311,6 +348,11 @@ class Vehicle(_Model):
     record_session: int | None
     sim: SimView | None
     procedure: ProcedureBrief | None = None  # bench procedure (WP-B)
+    # WP-1 onboard programs (06 §2.6)
+    program: ProgramRunView | None = None
+    programs_allowed: bool = Field(
+        default=True, description="real aircraft: the operator allowed programs (reset when the link drops)"
+    )
 
 
 class Alert(_Model):
@@ -404,6 +446,14 @@ EventKind = Literal[
     "peer_left",
     "arena_hit",
     "arena_down",
+    # WP-1 onboard programs (06 §2.6)
+    "program_started",
+    "program_stopped",
+    "program_paused",
+    "program_resumed",
+    "program_faulted",
+    "program_host_restarted",
+    "program_gate",
 ]
 
 

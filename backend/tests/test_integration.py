@@ -35,7 +35,7 @@ def wait(fn, timeout=5.0, step=0.05):
 @pytest.fixture(scope="module")
 def rig(tmp_path_factory):
     port = free_udp_port()
-    settings = Settings()
+    settings = Settings(agent_flight_level="full")  # module scope: the autouse fixture is too late
     settings.listen_port = port
     svc = FleetService(settings, None, operator_token="op", allow_loopback=True, history=History(None))
     svc.start()

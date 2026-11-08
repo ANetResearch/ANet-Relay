@@ -199,6 +199,46 @@ CATALOGUE: dict[str, tuple[int, str, str]] = {
         "步骤 {step} 未在等待回答。",
     ),
     "test_run_not_found": (404, "There is no bench report {run}.", "没有编号为 {run} 的标定报告。"),
+    # WP-1 onboard programs and the agent flight level (06 §2, §5)
+    "sticks_only": (
+        403,
+        "Agents fly with sticks and programs only at this control level; {action} is not available.",
+        "当前控制等级下智能体只能通过摇杆或程序飞行，{action} 不可用。",
+    ),
+    "program_not_found": (404, "There is no program {program}.", "没有程序 {program}。"),
+    "revision_not_found": (
+        404,
+        "Program {program} has no revision {rev}.",
+        "程序 {program} 没有版本 {rev}。",
+    ),
+    "program_readonly": (
+        409,
+        "Built-in programs cannot be changed; copy it first.",
+        "内置程序不可修改，请先复制。",
+    ),
+    "program_invalid": (400, "The program is not valid: {reason}.", "程序无效：{reason}。"),
+    "program_param_invalid": (
+        400,
+        "Parameter {name} is not valid: {reason}.",
+        "参数 {name} 无效：{reason}。",
+    ),
+    "program_load_failed": (409, "The program could not start: {reason}.", "程序无法启动：{reason}。"),
+    "no_program": (409, "No program is deployed on this aircraft.", "这架飞机没有部署程序。"),
+    "program_not_paused": (
+        409,
+        "The program is {status}; deploy it again.",
+        "程序处于 {status} 状态，请重新部署。",
+    ),
+    "programs_not_allowed": (
+        409,
+        "Allow programs on this aircraft in the inspector first.",
+        "须先在检查器中允许这架飞机运行程序。",
+    ),
+    "program_host_unavailable": (
+        503,
+        "The program host is not available: {reason}.",
+        "程序宿主不可用：{reason}。",
+    ),
 }
 
 

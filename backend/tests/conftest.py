@@ -21,6 +21,22 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "tools" / "fakes"))
 
 
+@pytest.fixture(autouse=True)
+def _agent_flight_level(request, monkeypatch):
+    """06 §5: sessions fly with sticks only by default. The tests written before that rule (and the ones
+    that are not about it) fly sessions with every skill, so their fleets run at ``full``; tests of the
+    default level are marked ``sticks_level``."""
+    if request.node.get_closest_marker("sticks_level"):
+        return
+    init = FleetService.__init__
+
+    def full(self, *args, **kwargs):
+        init(self, *args, **kwargs)
+        self.settings.agent_flight_level = "full"
+
+    monkeypatch.setattr(FleetService, "__init__", full)
+
+
 class FakeClock:
     def __init__(self, t: float = 1000.0) -> None:
         self.t = t

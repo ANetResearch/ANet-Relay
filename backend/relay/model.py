@@ -8,7 +8,7 @@ from typing import Literal
 
 VehicleKind = Literal["real", "sim"]
 LinkState = Literal["waiting", "ok", "delayed", "lost", "offline"]
-Controller = Literal["none", "human", "agent"]
+Controller = Literal["none", "human", "agent", "program"]  # program: WP-1 onboard program (06 §2.6)
 InputKind = Literal["keyboard", "screen", "gamepad"]
 INPUT_KINDS = ("keyboard", "screen", "gamepad")
 AXES = ("roll", "pitch", "yaw")
@@ -56,7 +56,7 @@ class StickInput:
     yaw: float
     throttle: float
     t: float = 0.0  # monotonic arrival time
-    source: Literal["human", "agent"] = "agent"
+    source: Literal["human", "agent", "program"] = "agent"
     conn: str | None = None  # WebSocket connection that sent it, if any
 
     @staticmethod
