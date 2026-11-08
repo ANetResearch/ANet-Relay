@@ -186,6 +186,28 @@ test("program edits need no approval; deploying on a real aircraft waits for the
   assert.equal(events.find((e) => e.type === "tool_end" && e.tool === "program_deploy").error, true);
 });
 
+test("retuning a program on a real aircraft waits for the operator", async () => {
+  const routes = {
+    "GET /settings": { agent_flight_level: "sticks" },
+    "GET /app/ui": { state: { selected: "real-1", lang: "en" } },
+    "GET /vehicles/real-1": REAL,
+    "PATCH /vehicles/real-1/program/params": (body) => ({ id: "real-1", params: body }),
+  };
+  const { copilot, relay, events } = offlineCopilot(routes, [
+    fauxAssistantMessage(fauxToolCall("program_params", { vehicle: "real-1", params: { kp: 9 } }), { stopReason: "toolUse" }),
+    fauxAssistantMessage("Declined."),
+  ]);
+  const pending = copilot.prompt("make it more aggressive");
+  for (let i = 0; i < 150 && !events.some((e) => e.type === "approval"); i++) await new Promise((r) => setTimeout(r, 20));
+  const approvals = events.filter((e) => e.type === "approval");
+  assert.equal(approvals.length, 1);
+  assert.equal(approvals[0].tool, "program_params");
+  assert.equal(approvals[0].request.danger, "program");
+  copilot.approve(approvals[0].id, false);
+  await pending;
+  assert.ok(!relay.calls.some((c) => c.path === "/vehicles/real-1/program/params"), "declined: nothing changed");
+});
+
 test("deploying on a simulator claims it and sends the scenario; arm and mode on a real aircraft ask", async () => {
   const relay = stubRelay({
     "GET /vehicles/sim-1": SIM,

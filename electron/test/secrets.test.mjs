@@ -193,6 +193,16 @@ test("keychain opt-in refuses when the system offers none and keeps the file key
   assert.deepEqual([store.view().keyStorage, store.apiKey()], ["file", KEY]);
 });
 
+test("switching to the keychain with a new key keeps the stored key when the keychain refuses", () => {
+  const { dir, store } = setup({ available: false });
+  store.save({ apiKey: KEY });
+  const before = read(dir, "copilot.json");
+  assert.throws(() => store.save({ keyStorage: "keychain", apiKey: "sk-new-0123456789" }), /not available/);
+  assert.deepEqual([store.view().keyStorage, store.view().hasKey, store.apiKey()], ["file", true, KEY]);
+  assert.ok(fs.existsSync(path.join(dir, SECRETS_FILE)));
+  assert.equal(read(dir, "copilot.json"), before);
+});
+
 test("validation is unchanged", () => {
   const { store } = setup();
   assert.throws(() => store.save({ baseUrl: "ftp://x" }), /http/);

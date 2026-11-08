@@ -252,6 +252,9 @@ export function createCopilotConfig({ dir, keychain, platform = process.platform
     const newKey = hasNewKey && typeof input.apiKey === "string" ? input.apiKey.trim() : "";
     if (newKey.length > 4096) throw new Error("The API key is too long.");
 
+    // Everything that can fail (the keychain refusing, above all) runs before anything is written, so a refused
+    // save leaves the stored key and copilot.json as they were. secrets: what then happens to the file store.
+    let secrets = null; // null: unchanged; { remove: true }; { write: key }
     if (target !== before.keyStorage) {
       if (target === "keychain") {
         // Opt in. A pre-0.4 keyEnc is kept as is ("Keep using keychain"); a file key moves into the keychain.
@@ -264,12 +267,12 @@ export function createCopilotConfig({ dir, keychain, platform = process.platform
             throw new Error("The system keychain is not available on this computer.");
           }
         }
-        removeSecrets();
+        secrets = { remove: true };
       } else {
         // Opt out: the keychain key moves into the file store (one keychain read, asked for by the operator).
         if (!hasNewKey && next.keyEnc) {
           const moved = keychainDecrypt(next.keyEnc);
-          if (moved) writeSecrets(moved);
+          if (moved) secrets = { write: moved };
         }
         delete next.keyEnc;
         delete next.keyHint;
@@ -278,18 +281,19 @@ export function createCopilotConfig({ dir, keychain, platform = process.platform
     }
 
     if (hasNewKey) {
-      // Encrypt first: a keychain that refuses leaves the stored key as it was.
       const enc = newKey && next.keyStorage === "keychain" ? keychainEncrypt(newKey) : null;
       delete next.keyEnc;
       delete next.keyHint;
-      removeSecrets();
       if (enc) {
         next.keyEnc = enc;
         next.keyHint = newKey.length >= 8 ? newKey.slice(-4) : null;
-      } else if (newKey) {
-        writeSecrets(newKey);
+        secrets = { remove: true };
+      } else {
+        secrets = newKey ? { write: newKey } : { remove: true };
       }
     }
+    if (secrets?.write) writeSecrets(secrets.write);
+    else if (secrets?.remove) removeSecrets();
     writeConfig(next);
     return { before, cfg: next };
   };

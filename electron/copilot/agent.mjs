@@ -415,7 +415,7 @@ export function systemPrompt(lang, scope = "all", level = "full") {
     sticks
       ? "- To fly: claim, relay_mode to a manual mode (STABILIZE), relay_arm, then program_deploy a tested program; watch program_status and program_log and tune with program_params. relay_sticks_for is only for a short open-loop push."
       : "- For several actions in a row (for example take off, hover, move, turn, land), plan them and call relay_plan once.",
-    "- Programs: write -> program_validate -> program_test -> challenge_submit or a simulator -> program_deploy -> program_params. Editing programs needs no approval; deploying or resuming one on a real aircraft waits for the operator. Releasing the claim, pushing sticks yourself or starting a skill ends your program.",
+    "- Programs: write -> program_validate -> program_test -> challenge_submit or a simulator -> program_deploy -> program_params. Editing programs needs no approval; deploying, resuming or retuning (program_params) one on a real aircraft waits for the operator. Releasing the claim, pushing sticks yourself or starting a skill ends your program.",
     "- Before flying, check relay_fleet or relay_vehicle when you are not sure which aircraft is meant or whether it is ready.",
     "- If the user did not name an aircraft, use the selected aircraft given in the message context; if none, ask.",
     "- A person can possess any aircraft at any time and always wins. If a tool reports possessed_by_human, stop and tell the user to release the aircraft first. Never retry around it.",

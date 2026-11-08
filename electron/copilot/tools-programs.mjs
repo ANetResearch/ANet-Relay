@@ -1,7 +1,7 @@
 // Program tools (06 §6, WP-4b): Copilot writes, tests, judges and deploys onboard flight programs instead of
 // flying the 50 Hz loop itself. Names match the app MCP server and the SDK (program_*, challenge_*, job_status,
-// duel_run, ladder, airframe_set). Editing a program is only code and needs no approval; deploying or resuming
-// one on a real aircraft waits for the operator (agent.mjs, PROGRAM_DANGER).
+// duel_run, ladder, airframe_set). Editing a program is only code and needs no approval; deploying, resuming or
+// retuning one on a real aircraft waits for the operator (agent.mjs, PROGRAM_DANGER).
 import { defineTool, enc, flightHelpers, sleep, text, Type, VID } from "./tools-common.mjs";
 
 const opt = (t) => Type.Optional(t);
@@ -28,8 +28,9 @@ const AIRFRAME = Type.Object(
   { description: "Simulator defects: {preset} (fresh seed), {preset, seed}, {seed} or {params: {mass_kg, payload_kg, cg_offset_cm, level_trim_deg, motor_gain, prop_damage, damaged_prop, imu_noise}}" },
 );
 
-/** Calls that deploy or resume a program: approved by the operator on a real aircraft (danger "program"). */
-export const PROGRAM_DANGER = { program_deploy: "program", program_resume: "program" };
+/** Calls that deploy, resume or retune a program: approved by the operator on a real aircraft (danger "program").
+ * program_params is one of them: its new values steer the flight loop as directly as a new deployment. */
+export const PROGRAM_DANGER = { program_deploy: "program", program_resume: "program", program_params: "program" };
 export const JOB_POLL_MS = 500;
 export const JOB_WAIT_MS = 180_000;
 const JOB_FINAL = new Set(["done", "failed", "error", "cancelled", "canceled"]);
