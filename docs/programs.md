@@ -162,7 +162,8 @@ Observation fields left out hover level at 1 m. Optional: `mem`, `state` (the st
 | `hover_trim` | Hover with integral trim: an integrator learns the hover throttle, attitude stays level |
 | `liftoff` | Take-off by throttle search |
 | `patrol` | Timed-turn patrol without a position source |
-| `hunter_easy` / `hunter_medium` / `hunter_hard` | Arena hunters at three levels: search → approach → fire → evade |
+| `hunter_easy` / `hunter_medium` / `hunter_hard` | Arena hunters at three levels: search → approach → fire → evade, with a dodge when a contact closes fast (`dodge_s`, `threat_dist`, `threat_closing`) |
+| `rammer` | Ram an opponent, never fire: climb → search → pursue (proportional navigation on the nearest contact) → ram → recover; reads `obs.collision` when the simulator reports one |
 
 Examples are read only; duplicate one to change it.
 
@@ -181,6 +182,7 @@ seed). Scores run from 0 to 100; the best score and the number of submissions ar
 | `rings` | The ring course | Every ring, timed |
 | `pursuit` | A target aircraft on a scripted path | Share of 60 s within 2 m of the target |
 | `duel_easy` / `duel_medium` / `duel_hard` | A built-in hunter as opponent | Win (shoot it down and survive); a draw counts remaining hit points |
+| `ram_easy` | A hovering target on the spawn ring; guns off; contacts and UWB-style position | The target crashes from a collision with you within 60 s; faster and harder scores higher |
 
 The Lab's **Judge** tab: choose a challenge → **Submit revision N** → progress → score, verdict, metrics and one row
 per seed, each with a **Replay**.
@@ -193,6 +195,14 @@ same (scenario, seed, program revision) always gives the same result.
 
 Live duels: deploy programs to several local simulators and fly them in the arena in real time; programs deployed by
 other terminals on the LAN fly in the same arena.
+
+**Dogfight**: `POST /scenarios/dogfight` (Copilot and MCP `dogfight_start`, SDK `dogfight_start`) sets up a timed
+fight of 2 to 8 simulators in one call: a spawn ring facing the centre, a program per role (gunners fire with
+`hunter_medium` by default, rammers fly `rammer` and never fire), free-for-all or 2 / 3 teams (the `team` parameter
+of each program), respawn after 5 s, then landing and the final standings on the leaderboard
+(`GET /arena/leaderboard`: downs, survival, accuracy, rams). Programs fly with sticks only; a person can possess any
+aircraft at any time. On the LAN it joins the shared match; otherwise the arena runs as local practice. Simulators
+only; see `agent-api.md` (Dogfights, matches and the leaderboard).
 
 **Replay**: opening a trace switches to the Fly workspace, where the stage replays every aircraft and every round,
 with play / pause, 1x / 4x / 16x, a scrubber and Exit at the bottom. The replay closes by itself when an aircraft

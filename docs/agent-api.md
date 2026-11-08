@@ -308,7 +308,7 @@ An onboard program (design 06 §2) is a restricted Python program with `PARAMS`,
 
 | Method and path | Who | Purpose |
 |---|---|---|
-| `GET /programs` | – | Built-in examples (`hover_trim`, `liftoff`, `patrol`, `hunter_easy`, `hunter_medium`, `hunter_hard`; read-only) and stored programs |
+| `GET /programs` | – | Built-in examples (`hover_trim`, `liftoff`, `patrol`, `hunter_easy`, `hunter_medium`, `hunter_hard`, `rammer`; read-only) and stored programs |
 | `POST /programs` | session or operator | `{name, source?, description?, params?, tests?, note?, copy_of?}` → `{program, validation}` |
 | `GET /programs/{pid}` · `GET /programs/{pid}/revisions` | – | One program (`source`, `params`, `tests`, `rev`); the last 50 revisions, newest first, with author and note |
 | `PUT /programs/{pid}` | session or operator | `{source}` or `{patch: [{start, end, text}]}` (1-based, inclusive, numbered against the current revision; `end = start - 1` inserts), plus `name`, `description`, `params`, `tests`, `note`: a new revision; returns `{program, validation}` |
@@ -347,6 +347,7 @@ Onboard programs (design 06 §2) are judged like exercises on a practice site: a
 | `rings` | The `cage-loop` ring course, UWB-like position | Every ring in order within 60 s; timed |
 | `pursuit` | A scripted target circles the centre (3 m, 0.5 m/s, 1.2 m up); contacts and UWB-like position | Within 2 m of the target for at least half of the 60 s; the score is that share |
 | `duel_easy` / `duel_medium` / `duel_hard` | One against one with `hunter_easy` / `hunter_medium` / `hunter_hard` (arena radius 8 m, ceiling 4 m) | A win: the opponent shot down, crashed or out of the arena while you still fly; time up scores by hit points left |
+| `ram_easy` | A target hovers on the spawn ring (`judge_hover_target`); guns are off; contacts and UWB-like position | The target crashes from a collision with you within 60 s; faster and harder impacts score higher, a near miss scores by the closest approach |
 
 Scores are 0–100. A submission runs every seed, passes when every seed passes and scores their mean; `result = {score, passed, metrics, seeds: [{seed (null when hidden), hidden, score, passed, metrics, trace_id}], trace_id, best, speed}`. Hidden seeds fly other airframes and leave no trace. Each challenge keeps its best full submission and the last 50 in `<data_dir>/programs/results.json`.
 
@@ -397,6 +398,25 @@ The arena (05 §7) lets Relay terminals on the same broadcast domain see each ot
 
 A round deals 20 damage (five bring a simulator down) and pushes the airframe; a shot-down simulator stops its motors, falls, disarms on the ground and returns to its seat's spawn point after 5 s (setting `arena_auto_respawn`) or on a reset. Hits are not safety events: they raise no alert. Settings: `peer_enabled`, `peer_port`, `peer_callsign` (≤ 16 characters; empty uses the computer name), `arena_auto_respawn`. SDK: `arena()`, `fire(id, seconds)`.
 
+### Dogfights, matches and the leaderboard
+
+A **dogfight** (07 §3) is a timed fight of 2–8 simulators in the arena, each flown by an onboard program at the `sticks` level: **gunners** fire, **rammers** fly into their targets and never fire. One call sets it up: Relay takes free simulators (and adds the rest), places them on a ring of spawn points 3 m inside the arena edge facing the centre, sets hover assist and the airframe, opens a session named `dogfight` that claims them, deploys the program of each role (`hunter_medium` and `rammer` by default), arms them, and the programs take off themselves. The operator can possess any aircraft at any time: its program pauses (state `human`) and resumes on release. With `respawn` a shot-down or crashed aircraft (state `down`) is back at its spawn point after 5 s and flies again. At the end (time up, `DELETE`, or every aircraft failed) the programs stop, airborne aircraft land, a simulator still up after 20 s or sitting on the ground without the landing detector firing is disarmed with the checks skipped, the claims are released and the final standings stay on the leaderboard. On the LAN the dogfight joins the running match or starts one on every version 2 terminal; with the arena off it runs in **practice mode** (the arena rules without a socket; nothing is sent) and leaves it at the end. **Real aircraft are refused** (`dogfight_real_aircraft`); they never take part in matches, collisions or scenarios.
+
+| Method and path | Who | Purpose |
+|---|---|---|
+| `POST /scenarios/dogfight` | app control (session with `agents_app_control`, or the operator) | `{aircraft (2–12, default 6; more than 8 → dogfight_no_aircraft), teams ("ffa" / 2 / 3), roles: {gunner, rammer} (sum = aircraft; default 2 gunners : 1 rammer), programs: {gunner, rammer}, arena: {radius (3–30, default 8), ceiling (2–10, default 4)}, airframe (ideal / typical / rough), hover_assist (default false), duration_s (30–1800, default 180), respawn (default true), seed, vehicles}` → the dogfight view; `dogfight_running` while one runs |
+| `GET /scenarios/dogfight` | – | `{running, phase (idle / booting / arming / deploying / running / ending / done), started_at, ends_at, config, aircraft: [{vid, role, program, team, state (booting / arming / deploying / flying / human / down / stopped / failed)}], match, by, reason (time / stopped / error), error}` |
+| `DELETE /scenarios/dogfight` | app control | End it early; `dogfight_not_running` without one |
+| `POST /arena/match` | app control | `{duration_s}` (30–1800, default 180): a match here and on every version 2 peer; `arena_off`, `match_running` |
+| `DELETE /arena/match` | app control | End the running match everywhere (`ended: true`); without one, reset the statistics (`ended: false`) |
+| `GET /arena/leaderboard?by=` | – | `{by, match, rows: [{key, aircraft, callsign, local, controller: {kind (program / agent / human / none), name}, downs, hits, shots, accuracy, rams, deaths, crashes, damage, alive, alive_s, best_alive_s}]}`, sorted by `downs` (default), `survival`, `accuracy` or `rams` |
+
+**Statistics.** Every simulator in the arena has a line: downs (a round of its brought another aircraft down), hits, shots, rams (a collision it caused crashed the other aircraft), deaths (shot down), crashes (collision or ground), damage dealt, the current survival time and the longest one. A match (`{id, origin, started_at, duration_s, running, ended_at, reason (time / stopped / conflict)}`) resets the lines at its start and freezes them at its end; the arena snapshot carries `match` and `board_rev`. Rows of a LAN peer come from its own statistics (it counts what it saw); a Relay 0.4 peer's rows have null statistics.
+
+**Wire protocol 2.** Relay 0.5 speaks version 2 of the arena protocol and stays compatible with 0.4: every packet 0.4 knows is still sent with version byte 1, byte for byte; version 2 is used only for `COLLIDE`, `MATCH` and, about once a second, a `STATE` that carries the statistics block (a 0.4 terminal drops those as malformed and keeps the other states). A peer is version 2 from its first valid version 2 packet; matches and collisions only involve version 2 peers. `MATCH` starts or ends a match on every terminal (the earliest start wins a conflict; it is repeated every 2 s while running). **LAN collisions**: each terminal sweeps its own aircraft against the peers' (as last reported, extrapolated at most 0.15 s); on a contact it applies the response to its own aircraft and sends `COLLIDE` to the owner of the other one. The owner applies it only after checking it again: at most 0.3 s old (clock difference and half the round trip), the two aircraft within 0.6 m of each other at the contact time on its own view, at most 4 per second per peer aircraft, once per pair within 0.5 s; it answers with a reply (never answered again) so the sender learns about a crash it caused. A rejected `COLLIDE` changes nothing. Event `collision` (`data.a`, `data.b`, `data.b_label`, `data.point`, `data.v_rel`, `data.crashed`, `data.kind`, `data.remote`).
+
+SDK: `dogfight_start(...)`, `dogfight_stop()`, `dogfight_status()`, `leaderboard(by)`, `match_start(duration_s)`, `match_end()`. MCP (application server) and Copilot: `dogfight_start`, `dogfight_stop`, `dogfight_status`, `leaderboard`. A request such as "a six-aircraft free-for-all, four gunners and two rammers" maps to `dogfight_start {aircraft: 6, teams: "ffa", roles: {gunner: 4, rammer: 2}}`.
+
 ## 6. WebSocket `/api/v1/stream`
 
 Server → client:
@@ -432,6 +452,8 @@ Each event is `{seq, t, kind, vehicle, session, text_en, text_zh, data}`. The ki
 | `sim_airframe_changed` | Airframe defects of a simulated aircraft set (`data.preset`, `data.seed`, `data.by`) |
 | `judge_finished` | A challenge or duel job ended (`data.job`, `data.kind`, `data.state`, `data.score`, `data.passed`) |
 | `peer_joined` / `peer_left` / `arena_hit` / `arena_down` | LAN arena: a terminal joined or left, a hit scored or taken, a simulator shot down |
+| `collision` | Two aircraft, or an aircraft and a ring or the ground, touched (`data.a`, `data.b`, `data.crashed`, `data.kind`, `data.remote` for a LAN contact) |
+| `dogfight_started` / `dogfight_finished` / `match_started` / `match_finished` | Dogfight scenario and arena match (`data.reason`; the leader in the finished text) |
 | `device_command` / `motor_test` / `motor_test_stopped` / `actuator_set` / `rc_override` / `message_interval` / `home_set` / `rebooting` / `calibration_started` / `terminated` | Device-level operations |
 | `app_command` | An interface action run by a session or the operator (`data.action`, `data.by`) |
 | `procedure_started` / `procedure_step` / `procedure_waiting` / `procedure_finished` / `procedure_aborted` | Bench procedures, with `data.run_id`, `data.step`, `data.verdict` or `data.reason` |
@@ -454,7 +476,7 @@ The full list is in `web/src/api/schema.json` (`EventKind`). Errors share one bo
 | 503 | `link_not_ready`, `backend_busy`, `ui_unavailable`, `judge_unavailable` |
 | 504 | `ui_timeout` |
 
-Onboard programs and the agent flight level add: 403 `sticks_only`; 400 `program_invalid`, `program_param_invalid`; 404 `program_not_found`, `revision_not_found`; 409 `program_readonly`, `program_load_failed`, `no_program`, `program_not_paused`, `programs_not_allowed`; 503 `program_host_unavailable`. The clients add `judge_unavailable` (404) for a Relay without the judge API.
+Onboard programs and the agent flight level add: 403 `sticks_only`; 400 `program_invalid`, `program_param_invalid`; 404 `program_not_found`, `revision_not_found`; 409 `program_readonly`, `program_load_failed`, `no_program`, `program_not_paused`, `programs_not_allowed`; 503 `program_host_unavailable`. Dogfights and matches add 400 `dogfight_real_aircraft`; 409 `dogfight_running`, `dogfight_not_running`, `dogfight_no_aircraft`, `match_running`. The clients add `judge_unavailable` (404) for a Relay without the judge API.
 
 ## 8. MCP servers
 
@@ -464,7 +486,7 @@ Relay ships three stdio Model Context Protocol servers (JSON-RPC 2.0, standard l
 |---|---|---|---|
 | `anet-relay` | `mcp/anet_relay_mcp.py` | 20 `relay_*` (13 at the `sticks` level) | Flight: fleet, claims, arm, mode, skills, plans, timed sticks, re-fly, courses, stop |
 | `anet-relay-device` | `mcp/anet_relay_device_mcp.py` | 36 `device_*` | Device level: overview, MAVLink messages, parameter reads and writes, raw commands, single-motor tests, actuators, RC override, message rates, reboot, calibration, home, attitude and velocity control, flight termination, bench procedures and their reports |
-| `anet-relay-app` | `mcp/anet_relay_app_mcp.py` | 42 `app_*` and 19 program tools | Application control: app and window state, controllers, language, workspace, selection, inspector, dialogs, screenshots, network scan, connecting and removing aircraft, simulators, settings, alerts, records and export, re-fly sources, possession, the Copilot window, stop-all; onboard programs: `program_guide`, `program_*`, `challenge_list`, `challenge_submit`, `job_status`, `duel_run`, `ladder`, `airframe_set` |
+| `anet-relay-app` | `mcp/anet_relay_app_mcp.py` | 42 `app_*`, 19 program tools and 4 dogfight tools | Application control: app and window state, controllers, language, workspace, selection, inspector, dialogs, screenshots, network scan, connecting and removing aircraft, simulators, settings, alerts, records and export, re-fly sources, possession, the Copilot window, stop-all; onboard programs: `program_guide`, `program_*`, `challenge_list`, `challenge_submit`, `job_status`, `duel_run`, `ladder`, `airframe_set`; dogfights: `dogfight_start`, `dogfight_stop`, `dogfight_status`, `leaderboard` |
 
 Each server opens an agent session named by `--name` (defaults `mcp`, `mcp-device` and `mcp-app`) at start, renews its lease and closes it when the client disconnects. After a Relay restart it opens a new session on the next call; claims must then be made again. Claims belong to a session: fly an aircraft with the claim tool of the same server (`relay_claim` or `device_claim`). Arguments are checked before anything reaches Relay; missing or unknown ones come back as `invalid arguments`. Failures come back as tool results with `isError: true` and the error code, so a model can react (for example, wait on `possessed_by_human`).
 
@@ -539,6 +561,7 @@ If Relay is not on port 8765, add `"--base", "http://127.0.0.1:<port>"`. The des
 | `message_interval(id, message, hz)` · `request_message(id, message)` · `reboot(id, confirm)` · `calibrate(id, sensor, confirm)` · `set_home(id, here, lat, lon, alt)` · `terminate(id, confirm)` | Message rates, reboot, calibration, home, flight termination |
 | `procedures()` · `procedure_start(id, procedure, hover_s, skip, auto_answer)` · `procedure(id)` · `procedure_answer(id, step, answer, confirm)` · `procedure_abort(id)` · `wait_procedure(id, timeout, waiting=True)` · `test_runs(id)` · `test_run(run_id)` · `test_run_export(run_id, fmt)` | Bench procedures and reports |
 | `arena()` · `fire(id, seconds)` | LAN arena view and the trigger of a simulator |
+| `dogfight_start(aircraft, teams, roles, programs, arena, airframe, hover_assist, duration_s, respawn, seed, vehicles)` · `dogfight_stop()` · `dogfight_status()` · `leaderboard(by)` · `match_start(duration_s)` · `match_end()` | Dogfight scenario, matches and the leaderboard (app operations) |
 | `program_list()` · `program_get(pid)` · `program_revisions(pid)` · `program_create(name, source, description, params, tests, note, copy_of)` · `program_update(pid, source, patch, note, ...)` · `program_delete(pid)` · `program_validate(pid, source)` · `program_test(pid, rev, source, tests, seed)` | Onboard programs: store, revisions, validation and unit tests |
 | `program_deploy(id, pid, rev, params, mode, sensors, arena, seed, airframe)` · `program_stop(id)` · `program_resume(id)` · `program_params(id, **values)` · `program_status(id)` · `program_log(id, after, limit)` · `program_allow(id, allow, confirm)` | Running programs (`program_allow` needs the operator token) |
 | `challenge_list()` · `challenge_submit(challenge, pid, rev, wait=True)` · `job_status(job)` · `wait_job(job)` · `duel_run(pids, rounds, seed, scenario, wait=True)` · `ladder()` · `trace(id)` | Judge, duels and the ladder; `judge_unavailable` without the judge API |

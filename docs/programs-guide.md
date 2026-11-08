@@ -118,7 +118,7 @@ takes `roll`, `pitch`, `yaw`, `throttle` as `[low, high]`, `fire` as a boolean a
 ## Workflow with the tools
 
 1. `program_list` / `program_get`: start from a built-in (`hover_trim`, `liftoff`, `patrol`, `hunter_easy`,
-   `hunter_medium`, `hunter_hard`; read-only, copy with `program_create {copy_of}`) or write a new one.
+   `hunter_medium`, `hunter_hard`, `rammer`; read-only, copy with `program_create {copy_of}`) or write a new one.
 2. `program_create` / `program_update`: every change is a new revision with a `note`. `program_update` takes
    a whole `source` or a line `patch` `[{start, end, text}]` (1-based, inclusive; all numbers refer to the
    current revision; `end = start - 1` inserts before `start`). Both return the validation result.
