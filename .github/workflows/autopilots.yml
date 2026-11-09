@@ -117,6 +117,11 @@ jobs:
         working-directory: ${{ runner.temp }}/ardupilot
         run: |
           python -m pip install --disable-pip-version-check empy==3.3.4 pexpect future lxml dronecan
+          case "${{ matrix.version.version }}" in
+            # The new Apple linker rejects the packed AP_FWVersion pointers of 4.3 and 4.4 on arm64; 4.5 and
+            # later link with ld_classic for the same reason (Tools/ardupilotwaf/boards.py).
+            4.3.*|4.4.*) export LINKFLAGS="-Wl,-ld_classic" ;;
+          esac
           python ./waf configure --board sitl
           python ./waf copter
           ls -l build/sitl/bin
@@ -290,9 +295,12 @@ jobs:
         working-directory: ${{ runner.temp }}/px4
         run: |
           if [ "${RUNNER_OS}" = macOS ]; then
-            # Xcode 16 clang reports variable length arrays as a C++ extension, which -Werror makes fatal
-            # in PX4 1.14 to 1.16 (dataman). Kept as a warning; flight code is unchanged.
-            export CXXFLAGS="-Wno-error=vla-cxx-extension" CFLAGS="-Wno-error=vla-extension"
+            # Diagnostics Xcode 16 clang added after these PX4 releases (variable length arrays in dataman,
+            # unprototyped sitl_led.c functions, ...), which -Werror makes fatal in 1.14 to 1.16. Kept as
+            # warnings; flight code is unchanged.
+            common="-Wno-error=deprecated-declarations -Wno-error=unused-but-set-variable"
+            export CFLAGS="${common} -Wno-error=vla-extension -Wno-error=strict-prototypes -Wno-error=deprecated-non-prototype"
+            export CXXFLAGS="${common} -Wno-error=vla-cxx-extension -Wno-error=bitwise-instead-of-logical -Wno-error=unqualified-std-cast-call -Wno-error=single-bit-bitfield-constant-conversion"
           fi
           make px4_sitl_default
           ls -l build/px4_sitl_default/bin/px4
