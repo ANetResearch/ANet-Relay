@@ -981,8 +981,11 @@ def test_firmware_dies_with_a_killed_relay_and_stale_workdirs_are_swept(tmp_path
                 os.kill(child, 0)
             except ProcessLookupError:
                 break
-            if Path(f"/proc/{child}/stat").read_text().split()[2] == "Z":
-                break  # killed, waiting for its reaper
+            try:
+                if Path(f"/proc/{child}/stat").read_text().split()[2] == "Z":
+                    break  # killed, waiting for its reaper
+            except OSError:
+                break  # reaped between the two checks
             time.sleep(0.05)
         else:
             os.kill(child, signal.SIGKILL)
