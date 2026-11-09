@@ -63,6 +63,35 @@ export const live = {
 
 const fetched = new Set<string>()
 
+/**
+ * A simulator's level error (radians, roll and pitch) for this flight. ATTITUDE is the board's estimate and leaves
+ * the level error out by design (10 §3): the board believes it is level. The stage draws the airframe itself, so it
+ * adds the error back. The value comes from the operator-only airframe view (06 §4), never from the snapshot.
+ */
+const levelErrors = new Map<string, { key: string; at: number; rad: [number, number] }>()
+const LEVEL_REFRESH_MS = 3000
+
+function levelError(v: Vehicle, now: number): [number, number] {
+  if (v.kind !== 'sim' || !v.sim) return [0, 0]
+  const key = `${v.armed}:${v.sim.hover_assist}:${v.sim.airframe.preset}:${v.sim.airframe.seed}`
+  const got = levelErrors.get(v.id)
+  if (!got || got.key !== key || (v.armed && now - got.at > LEVEL_REFRESH_MS)) {
+    levelErrors.set(v.id, { key, at: now, rad: got?.rad ?? [0, 0] })
+    api
+      .simAirframe(v.id)
+      .then((af) => {
+        const deg = af.active ? (af.level_now_deg ?? [0, 0]) : [0, 0]
+        const rad: [number, number] = [((deg[0] ?? 0) * Math.PI) / 180, ((deg[1] ?? 0) * Math.PI) / 180]
+        const cur = levelErrors.get(v.id)
+        if (cur) cur.rad = rad
+      })
+      .catch(() => {
+        /* not the operator: the estimate is all there is */
+      })
+  }
+  return levelErrors.get(v.id)?.rad ?? [0, 0]
+}
+
 function throttleOf(v: Pick<Vehicle, 'armed' | 'throttle_pct' | 'sticks'>): number {
   if (!v.armed) return 0
   if (typeof v.throttle_pct === 'number') return Math.min(1, Math.max(0, v.throttle_pct / 100))
@@ -141,6 +170,7 @@ function rebuild(): void {
 
   const ids = new Set(vehicles.map((v) => v.id))
   for (const id of live.spawns.keys()) if (!ids.has(id)) live.spawns.delete(id)
+  for (const id of levelErrors.keys()) if (!ids.has(id)) levelErrors.delete(id)
   for (const v of vehicles) {
     if (v.kind !== 'sim') continue
     if (!live.spawns.has(v.id)) {
@@ -167,6 +197,7 @@ function rebuild(): void {
       const v = vehicles[i]
       const p = placed[i]
       const att = v.attitude
+      const [errRoll, errPitch] = levelError(v, now)
       next.set(v.id, {
         id: v.id,
         kind: p.kind,
@@ -177,8 +208,8 @@ function rebuild(): void {
         vx: p.vx,
         vy: p.vy,
         vz: p.vz,
-        roll: att ? att.roll : null,
-        pitch: att ? att.pitch : null,
+        roll: att ? att.roll + errRoll : null,
+        pitch: att ? att.pitch + errPitch : null,
         yaw: att ? att.yaw : typeof v.heading_deg === 'number' ? (v.heading_deg * Math.PI) / 180 : null,
         throttle: throttleOf(v),
         armed: v.armed,
