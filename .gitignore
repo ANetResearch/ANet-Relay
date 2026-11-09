@@ -15,6 +15,8 @@ e2e/artifacts/
 test-results/
 playwright-report/
 refs/
+var/
+build/autopilots/
 .DS_Store
 *.log
 electron/copilot/agent.bundle.mjs

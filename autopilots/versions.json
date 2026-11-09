@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "comment": "Autopilot runtime packs bundled with Relay (11 §3.1), in priority order. Built by .github/workflows/autopilots.yml into the release autopilots-v1; see docs/autopilot-packs.md.",
+  "ardupilot": [
+    { "version": "4.7.2", "tag": "Copter-4.7.2" },
+    { "version": "4.6.3", "tag": "Copter-4.6.3" },
+    { "version": "4.5.7", "tag": "Copter-4.5.7" },
+    { "version": "4.4.4", "tag": "Copter-4.4.4" },
+    { "version": "4.3.8", "tag": "Copter-4.3.8" }
+  ],
+  "px4": [
+    { "version": "1.17.0", "tag": "v1.17.0" },
+    { "version": "1.16.2", "tag": "v1.16.2" },
+    { "version": "1.15.4", "tag": "v1.15.4" },
+    { "version": "1.14.4", "tag": "v1.14.4" }
+  ]
+}

@@ -1,0 +1,26 @@
+# Relay baseline for ArduCopter SITL on Relay's default frame (11 §5, §6.1): micro-120, 120 g, 250 mm
+# wheelbase, thrust-to-weight 2.4 (backend/relay/sim/physics.py). Loaded after the version's copter.parm
+# and before a twin profile's parameters, so a captured vehicle overrides every value here.
+#
+# Quad X; the motor order matches Relay's physics (1 front right CCW, 2 rear left CCW, 3 front left CW,
+# 4 rear right CW).
+FRAME_TYPE 1
+#
+# Rate loop. The stock gains (P/I 0.135, D 0.0036) are tuned for a 1.5 kg airframe; the micro frame has
+# roughly ten times the angular acceleration per unit of output and oscillates on them. These values were
+# flown in the lockstep spike (2026-11-09): take-off, 3 m altitude hold, 1 m/s descent and landing.
+ATC_RAT_RLL_P 0.03
+ATC_RAT_RLL_I 0.03
+ATC_RAT_RLL_D 0.0008
+ATC_RAT_PIT_P 0.03
+ATC_RAT_PIT_I 0.03
+ATC_RAT_PIT_D 0.0008
+ATC_RAT_YAW_P 0.08
+ATC_RAT_YAW_I 0.008
+#
+# Thrust model: Relay's hover output with the linear thrust curve of the physics model.
+MOT_THST_HOVER 0.42
+MOT_THST_EXPO 0
+#
+# Physics frame rate requested from Relay: at least 1.8 x the 400 Hz main loop.
+SIM_RATE_HZ 1000
