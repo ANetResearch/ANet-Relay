@@ -105,7 +105,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          # ArduPilot 4.3 and 4.4 open files with mode 'rU', which Python 3.11 removed.
+          python-version: ${{ (startsWith(matrix.version.version, '4.3.') || startsWith(matrix.version.version, '4.4.')) && '3.10' || env.PYTHON_VERSION }}
       - name: Clone ${{ matrix.version.tag }}
         run: |
           git clone --depth 1 --branch "${{ matrix.version.tag }}" https://github.com/ArduPilot/ardupilot.git "${RUNNER_TEMP}/ardupilot"
@@ -201,7 +202,20 @@ jobs:
           python scripts/build-pack.py ardupilot --version ${{ matrix.version }} --platform win-x64 --built ci \
             --binary "${exe}" --git "$(git -C "${src}" rev-parse HEAD)" \
             --copter-parm "${src}/Tools/autotest/default_params/copter.parm" "${libs[@]}" --out dist
-          ./dist/ardupilot-copter-${{ matrix.version }}/bin/arducopter.exe --help > help.txt && head -n 3 help.txt
+          ls -l "dist/ardupilot-copter-${{ matrix.version }}/bin"
+      # Started from PowerShell, as Relay starts it: the pack's own Cygwin DLLs, not the installed ones.
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $exe = "dist\ardupilot-copter-${{ matrix.version }}\bin\arducopter.exe"
+          $out = & $exe --help 2>&1
+          $code = $LASTEXITCODE
+          $out | Select-Object -First 3
+          if ($code -ne 0) {
+            Write-Host "arducopter.exe --help exited with $code"
+            & C:\cygwin\bin\cygcheck.exe (Resolve-Path $exe)
+            exit 1
+          }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pack-ardupilot-copter-${{ matrix.version }}-win-x64
@@ -241,7 +255,9 @@ jobs:
           brew list ninja > /dev/null 2>&1 || brew install ninja
       - name: Python dependencies
         run: |
-          python -m pip install --disable-pip-version-check cmake ninja kconfiglib jinja2 empy==3.3.4 pyros-genmsg \
+          # PX4 1.14 and 1.15 declare cmake_minimum_required below 3.5, which CMake 4 rejects.
+          case "${{ matrix.version.version }}" in 1.14.*|1.15.*) cmake='cmake<4' ;; *) cmake=cmake ;; esac
+          python -m pip install --disable-pip-version-check "${cmake}" ninja kconfiglib jinja2 empy==3.3.4 pyros-genmsg \
             pyyaml jsonschema future numpy packaging toml
       - name: Clone v${{ matrix.version.version }}
         run: |
@@ -273,6 +289,11 @@ jobs:
       - name: Build SITL
         working-directory: ${{ runner.temp }}/px4
         run: |
+          if [ "${RUNNER_OS}" = macOS ]; then
+            # Xcode 16 clang reports variable length arrays as a C++ extension, which -Werror makes fatal
+            # in PX4 1.14 to 1.16 (dataman). Kept as a warning; flight code is unchanged.
+            export CXXFLAGS="-Wno-error=vla-cxx-extension" CFLAGS="-Wno-error=vla-extension"
+          fi
           make px4_sitl_default
           ls -l build/px4_sitl_default/bin/px4
       - name: Assemble pack
@@ -313,7 +334,7 @@ jobs:
           for platform in linux-x64 mac-arm64 mac-x64 win-x64; do
             python3 scripts/build-pack.py index dist --platform "${platform}" --out "dist/index-${platform}.json"
             packs="$(python3 -c 'import json,sys; print(", ".join(p["id"] for p in json.load(open(sys.argv[1]))["packs"]) or "none")' "dist/index-${platform}.json")"
-            size="$(du -ch dist/*-"${platform}".tar.gz 2>/dev/null | tail -n 1 | cut -f1)"
+            size="$( (du -ch dist/*-"${platform}".tar.gz 2>/dev/null || true) | tail -n 1 | cut -f1)"
             echo "| ${platform} | ${packs} | ${size:-0} |" >> summary.md
           done
           cat summary.md >> "${GITHUB_STEP_SUMMARY}"
