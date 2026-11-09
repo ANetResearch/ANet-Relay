@@ -24,7 +24,14 @@ def test_new_sims_follow_the_setting(svc, stepper):
     assert v.driver.sim.hover_assist is True
     sim = svc._vehicle_view(v, svc.clock(), svc.wall())["sim"]
     airframe = sim.pop("airframe")  # WP-2a: preset and seed of the setting's default airframe
-    assert sim == {"hover_assist": True, "turbulence": 0.3}
+    # 11 §10: a fast simulator reports its engine and frame preset, and no firmware
+    assert sim == {
+        "hover_assist": True,
+        "turbulence": 0.3,
+        "engine": "relay",
+        "firmware": None,
+        "frame": "micro-120",
+    }
     assert airframe["preset"] == "typical" and set(airframe) == {"preset", "seed"}
     svc.update_settings({"sim_hover_assist": False})
     (second,) = svc.add_sims(1)
