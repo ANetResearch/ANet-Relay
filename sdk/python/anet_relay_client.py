@@ -922,6 +922,164 @@ class RelayClient:
     def remove_sims(self, ids: list[str] | None = None) -> list[str]:
         return self._app("DELETE", "/sims", query={"id": ids} if ids else None)["removed"]
 
+    def set_frame(
+        self,
+        sim_id: str,
+        preset: str | None = None,
+        mass_kg: float | None = None,
+        wheelbase_m: float | None = None,
+        prop_in: float | None = None,
+        cells: int | None = None,
+        capacity_mah: float | None = None,
+    ) -> dict:
+        """A new frame for a disarmed simulator on the ground (11 §8.1), a fast simulator or a firmware twin:
+        ``preset`` micro-120 | small-250 | large-450 and any of its values; omitted values keep the current
+        frame's. Returns ``{id, engine, frame}``; ``armed`` while armed or airborne."""
+        body = _drop_none(
+            preset=preset,
+            mass_kg=mass_kg,
+            wheelbase_m=wheelbase_m,
+            prop_in=prop_in,
+            cells=cells,
+            capacity_mah=capacity_mah,
+        )
+        return self._either("PUT", f"/sims/{_q(sim_id)}/frame", body)
+
+    # ------------------------------------------------------------------ firmware twins (11 §3-§6, §10)
+
+    def autopilots(self) -> dict:
+        """Installed autopilot runtime packs of this platform: ``{platform, bundled_dir, imported_dir,
+        packs}``; each pack ``{id, family, vehicle, version, git, size_bytes, license, origin, usable,
+        problem, twins}``."""
+        return self._get("/autopilots")
+
+    def import_autopilot(self, path: str, sha256: str | None = None) -> dict:
+        """Import a pack tarball from a local path after checking its sha256 (operator token)."""
+        return self._op("POST", "/autopilots/import", _drop_none(path=path, sha256=sha256))
+
+    def delete_autopilot(self, pack_id: str) -> dict:
+        """Delete an imported pack (operator token); bundled and running packs give ``pack_unsupported``."""
+        return self._op("DELETE", f"/autopilots/{_q(pack_id)}")
+
+    def firmware(self, vehicle_id: str) -> dict:
+        """The aircraft's firmware identity (family, version, git, board), its parameter progress and the
+        matching packs: ``match = {recommended, match, warning_en, warning_zh, candidates}``."""
+        return self._get(f"/vehicles/{_q(vehicle_id)}/firmware")
+
+    def twin_profiles(self) -> list[dict]:
+        """Saved twin profiles (summaries): ``[{id, name, firmware, pack, match, frame, ...}]``."""
+        return self._get("/twins/profiles")["profiles"]
+
+    def twin_profile(self, profile_id: str) -> dict:
+        """One twin profile with every parameter and the excluded ones with their reasons (the export)."""
+        return self._get(f"/twins/profiles/{_q(profile_id)}")
+
+    def capture_twin_profile(
+        self,
+        vehicle_id: str,
+        name: str | None = None,
+        frame: str | dict | None = None,
+        profile: str | None = None,
+    ) -> dict:
+        """Capture a twin profile from a connected real aircraft whose parameter table is read completely.
+
+        ``frame`` is a preset name or ``{preset, mass_kg, wheelbase_m, prop_in, cells, capacity_mah}``
+        (omitted: guessed from the battery); ``profile`` recaptures into that profile (name, frame and home
+        stay). Errors: ``real_only``, ``params_incomplete`` (``detail.received/total``),
+        ``pack_unsupported``."""
+        body = _drop_none(from_vehicle=vehicle_id, name=name, frame=_frame_body(frame), profile=profile)
+        return self._app("POST", "/twins/profiles", body)
+
+    def update_twin_profile(
+        self,
+        profile_id: str,
+        name: str | None = None,
+        frame: str | dict | None = None,
+        pack: str | None = None,
+        home: dict | tuple | None = None,
+        clear_home: bool = False,
+    ) -> dict:
+        """Rename a profile, change its frame, pick another pack of the same firmware or set its home
+        (``clear_home=True`` removes it)."""
+        body = _drop_none(name=name, frame=_frame_body(frame), pack=pack, home=_home_body(home))
+        if clear_home:
+            body["home"] = None
+        return self._app("PUT", f"/twins/profiles/{_q(profile_id)}", body)
+
+    def delete_twin_profile(self, profile_id: str) -> dict:
+        return self._app("DELETE", f"/twins/profiles/{_q(profile_id)}")
+
+    def start_twin(
+        self,
+        profile: str | None = None,
+        pack: str | None = None,
+        frame: str | dict | None = None,
+        home: dict | tuple | None = None,
+        count: int = 1,
+        autopilot: str | None = None,
+    ) -> list[str]:
+        """Start firmware twins (``POST /sims`` with ``engine: "sitl"``) and return their ids.
+
+        The official firmware runs against Relay's physics: from a twin ``profile`` (the real aircraft's
+        version and parameters), or a runtime ``pack`` with its default parameters; neither means the newest
+        ArduPilot pack. ``home`` is ``{lat, lon, alt_m}`` or ``(lat, lon[, alt_m])``. The call returns once
+        every firmware sent its first heartbeat. Errors: ``pack_missing``, ``pack_unsupported``,
+        ``twin_start_failed`` (``detail.reason``, ``detail.lines``), ``twin_limit``, ``frame_unsupported``,
+        ``profile_not_found``."""
+        body: dict[str, Any] = {"count": count, "engine": "sitl"}
+        frame_body, home_body = _frame_body(frame), _home_body(home)
+        body.update(_drop_none(autopilot=autopilot, profile=profile, pack=pack))
+        body.update(_drop_none(frame=frame_body, home=home_body))
+        return self._app("POST", "/sims", body)["added"]
+
+    def twin(self, sim_id: str) -> dict:
+        """A firmware twin's state, pack, profile, parameters applied, frame, process and lockstep figures."""
+        return self._get(f"/sims/{_q(sim_id)}/twin")
+
+    # ------------------------------------------------------------------ serial link and HITL (11 §7)
+
+    def serial_ports(self) -> list[dict]:
+        """Serial ports on this computer: ``[{device, name, description, manufacturer, vid, pid,
+        serial_number, autopilot}]``; ``autopilot`` marks a known flight-controller USB interface."""
+        return self._get("/serial/ports")["ports"]
+
+    def connect(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        serial: str | dict | None = None,
+        baud: int | str | None = None,
+    ) -> dict:
+        """Connect an aircraft by ``host`` (UDP, optional ``port``) or over a ``serial`` device (USB).
+
+        ``serial`` is a device path such as ``/dev/ttyACM0`` or ``COM5``, or ``{device, baud}``; ``baud`` is a
+        rate or ``"auto"`` (115200, 57600, 921600 in turn until a heartbeat arrives; USB CDC autopilots ignore
+        it). Errors: ``serial_unavailable`` (``detail.reason/reason_zh``)."""
+        if (host is None) == (serial is None):
+            raise ValueError("connect needs exactly one of host and serial")
+        if serial is None:
+            return self._app("POST", "/vehicles", _drop_none(host=host, port=port))
+        link = dict(serial) if isinstance(serial, dict) else {"device": serial}
+        if baud is not None:
+            link["baud"] = baud
+        return self._app("POST", "/vehicles", {"serial": link})
+
+    def hitl(self, vehicle_id: str, action: str = "status", confirm: str | None = None) -> dict:
+        """PX4 hardware in the loop over a USB serial link: ``action`` status | start | stop.
+
+        ``start`` needs ``confirm="HITL"`` (the propellers are removed), a disarmed PX4 aircraft on a
+        serial link and the operator's possession; Relay backs up the parameters, sets ``SYS_HITL``, reboots
+        and feeds the board sensor data from its physics. ``stop`` writes the backup back, reboots and
+        verifies it. Returns the status ``{state, steps, backup, changed, mismatches, error, run,
+        pending_restore}``.
+        Errors: ``hitl_unavailable`` (``detail.reason/reason_zh``), ``serial_unavailable``."""
+        if action == "status":
+            return self._get(f"/vehicles/{_q(vehicle_id)}/hitl")
+        if action not in ("start", "stop"):
+            raise ValueError("action must be status, start or stop")
+        body = _drop_none(action=action, confirm=confirm)
+        return self._app("POST", f"/vehicles/{_q(vehicle_id)}/hitl", body)
+
     # ------------------------------------------------------------------ onboard programs (06 §2, §3, §6)
     # WP-4b: the same operations as the Copilot program tools and the app MCP server. Store writes, validation
     # and tests need the open session (or the operator token); deploying, stopping, resuming and tuning need
@@ -1181,6 +1339,21 @@ def _q(value: str) -> str:
 
 def _drop_none(**values: Any) -> dict:
     return {k: v for k, v in values.items() if v is not None}
+
+
+def _frame_body(frame: str | dict | None) -> dict | None:
+    """A frame argument: a preset name or the frame object."""
+    if frame is None:
+        return None
+    return {"preset": frame} if isinstance(frame, str) else dict(frame)
+
+
+def _home_body(home: dict | tuple | list | None) -> dict | None:
+    """A home argument: ``{lat, lon, alt_m}`` or ``(lat, lon[, alt_m])``."""
+    if home is None or isinstance(home, dict):
+        return home
+    lat, lon, *rest = home
+    return {"lat": float(lat), "lon": float(lon), "alt_m": float(rest[0]) if rest else 0.0}
 
 
 def _job_id(job: Any) -> str | None:

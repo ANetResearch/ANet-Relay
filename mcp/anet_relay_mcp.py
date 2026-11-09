@@ -16,6 +16,8 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from relay_mcp_common import (
+    FRAME,
+    HOME,
     VID,
     WAIT,
     McpServer,
@@ -85,6 +87,9 @@ ARS = {
     "required": ["format", "version", "mode", "tracks"],
 }
 
+PROFILE_ID = {"type": "string", "description": "twin profile id from relay_twin_profiles_list, e.g. tp-1a2b3c4d"}
+PACK_ID = {"type": "string", "description": "runtime pack id from relay_autopilots_list, e.g. ardupilot-copter-4.7.2"}
+
 SERVER_NAME = "anet-relay"
 
 INSTRUCTIONS = (
@@ -98,7 +103,10 @@ INSTRUCTIONS = (
     "Real aircraft need confirm='ARM' to arm and must pass preflight checks. goto targets must stay inside "
     "the safety volume reported by relay_fleet. Use relay_stop only in an emergency: it cuts the motors. "
     "relay_sticks_for pushes the sticks for a few seconds (a language model cannot fly a 50 Hz loop); "
-    "relay_refly repeats an earlier recorded flight."
+    "relay_refly repeats an earlier recorded flight. "
+    "Firmware twins run the official PX4 or ArduPilot firmware (the real aircraft's version and parameters) "
+    "against Relay's physics: relay_firmware_identify a real aircraft, relay_twin_profile_capture its "
+    "parameters, relay_twin_start a twin and fly it like any simulator."
 )
 # 06 §5 (WP-1): at agent_flight_level "sticks" (the default) agent sessions fly with sticks only.
 # Relay refuses everything else with 403 sticks_only; this server also lists only the tools that still
@@ -124,6 +132,15 @@ STICKS_TOOL_NAMES = frozenset(
         "relay_timeline_stop",
         "relay_timeline_record",
         "relay_timeline_from_record",
+        # 11 §12: firmware twins are simulators; reading and starting them flies nothing
+        "relay_autopilots_list",
+        "relay_firmware_identify",
+        "relay_twin_profiles_list",
+        "relay_twin_profile_get",
+        "relay_twin_profile_capture",
+        "relay_twin_start",
+        "relay_twin_status",
+        "relay_sim_frame",
     }
 )
 STICKS_INSTRUCTIONS = (
@@ -136,7 +153,8 @@ STICKS_INSTRUCTIONS = (
     "For closed-loop flight, write and deploy an onboard program with the anet-relay-app server's program "
     "tools (program_guide, program_create, program_test, program_deploy). "
     "A person can take over (possess) any aircraft at any time; control calls then fail with "
-    "possessed_by_human. Real aircraft need confirm='ARM' to arm and must pass preflight checks."
+    "possessed_by_human. Real aircraft need confirm='ARM' to arm and must pass preflight checks. "
+    "Firmware twins (relay_twin_start) fly the official firmware against Relay's physics like any simulator."
 )
 
 
@@ -416,6 +434,80 @@ TOOLS = [
         },
         ["vehicle", "session_id"],
     ),
+    # 11 §12: firmware twins (official SITL firmware against Relay's physics)
+    _tool(
+        "relay_autopilots_list",
+        "Installed autopilot runtime packs of this platform (official PX4 and ArduPilot SITL builds bundled "
+        "with Relay or imported): id, family, version, git, size, license, origin, usable and running twins.",
+        read_only=True,
+    ),
+    _tool(
+        "relay_firmware_identify",
+        "Firmware identity of an aircraft (family, version, git, board; from AUTOPILOT_VERSION), its "
+        "parameter progress, whether a twin can fly its frame, and the matching runtime packs with the "
+        "recommended one and the match level (exact, version, series, nearest, none).",
+        {"vehicle": VID},
+        ["vehicle"],
+        read_only=True,
+    ),
+    _tool(
+        "relay_twin_profiles_list",
+        "Saved twin profiles: firmware identity, pack, match level, frame, home and how many parameters "
+        "apply to the twin.",
+        read_only=True,
+    ),
+    _tool(
+        "relay_twin_profile_get",
+        "One twin profile with every parameter and the excluded hardware-specific ones with their reasons.",
+        {"profile": PROFILE_ID},
+        ["profile"],
+        read_only=True,
+    ),
+    _tool(
+        "relay_twin_profile_capture",
+        "Capture a twin profile from a connected real aircraft (firmware identity and the whole parameter "
+        "table; hardware-specific parameters are left out). Fails with params_incomplete until every "
+        "parameter is read, real_only for a simulator. `profile` recaptures into an existing profile (its "
+        "name, frame and home stay).",
+        {
+            "vehicle": VID,
+            "name": {"type": "string", "maxLength": 80},
+            "frame": FRAME,
+            "profile": PROFILE_ID,
+        },
+        ["vehicle"],
+    ),
+    _tool(
+        "relay_twin_start",
+        "Start firmware twins: the official PX4 or ArduPilot firmware runs against Relay's physics and "
+        "appears as simulators (sim-N) that fly with every flight tool. From a twin profile (the real "
+        "aircraft's version and parameters) or a pack with its default parameters; neither means the newest "
+        "ArduPilot pack. Returns once each firmware sends its first heartbeat (up to 15 s); errors "
+        "twin_start_failed, twin_limit, pack_missing, frame_unsupported.",
+        {
+            "profile": PROFILE_ID,
+            "pack": PACK_ID,
+            "frame": FRAME,
+            "home": HOME,
+            "count": {"type": "integer", "minimum": 1, "maximum": 8, "default": 1},
+        },
+    ),
+    _tool(
+        "relay_twin_status",
+        "A firmware twin's process state, pack, match level, profile, parameters applied and excluded, "
+        "frame, home, restarts, exit code and last output, and lockstep figures (steps, stalls).",
+        {"vehicle": VID},
+        ["vehicle"],
+        read_only=True,
+    ),
+    _tool(
+        "relay_sim_frame",
+        "Change the physics frame of a disarmed simulator or firmware twin on the ground: a preset "
+        "(micro-120, small-250, large-450) and any of mass, wheelbase, propeller, cells, capacity. A twin "
+        "recomputes the motor thrust from its parameters. Fails with armed while armed or airborne.",
+        {"vehicle": VID, **FRAME["properties"]},
+        ["vehicle"],
+    ),
 ]
 TOOL_NAMES = {t["name"] for t in TOOLS}
 
@@ -553,6 +645,29 @@ def _dispatch(r: RelayClient, name: str, a: dict) -> Any:
             confirm=a.get("confirm"),
             wait=wait,
         )
+    if name == "relay_autopilots_list":
+        return r.autopilots()
+    if name == "relay_firmware_identify":
+        return r.firmware(vid)
+    if name == "relay_twin_profiles_list":
+        return {"profiles": r.twin_profiles()}
+    if name == "relay_twin_profile_get":
+        return r.twin_profile(a["profile"])
+    if name == "relay_twin_profile_capture":
+        return r.capture_twin_profile(vid, name=a.get("name"), frame=a.get("frame"), profile=a.get("profile"))
+    if name == "relay_twin_start":
+        added = r.start_twin(
+            profile=a.get("profile"),
+            pack=a.get("pack"),
+            frame=a.get("frame"),
+            home=a.get("home"),
+            count=int(a.get("count") or 1),
+        )
+        return {"added": added}
+    if name == "relay_twin_status":
+        return r.twin(vid)
+    if name == "relay_sim_frame":
+        return r.set_frame(vid, **{k: a.get(k) for k in FRAME["properties"]})
     raise KeyError(name)
 
 

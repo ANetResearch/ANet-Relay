@@ -187,9 +187,10 @@ def test_mcp_protocol(base):
     assert init["protocolVersion"] == "2025-06-18" and init["capabilities"]["tools"] == {"listChanged": False}
     names = [t["name"] for t in replies[2]["result"]["tools"]]
     assert (
-        len(names) == 26
+        len(names) == 34
         and {"relay_course_start", "relay_plan", "relay_move", "relay_yaw", "relay_sticks_for", "relay_refly"}
         <= set(names)
+        and "relay_twin_start" in names
         and "relay_sticks" not in names
     )
     fleet = json.loads(replies[3]["result"]["content"][0]["text"])
