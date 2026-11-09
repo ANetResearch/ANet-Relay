@@ -3,7 +3,8 @@
 // The app is packaged with `identity: null`, so electron-builder never signs on its own; this hook decides.
 //
 // Developer ID (MAC_SIGN_IDENTITY set: a certificate name or SHA-1 hash, optionally in MAC_SIGN_KEYCHAIN):
-//   every Mach-O file of the PyInstaller backend is signed first with the Hardened Runtime, then
+//   every Mach-O file of the PyInstaller backend and of the autopilot runtime packs (Resources/autopilots, 11 §3.2)
+//   is signed first with the Hardened Runtime, then
 //   @electron/osx-sign signs the Electron frameworks, helpers and the app with brand/entitlements.mac.plist.
 //   With APPLE_API_KEY_PATH, APPLE_API_KEY_ID and APPLE_API_ISSUER (an App Store Connect API key) the app is
 //   then notarized and the ticket stapled, so a downloaded copy opens without any Gatekeeper step.
@@ -50,17 +51,22 @@ function run(cmd, args, options = {}) {
   return execFileSync(cmd, args, { stdio: "inherit", ...options });
 }
 
-function backendBinaries(appPath) {
-  const dir = path.join(appPath, "Contents", "Resources", "backend");
-  return fs.existsSync(dir) ? [...walk(dir)].filter(isMachO) : [];
+// Loose executables under Contents/Resources that the app signature does not cover on its own.
+const SIGNED_RESOURCES = ["backend", "autopilots"];
+
+function resourceBinaries(appPath) {
+  return SIGNED_RESOURCES.flatMap((name) => {
+    const dir = path.join(appPath, "Contents", "Resources", name);
+    return fs.existsSync(dir) ? [...walk(dir)].filter(isMachO) : [];
+  });
 }
 
 function adHoc(appPath) {
-  // codesign --deep does not reach loose Mach-O files under Contents/Resources, so the
-  // PyInstaller backend's executable and libraries are signed first, one by one.
-  const files = backendBinaries(appPath);
+  // codesign --deep does not reach loose Mach-O files under Contents/Resources, so the PyInstaller
+  // backend's executable and libraries and the autopilot executables are signed first, one by one.
+  const files = resourceBinaries(appPath);
   for (const file of files) run("codesign", ["--force", "--sign", "-", "--timestamp=none", file]);
-  console.log(`  • ad-hoc signed ${files.length} backend binaries`);
+  console.log(`  • ad-hoc signed ${files.length} backend and autopilot binaries`);
   run("codesign", ["--force", "--deep", "--sign", "-", "--timestamp=none", appPath]);
   run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath]);
   console.log(`  • ad-hoc signed ${path.basename(appPath)}`);
@@ -68,12 +74,12 @@ function adHoc(appPath) {
 
 async function developerId(appPath, identity, keychain) {
   const keychainArgs = keychain ? ["--keychain", keychain] : [];
-  const backend = path.join(appPath, "Contents", "Resources", "backend") + path.sep;
-  const files = backendBinaries(appPath);
+  const presigned = SIGNED_RESOURCES.map((name) => path.join(appPath, "Contents", "Resources", name) + path.sep);
+  const files = resourceBinaries(appPath);
   for (const file of files) {
     run("codesign", ["--force", "--sign", identity, ...keychainArgs, "--options", "runtime", "--timestamp", "--entitlements", ENTITLEMENTS, file]);
   }
-  console.log(`  • signed ${files.length} backend binaries with the Developer ID`);
+  console.log(`  • signed ${files.length} backend and autopilot binaries with the Developer ID`);
 
   const { signAsync } = require("@electron/osx-sign");
   await signAsync({
@@ -84,10 +90,11 @@ async function developerId(appPath, identity, keychain) {
     type: "distribution",
     preAutoEntitlements: false,
     optionsForFile: () => ({ hardenedRuntime: true, entitlements: ENTITLEMENTS }),
-    // Only Mach-O code and bundles: the backend is already signed, and data files (app.asar, images, the
-    // backend's archives) are sealed as resources by the app's signature instead of carrying their own.
+    // Only Mach-O code and bundles: the backend and the autopilot packs are already signed, and data files
+    // (app.asar, images, the backend's archives, the packs' ROMFS) are sealed as resources by the app's
+    // signature instead of carrying their own.
     ignore: (file) => {
-      if (file.startsWith(backend)) return true;
+      if (presigned.some((dir) => file.startsWith(dir))) return true;
       if (/\.(app|framework)$/.test(file)) return false;
       return !isMachO(file);
     },

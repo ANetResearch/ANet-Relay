@@ -1,0 +1,33 @@
+#!/bin/sh
+# Relay baseline for PX4 SITL on Relay's default frame (11 §5, §6.2): micro-120, 120 g, 250 mm wheelbase,
+# thrust-to-weight 2.4 (backend/relay/sim/physics.py). PX4 shell syntax, one 'param set-default' per line;
+# sourced through RELAY_PX4_PARAMS by the pack's px4-rc.mavlink (docs/autopilot-packs.md). A twin
+# profile's parameters are applied after this file with 'param set' and therefore take precedence.
+#
+# Hover output of the physics model (the same value the ArduPilot baseline uses for MOT_THST_HOVER).
+param set-default MPC_THR_HOVER 0.42
+#
+# Rate loop. The stock gains (roll/pitch P 0.15, I 0.2, D 0.003; yaw P 0.2, I 0.1) suit a 1.5 kg airframe.
+# The micro frame has roughly ten times the angular acceleration per unit of output, so the gains are
+# scaled by about 0.25, the same factor that made the ArduPilot spike fly cleanly. Raise P first if the
+# twin feels soft; halve D first if it oscillates.
+param set-default MC_ROLLRATE_P 0.04
+param set-default MC_ROLLRATE_I 0.05
+param set-default MC_ROLLRATE_D 0.0008
+param set-default MC_PITCHRATE_P 0.04
+param set-default MC_PITCHRATE_I 0.05
+param set-default MC_PITCHRATE_D 0.0008
+param set-default MC_YAWRATE_P 0.08
+param set-default MC_YAWRATE_I 0.04
+#
+# Quad X geometry of the micro frame: rotors at +-0.088 m on both axes, PX4 order (0 front right CCW,
+# 1 rear left CCW, 2 front left CW, 3 rear right CW), the same order as HIL_ACTUATOR_CONTROLS 0..3.
+param set-default CA_ROTOR_COUNT 4
+param set-default CA_ROTOR0_PX 0.088
+param set-default CA_ROTOR0_PY 0.088
+param set-default CA_ROTOR1_PX -0.088
+param set-default CA_ROTOR1_PY -0.088
+param set-default CA_ROTOR2_PX 0.088
+param set-default CA_ROTOR2_PY -0.088
+param set-default CA_ROTOR3_PX -0.088
+param set-default CA_ROTOR3_PY 0.088

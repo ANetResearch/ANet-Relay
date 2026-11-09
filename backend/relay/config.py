@@ -226,6 +226,21 @@ def default_data_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "data"
 
 
+def autopilots_dir() -> Path:
+    """Autopilot runtime packs (11 §3.2, docs/autopilot-packs.md).
+
+    RELAY_AUTOPILOTS_DIR (set by the Electron shell when packaged), else resources/autopilots next to a
+    frozen backend (<resources>/backend/anet-relay-backend), else <repo>/var/autopilots in development.
+    The directory may not exist: a build without packs, or a checkout before fetch-autopilots.mjs.
+    """
+    override = os.environ.get("RELAY_AUTOPILOTS_DIR", "").strip()
+    if override:
+        return Path(override).expanduser()
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent.parent / "autopilots"
+    return Path(__file__).resolve().parent.parent.parent / "var" / "autopilots"
+
+
 def load_settings(data_dir: Path | None) -> Settings:
     settings = Settings()
     if data_dir is not None:

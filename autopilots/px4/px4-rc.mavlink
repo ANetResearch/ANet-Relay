@@ -1,0 +1,45 @@
+#!/bin/sh
+# shellcheck disable=SC2154
+#
+# ANet Relay replacement for ROMFS init.d-posix/px4-rc.mavlink (11 §2, §6.2; docs/autopilot-packs.md).
+# Differences from the PX4 original (v1.16.2):
+# - The GCS link sends to Relay's dedicated port instead of the default 14550, which Relay listens on for
+#   real aircraft: local UDP 18570+n, remote 24550+n, or RELAY_GCS_PORT_LOCAL / RELAY_GCS_PORT_REMOTE.
+# - No API/Offboard link (14540+n) and no gimbal link (13280+n).
+# - RELAY_PX4_PARAMS names an optional file of 'param' lines (the pack's defaults/relay-quadx.params, a
+#   twin profile) that is sourced before the GCS link starts.
+
+udp_onboard_payload_port_local=$((14280+px4_instance))
+udp_onboard_payload_port_remote=$((14030+px4_instance))
+udp_gcs_port_local=${RELAY_GCS_PORT_LOCAL:-$((18570+px4_instance))}
+udp_gcs_port_remote=${RELAY_GCS_PORT_REMOTE:-$((24550+px4_instance))}
+
+# Relay parameters
+if [ -n "$RELAY_PX4_PARAMS" ] && [ -f "$RELAY_PX4_PARAMS" ]
+then
+	. "$RELAY_PX4_PARAMS"
+fi
+
+# GCS link
+mavlink start -x -u $udp_gcs_port_local -o $udp_gcs_port_remote -r 4000000 -f
+mavlink stream -r 50 -s POSITION_TARGET_LOCAL_NED -u $udp_gcs_port_local
+mavlink stream -r 50 -s LOCAL_POSITION_NED -u $udp_gcs_port_local
+mavlink stream -r 50 -s GLOBAL_POSITION_INT -u $udp_gcs_port_local
+mavlink stream -r 50 -s ATTITUDE -u $udp_gcs_port_local
+mavlink stream -r 50 -s ATTITUDE_QUATERNION -u $udp_gcs_port_local
+mavlink stream -r 50 -s ATTITUDE_TARGET -u $udp_gcs_port_local
+mavlink stream -r 50 -s SERVO_OUTPUT_RAW_0 -u $udp_gcs_port_local
+mavlink stream -r 20 -s RC_CHANNELS -u $udp_gcs_port_local
+mavlink stream -r 10 -s OPTICAL_FLOW_RAD -u $udp_gcs_port_local
+
+# Onboard link to camera
+mavlink start -x -u $udp_onboard_payload_port_local -r 4000 -f -m onboard -o $udp_onboard_payload_port_remote
+
+# To display for SIH sitl
+if [ "$PX4_SIMULATOR" = "sihsim" ]; then
+	udp_sihsim_port_local=$((19450+px4_instance))
+	udp_sihsim_port_remote=$((19410+px4_instance))
+	mavlink start -x -u $udp_sihsim_port_local -r 400000 -m custom -o $udp_sihsim_port_remote
+	mavlink stream -r 200 -s HIL_ACTUATOR_CONTROLS -u  $udp_sihsim_port_local
+	mavlink stream -r 25 -s HIL_STATE_QUATERNION -u  $udp_sihsim_port_local
+fi
