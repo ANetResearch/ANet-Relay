@@ -142,11 +142,15 @@ class _Markov:
         self.sigma = sigma
         self.tau = tau
         self.x = rng.gauss(0.0, sigma) if sigma > 0.0 else 0.0
+        self._dt = -1.0
+        self._decay = self._drive = 0.0
 
     def step(self, dt: float) -> float:
         if dt > 0.0 and self.sigma > 0.0:
-            decay = math.exp(-dt / self.tau)
-            self.x = self.x * decay + self.sigma * math.sqrt(1.0 - decay * decay) * self.rng.gauss(0.0, 1.0)
+            if dt != self._dt:  # a twin samples at one rate: keep the factors of the last step size
+                decay = math.exp(-dt / self.tau)
+                self._dt, self._decay, self._drive = dt, decay, self.sigma * math.sqrt(1.0 - decay * decay)
+            self.x = self.x * self._decay + self._drive * self.rng.gauss(0.0, 1.0)
         return self.x
 
 

@@ -428,6 +428,10 @@ def _autopilot_version(state, msg, fields, notes, now, wall):
         k: fields.get(k)
         for k in ("flight_sw_version", "board_version", "vendor_id", "product_id", "capabilities")
     }
+    # 11 §4: the git hash bytes (decoded per firmware by twin.identity) and the OS version
+    custom = getattr(msg, "flight_custom_version", None) or []
+    state["version"]["flight_custom_version"] = bytes(bytearray(custom)[:8]).hex()
+    state["version"]["os_sw_version"] = fields.get("os_sw_version")
     firmware = firmware_from_version(int(fields.get("flight_sw_version") or 0))
     if firmware:
         state["firmware"] = firmware
