@@ -1,7 +1,9 @@
 // Application tools (04 §3, §5, §6.2): everything an operator can do in the ANet Relay window and its backend
 // outside a single aircraft. Interface actions go through POST /app/ui (the window runs them and shows who did it);
-// the rest are the backend's own endpoints. Names match the app MCP server (app_*). No approval is needed.
+// the rest are the backend's own endpoints. Names match the app MCP server (app_*). No approval is needed, except for
+// hardware in the loop (relay_hitl), which agent.mjs puts before the operator on every start and stop (11 §12).
 import { defineTool, enc, Type } from "./tools-common.mjs";
+import { FRAME, HOME } from "./tools-twin.mjs";
 
 const opt = (t) => Type.Optional(t);
 const lit = (...values) => Type.Union(values.map((x) => Type.Literal(x)));
@@ -101,10 +103,29 @@ export function appTools(relay) {
     defineTool("app_scan", "Scan network", "Start a scan for aircraft on the local network.", empty, () => call("POST", "/discover")),
     defineTool(
       "app_connect",
-      "Connect by address",
-      "Connect to an aircraft or telemetry radio at a host (and UDP port).",
-      Type.Object({ host: Type.String(), port: opt(Type.Integer({ minimum: 1, maximum: 65535 })) }),
-      (p) => call("POST", "/vehicles", { host: p.host, port: p.port }),
+      "Connect aircraft",
+      "Connect to an aircraft or telemetry radio at a host (and UDP port), or to a flight controller on a USB serial port (serial {device, baud}; list the ports with relay_serial_ports). Give host or serial, not both. A serial link fails with serial_unavailable (device busy, not found, no heartbeat, pyserial missing).",
+      Type.Object({
+        host: opt(Type.String()),
+        port: opt(Type.Integer({ minimum: 1, maximum: 65535 })),
+        serial: opt(
+          Type.Object({
+            device: Type.String({ description: "device from relay_serial_ports, e.g. /dev/ttyACM0 or COM5" }),
+            baud: opt(Type.Union([Type.Integer({ minimum: 1200, maximum: 4000000 }), Type.Literal("auto")], { description: "auto (default) tries 115200, 57600 and 921600; USB autopilots ignore it" })),
+          }),
+        ),
+      }),
+      (p) => {
+        if ((p.host === undefined) === (p.serial === undefined)) throw new Error("invalid arguments: give host or serial, not both");
+        return call("POST", "/vehicles", p.serial ? { serial: p.serial } : { host: p.host, port: p.port });
+      },
+    ),
+    defineTool(
+      "relay_serial_ports",
+      "Serial ports",
+      "Serial ports on this computer: device, name, description, manufacturer, USB VID/PID, serial number and autopilot (a known flight-controller USB interface; USB-serial adapters are not marked). Connect one with app_connect {serial}.",
+      empty,
+      () => call("GET", "/serial/ports"),
     ),
     defineTool("app_remove_vehicle", "Remove aircraft", "Remove an aircraft from the fleet (simulators are deleted).", Type.Object({ vehicle: Type.String() }), (p) =>
       call("DELETE", `/vehicles/${enc(p.vehicle)}`),
@@ -112,18 +133,38 @@ export function appTools(relay) {
     defineTool(
       "app_add_sim",
       "Add simulators",
-      "Add simulated aircraft: count, autopilot px4 or ardupilot, with or without a position estimate, with or without hover assist (omitted: the sim_hover_assist setting).",
+      "Add simulated aircraft: count, autopilot px4 or ardupilot, with or without a position estimate, with or without hover assist (omitted: the sim_hover_assist setting), and a frame. engine relay (default) is Relay's fast simulator; engine sitl starts firmware twins (the official firmware against Relay's physics) from a profile or a pack, as relay_twin_start does.",
       Type.Object({
         count: opt(Type.Integer({ minimum: 1, maximum: 8 })),
         autopilot: opt(lit("px4", "ardupilot")),
         position: opt(Type.Boolean()),
         hover_assist: opt(Type.Boolean()),
+        engine: opt(lit("relay", "sitl")),
+        profile: opt(Type.String({ description: "sitl: twin profile id" })),
+        pack: opt(Type.String({ description: "sitl: runtime pack id" })),
+        frame: opt(FRAME),
+        home: opt(HOME),
       }),
-      (p) => call("POST", "/sims", { count: p.count ?? 1, autopilot: p.autopilot, position: p.position, hover_assist: p.hover_assist }),
+      (p) =>
+        call("POST", "/sims", {
+          count: p.count ?? 1,
+          autopilot: p.autopilot,
+          position: p.position,
+          hover_assist: p.hover_assist,
+          ...(p.engine ? { engine: p.engine } : {}),
+          ...(p.profile ? { profile: p.profile } : {}),
+          ...(p.pack ? { pack: p.pack } : {}),
+          ...(p.frame ? { frame: p.frame } : {}),
+          ...(p.home ? { home: p.home } : {}),
+        }),
     ),
     defineTool("app_remove_sims", "Remove all simulators", "Delete every simulated aircraft.", empty, () => call("DELETE", "/sims")),
-    defineTool("app_reset_sim", "Reset simulator", "Reset one simulated aircraft to its start state.", Type.Object({ vehicle: Type.String() }), (p) =>
-      call("POST", `/sims/${enc(p.vehicle)}/reset`),
+    defineTool(
+      "app_reset_sim",
+      "Reset simulator",
+      "Reset one simulated aircraft to its start state, upright on the ground; this also recovers a crashed one. A firmware twin restarts its firmware with the same profile: the link drops until the new heartbeat (event twin_started with restart true, or twin_start_failed).",
+      Type.Object({ vehicle: Type.String() }),
+      (p) => call("POST", `/sims/${enc(p.vehicle)}/reset`),
     ),
     defineTool(
       "app_sim_assist",
@@ -142,6 +183,17 @@ export function appTools(relay) {
     ),
     defineTool("app_alerts", "Alerts", "Open and recent alerts of the fleet.", empty, () => call("GET", "/alerts")),
     defineTool("app_ack_alert", "Acknowledge alert", "Acknowledge one alert by id.", Type.Object({ id: Type.String() }), (p) => call("POST", `/alerts/${enc(p.id)}/ack`)),
+    defineTool(
+      "relay_hitl",
+      "Hardware in the loop",
+      "PX4 hardware in the loop (11 §7) on a real PX4 aircraft connected over a USB serial link. status reads the session (state, steps, backup, changed parameters, mismatches). start backs up every parameter, sets SYS_HITL, reboots the board and feeds it Relay's physics while the firmware keeps the motors locked; it needs confirm HITL, a disarmed aircraft with the propellers removed and the operator's possession. stop writes the backup back, reboots and verifies it. ArduPilot has no HIL: recommend a firmware twin. start and stop always wait for the operator's approval, also with Allow all.",
+      Type.Object({ vehicle: Type.String(), action: lit("status", "start", "stop"), confirm: opt(Type.Literal("HITL", { description: "required for start" })) }),
+      (p) => {
+        if (p.action === "status") return call("GET", `/vehicles/${enc(p.vehicle)}/hitl`);
+        if (p.action === "start" && p.confirm !== "HITL") throw new Error("invalid arguments: start needs confirm HITL");
+        return call("POST", `/vehicles/${enc(p.vehicle)}/hitl`, { action: p.action, ...(p.confirm ? { confirm: p.confirm } : {}) });
+      },
+    ),
     defineTool("app_stop_all", "Stop all", "EMERGENCY ONLY: cut the motors of every aircraft. Airborne aircraft fall. Use only when the user asks for it.", empty, () => call("POST", "/stop-all")),
     defineTool("app_network", "Network", "Network interfaces, subnets, whether the computer is on a telemetry hotspot and the UDP listener state.", empty, () => call("GET", "/network")),
     defineTool("app_courses", "Courses", "Preset and custom ring courses, scaled to the safety volume.", empty, () => call("GET", "/courses")),

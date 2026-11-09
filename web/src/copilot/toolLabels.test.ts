@@ -18,6 +18,12 @@ describe('tool labels', () => {
     expect(toolLabel('challenge_submit', 'en')).toBe('Submit to challenge')
     expect(toolLabel('airframe_set', 'zh')).toBe('设置机体')
   })
+  it('names the firmware twin, serial and hardware-in-the-loop tools (11 §12)', () => {
+    expect(toolLabel('relay_twin_start', 'zh')).toBe('启动固件孪生')
+    expect(toolLabel('relay_firmware_identify', 'en')).toBe('Identify firmware')
+    expect(toolLabel('relay_serial_ports', 'zh')).toBe('串口列表')
+    expect(toolLabel('relay_hitl', 'en')).toBe('Hardware in the loop')
+  })
   it('names the dogfight tools (WP-B)', () => {
     expect(toolLabel('dogfight_start', 'zh')).toBe('开始狗斗')
     expect(toolLabel('leaderboard', 'en')).toBe('Leaderboard')

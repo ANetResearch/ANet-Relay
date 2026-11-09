@@ -8,7 +8,8 @@ import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@ear
 
 import fs from "node:fs";
 
-import { buildModels, createCopilot, createTracer, RelayHttp, relayTools, systemPrompt, toolsFor } from "../agent.mjs";
+import { alwaysApproved, buildModels, createCopilot, createTracer, RelayHttp, relayTools, systemPrompt, toolsFor } from "../agent.mjs";
+import { TWIN_TOOL_NAMES } from "../tools-twin.mjs";
 import { confirmFor, dangerResolver } from "../tools-device.mjs";
 import { DEFAULT_HEIGHT, DEFAULT_WIDTH, defaultBounds, fitBounds, MIN_HEIGHT, MIN_WIDTH } from "../window-bounds.mjs";
 
@@ -382,6 +383,125 @@ test("interface actions need no approval even with a real aircraft selected", as
   await copilot.prompt("select it");
   assert.ok(!events.some((e) => e.type === "approval"));
   assert.equal(events.find((e) => e.type === "tool_end" && e.tool === "app_select_vehicle").error, false);
+});
+
+// ---------------------------------------------------------------------------
+// 11 §12: firmware twins, serial link and hardware in the loop
+
+test("firmware twin tools reach their routes in every scope and at the sticks level", async () => {
+  const relay = stubRelay({
+    "GET /autopilots": { platform: "linux-x64", packs: [] },
+    "GET /vehicles/real-1/firmware": { id: "real-1", identity: { family: "ardupilot" } },
+    "GET /twins/profiles": { profiles: [] },
+    "GET /twins/profiles/tp-1": { id: "tp-1", params: {} },
+    "POST /twins/profiles": (body) => ({ id: "tp-2", ...body }),
+    "POST /sims": { added: ["sim-3"] },
+    "GET /sims/sim-3/twin": { id: "sim-3", state: "running" },
+    "PUT /sims/sim-3/frame": { id: "sim-3", engine: "sitl", frame: { preset: "small-250" } },
+  });
+  for (const [scope, level] of [["flight", "sticks"], ["all", "full"]]) {
+    const names = toolsFor(relay, scope, undefined, level).map((t) => t.name);
+    for (const name of TWIN_TOOL_NAMES) assert.ok(names.includes(name), `${name} in ${scope} at ${level}`);
+  }
+  const tools = Object.fromEntries(toolsFor(relay, "flight", undefined, "sticks").map((t) => [t.name, t]));
+  await tools.relay_autopilots_list.execute("1", {});
+  await tools.relay_firmware_identify.execute("1", { vehicle: "real-1" });
+  await tools.relay_twin_profiles_list.execute("1", {});
+  await tools.relay_twin_profile_get.execute("1", { profile: "tp-1" });
+  await tools.relay_twin_profile_capture.execute("1", { vehicle: "real-1", frame: { preset: "small-250" } });
+  assert.deepEqual(relay.calls.at(-1), { method: "POST", path: "/twins/profiles", body: { from_vehicle: "real-1", frame: { preset: "small-250" } } });
+  const out = await tools.relay_twin_start.execute("1", { profile: "tp-2", home: { lat: 47.6, lon: -122.3 } });
+  assert.match(out.content[0].text, /sim-3/);
+  assert.deepEqual(relay.calls.at(-1).body, { count: 1, engine: "sitl", profile: "tp-2", home: { lat: 47.6, lon: -122.3 } });
+  await tools.relay_twin_status.execute("1", { vehicle: "sim-3" });
+  await tools.relay_sim_frame.execute("1", { vehicle: "sim-3", preset: "small-250", mass_kg: 0.42 });
+  assert.deepEqual(relay.calls.at(-1), { method: "PUT", path: "/sims/sim-3/frame", body: { preset: "small-250", mass_kg: 0.42 } });
+  assert.deepEqual(
+    relay.calls.map((c) => `${c.method} ${c.path}`),
+    [
+      "GET /autopilots",
+      "GET /vehicles/real-1/firmware",
+      "GET /twins/profiles",
+      "GET /twins/profiles/tp-1",
+      "POST /twins/profiles",
+      "POST /sims",
+      "GET /sims/sim-3/twin",
+      "PUT /sims/sim-3/frame",
+    ],
+  );
+  // an .ars timeline may fly in acro (11 §9)
+  assert.match(JSON.stringify(tools.relay_timeline_run.parameters), /"acro"/);
+});
+
+test("twins add through app_add_sim, connect over serial, and reset recovers crashed sims and twins", async () => {
+  const relay = stubRelay({ "POST /sims": { added: ["sim-2"] }, "POST /vehicles": { id: "real-serial" }, "GET /serial/ports": { ports: [] } });
+  const tools = Object.fromEntries(toolsFor(relay, "all").map((t) => [t.name, t]));
+  await tools.app_add_sim.execute("1", { engine: "sitl", pack: "px4-1.16.2", frame: { preset: "large-450" } });
+  assert.deepEqual(relay.calls.at(-1).body, { count: 1, autopilot: undefined, position: undefined, hover_assist: undefined, engine: "sitl", pack: "px4-1.16.2", frame: { preset: "large-450" } });
+  await tools.relay_serial_ports.execute("1", {});
+  assert.equal(relay.calls.at(-1).path, "/serial/ports");
+  await tools.app_connect.execute("1", { serial: { device: "/dev/ttyACM0", baud: "auto" } });
+  assert.deepEqual(relay.calls.at(-1), { method: "POST", path: "/vehicles", body: { serial: { device: "/dev/ttyACM0", baud: "auto" } } });
+  await assert.rejects(tools.app_connect.execute("1", { host: "10.0.0.5", serial: { device: "COM5" } }), /host or serial/);
+  assert.match(tools.app_reset_sim.description, /crashed/);
+  assert.match(tools.app_reset_sim.description, /firmware twin restarts its firmware/);
+});
+
+test("relay_hitl: start and stop always ask, also with Allow all and on any aircraft; status never asks", async () => {
+  assert.equal(alwaysApproved("relay_hitl", { vehicle: "real-1", action: "start", confirm: "HITL" }), "hitl");
+  assert.equal(alwaysApproved("relay_hitl", { vehicle: "real-1", action: "stop" }), "hitl");
+  assert.equal(alwaysApproved("relay_hitl", { vehicle: "real-1", action: "status" }), null);
+  assert.equal(alwaysApproved("device_reboot", { vehicle: "real-1" }), null);
+  const status = { id: "real-1", available: true, state: "running", steps: [] };
+  const routes = {
+    "GET /app/ui": { state: null },
+    "GET /vehicles/real-1": REAL,
+    "GET /vehicles/sim-1": SIM,
+    "GET /vehicles/real-1/hitl": { ...status, state: "idle" },
+    "POST /vehicles/real-1/hitl": status,
+    "POST /vehicles/sim-1/hitl": status,
+  };
+  const { copilot, relay, events } = offlineCopilot(
+    routes,
+    [
+      fauxAssistantMessage(fauxToolCall("relay_hitl", { vehicle: "real-1", action: "status" }), { stopReason: "toolUse" }),
+      fauxAssistantMessage(fauxToolCall("relay_hitl", { vehicle: "real-1", action: "start", confirm: "HITL" }), { stopReason: "toolUse" }),
+      fauxAssistantMessage(fauxToolCall("relay_hitl", { vehicle: "sim-1", action: "stop" }), { stopReason: "toolUse" }),
+      fauxAssistantMessage("Done."),
+    ],
+    "all",
+    () => true, // Allow all is on
+  );
+  const pending = copilot.prompt("run hardware in the loop");
+  const waitApprovals = async (n) => {
+    for (let i = 0; i < 150 && events.filter((e) => e.type === "approval").length < n; i++) await new Promise((r) => setTimeout(r, 20));
+    return events.filter((e) => e.type === "approval");
+  };
+  let approvals = await waitApprovals(1);
+  assert.equal(approvals.length, 1, "start asks although Allow all is on");
+  assert.equal(approvals[0].auto, undefined);
+  assert.equal(approvals[0].vehicle, "real-1");
+  assert.equal(approvals[0].request.danger, "hitl");
+  assert.deepEqual(approvals[0].request.args, { action: "start", confirm: "HITL" });
+  assert.ok(relay.calls.some((c) => c.method === "GET" && c.path === "/vehicles/real-1/hitl"), "status ran without asking");
+  assert.ok(!relay.calls.some((c) => c.method === "POST" && c.path.endsWith("/hitl")), "nothing sent before the approval");
+  copilot.approve(approvals[0].id, true);
+  approvals = await waitApprovals(2);
+  assert.equal(approvals.length, 2, "a simulator asks too");
+  assert.equal(approvals[1].vehicle, "sim-1");
+  copilot.approve(approvals[1].id, false);
+  await pending;
+  const posts = relay.calls.filter((c) => c.method === "POST" && c.path.endsWith("/hitl"));
+  assert.deepEqual(posts, [{ method: "POST", path: "/vehicles/real-1/hitl", body: { action: "start", confirm: "HITL" } }]);
+  assert.ok(!events.some((e) => e.type === "approval_closed" && e.reason === "auto"));
+});
+
+test("relay_hitl start without the confirm word is refused before Relay", async () => {
+  const relay = stubRelay({});
+  const tools = Object.fromEntries(toolsFor(relay, "all").map((t) => [t.name, t]));
+  await assert.rejects(tools.relay_hitl.execute("1", { vehicle: "real-1", action: "start" }), /confirm HITL/);
+  assert.equal(relay.calls.length, 0);
+  assert.ok(!toolsFor(relay, "flight+device").some((t) => t.name === "relay_hitl"), "relay_hitl is an application tool");
 });
 
 test("window placement: default bottom-right, restore within the visible displays", () => {
