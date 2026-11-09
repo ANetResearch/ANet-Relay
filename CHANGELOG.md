@@ -5,6 +5,95 @@ All notable changes to ANet Relay are documented in this file. The format follow
 [Semantic Versioning](https://semver.org/). Each release section is published as the
 GitHub Release notes for its tag.
 
+## [0.5.4] - 2026-11-09
+
+<!-- Draft written with the Copilot, MCP, SDK and documentation work; the release step completes it. -->
+
+Firmware twins fly the official PX4 and ArduPilot firmware against Relay's
+physics with a real aircraft's version and parameters, PX4 flight controllers
+on USB run hardware in the loop, and the simulator gains frames, acro mode and
+crashes that tumble.
+
+### Added
+
+- **Firmware twins (SITL).** The desktop build of the official firmware, the
+  same version as the real aircraft and loaded with its parameters, runs as a
+  child process of Relay in lockstep with Relay's physics. To the rest of Relay
+  it is a simulator: claims, sticks, skills, plans, timelines, programs, the
+  stage and the arena work unchanged, with the firmware's own control loop,
+  arming checks and failsafes. The firmware only talks to Relay on loopback.
+  - Relay identifies a real aircraft's firmware (family, version, git hash,
+    board) and ranks the installed packs: exact, version, series, nearest.
+  - Twin profiles capture an aircraft's whole parameter table; calibration,
+    device ids, serial ports and other hardware-specific parameters stay out,
+    each with its reason.
+  - Frame presets `micro-120`, `small-250` and `large-450` with adjustable
+    mass, wheelbase, propeller and battery; a twin hovers at the same throttle
+    as the real aircraft.
+  - Without a real aircraft, a twin starts from any pack with its default
+    parameters and a baseline tuned to hover out of the box.
+- **Autopilot runtime packs** ship with the installer: ArduCopter 4.7.2,
+  4.6.3, 4.5.7, 4.4.4 and 4.3.8, PX4 1.17.0, 1.16.2, 1.15.4 and 1.14.4 (PX4
+  not on Windows). About 5 to 6 MB per pack, 25 to 30 MB per installer.
+  Settings lists them and imports further packs. Format:
+  [docs/autopilot-packs.md](docs/autopilot-packs.md).
+- **Hardware in the loop (PX4).** Over a USB serial link Relay backs up the
+  flight controller's parameters, switches it to HITL, feeds it sensor data
+  from its physics while the firmware keeps the motors locked, and afterwards
+  restores and verifies every parameter. A step-by-step dialog in the
+  inspector shows each stage. ArduPilot removed HIL support; Relay explains
+  this and recommends a firmware twin. The PX4 protocol is tested against a
+  simulated serial port; the full flow on a real board is verified once the
+  larger PX4 aircraft is available.
+- **Serial link.** Connect an aircraft over a USB serial port (the flight
+  controller's own USB socket or a USB-serial adapter); known flight-controller
+  interfaces are marked and the baud rate is detected automatically.
+- **Simulator physics.**
+  - Rigid-body ground contact at the feet, propeller tips and top: a normal
+    landing stays upright, a crash bounces, rolls and comes to rest in its
+    final attitude. Reset restores it upright.
+  - **Acro mode** in the fast simulator: the sticks set body rates with no
+    self-levelling or tilt limit, so it flips, rolls and flies inverted.
+    Timelines take `mode: "acro"`.
+  - Sensors with noise and bias for the twins and HITL: IMU, barometer,
+    magnetometer and GPS.
+  - The stage interpolates attitude with quaternions, so flips and inverted
+    flight do not jump; twins and HITL aircraft carry an engine badge.
+- API: `GET /autopilots`, `POST /autopilots/import`, `DELETE
+  /autopilots/{id}`, `GET /vehicles/{id}/firmware`, `GET`/`POST
+  /twins/profiles`, `GET`/`PUT`/`DELETE /twins/profiles/{pid}`, `POST /sims`
+  with `engine`, `profile`, `pack`, `frame` and `home`, `GET /sims/{id}/twin`,
+  `PUT /sims/{id}/frame`, `GET /serial/ports`, `POST /vehicles` with `serial`,
+  `GET`/`POST /vehicles/{id}/hitl`. Events `twin_started`, `twin_exited`,
+  `twin_start_failed`, `autopilot_pack_imported`, `hitl_started`,
+  `hitl_restored`, `hitl_failed`. Errors `pack_missing`, `pack_unsupported`,
+  `twin_start_failed`, `twin_limit`, `frame_unsupported`, `twin_unsupported`,
+  `profile_not_found`, `params_incomplete`, `hitl_unavailable`,
+  `hitl_restore_mismatch`, `serial_unavailable`.
+- Copilot, MCP and SDK:
+  - Copilot and the flight MCP server: `relay_autopilots_list`,
+    `relay_firmware_identify`, `relay_twin_profiles_list`,
+    `relay_twin_profile_get`, `relay_twin_profile_capture`,
+    `relay_twin_start`, `relay_twin_status` and `relay_sim_frame`, available
+    at both flight levels. The flight server now has 34 tools, 26 at the
+    sticks level.
+  - Copilot and the app MCP server: `relay_hitl` (status, start, stop; start
+    needs `confirm: "HITL"`), `relay_serial_ports`, connecting over serial and
+    adding twins with `engine: "sitl"`. The app server now has 67 tools.
+  - Copilot asks the operator for every hardware-in-the-loop start and stop,
+    on any aircraft and also while **Allow all** is on; that approval card has
+    no Allow all button.
+  - The SDK adds `autopilots()`, `firmware()`, `twin_profiles()`,
+    `twin_profile()`, `capture_twin_profile()`, `update_twin_profile()`,
+    `delete_twin_profile()`, `start_twin()`, `twin()`, `set_frame()`,
+    `serial_ports()`, `connect()` and `hitl()`.
+
+### Changed
+
+- Resetting a firmware twin restarts its firmware with the same profile; as
+  before, a reset brings a crashed simulator back upright on the ground. The
+  Copilot and MCP reset tools say so.
+
 ## [0.5.3] - 2026-11-09
 
 Stick timelines with their own file format, simulators that drift like a real

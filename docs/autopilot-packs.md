@@ -5,6 +5,13 @@ one platform, together with the defaults Relay starts it with. Relay ships the p
 and runs them as firmware twins (design contract `docs/design/11-v054.zh-CN.md`, §3). This document is the
 pack format; the twin runtime (`backend/relay/twin/`) reads exactly what is described here.
 
+Using the packs is described elsewhere: the REST interface (`GET /autopilots`, `GET /vehicles/{id}/firmware`, twin
+profiles, `POST /sims {engine: "sitl"}`) in [Agent API, Firmware twins](agent-api.md#firmware-twins-054)
+([简体中文](agent-api.zh-CN.md#固件孪生054)); the Copilot and flight MCP tools `relay_autopilots_list`,
+`relay_firmware_identify`, `relay_twin_profile_capture` and `relay_twin_start`; the SDK calls `autopilots()`,
+`firmware()`, `capture_twin_profile()` and `start_twin()`. Hardware in the loop (PX4 over USB) uses the real flight
+controller instead of a pack: [Agent API, Serial link and hardware in the loop](agent-api.md#serial-link-and-hardware-in-the-loop-054).
+
 ## Bundled versions
 
 `autopilots/versions.json` lists the bundled versions in priority order with their source tags.
@@ -16,6 +23,11 @@ pack format; the twin runtime (`backend/relay/twin/`) reads exactly what is desc
 
 A version that fails to build on a platform is left out of that platform's index; `index.json` is the
 authoritative list of what a given installer contains.
+
+Sizes (linux-x64, unpacked): ArduCopter 5.6 to 6.1 MB per version (4.3.8 is the largest), PX4 1.16.2 5.3 MB with a
+0.14 MB ROMFS. Compressed, an ArduCopter pack is about 3.0 MB and a PX4 pack about 2.3 MB, so the nine packs add
+about 25 to 30 MB to an installer (win-x64, ArduPilot only: about 20 MB). The release notes list the packs and sizes
+of every platform.
 
 ## Layout
 

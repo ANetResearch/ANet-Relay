@@ -19,8 +19,12 @@ through Relay instead.
 
 It is not a replacement for a high-fidelity simulator: there are no camera or lidar images, the aerodynamics are a
 compact rigid-body model with motor dynamics, drag, ground effect and gusts, and the flight-control firmware is a
-model of the autopilot, not the firmware itself. To test the real firmware, run PX4 or ArduPilot SITL and connect it
-to Relay (section 3); to study vision or aerodynamics, use one of the simulators below.
+model of the autopilot, not the firmware itself. To test the real firmware, start a firmware twin (0.5.4): Relay
+runs the official ArduCopter or PX4 SITL build that ships with it, with a real aircraft's version and parameters,
+against its own physics, and the twin flies like any simulator ([Agent API, Firmware twins](agent-api.md#firmware-twins-054),
+[runtime packs](autopilot-packs.md)). PX4 aircraft connected over USB can also run hardware in the loop. Section 3
+connects a SITL you run yourself, for example with Gazebo; to study vision or aerodynamics, use one of the
+simulators below.
 
 ## 2. Simulators in the field
 

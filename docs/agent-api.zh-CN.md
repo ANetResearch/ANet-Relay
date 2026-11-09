@@ -76,7 +76,7 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | `sticks`（缺省） | 推杆（WebSocket 流、`POST /vehicles/{id}/sticks`、`sticks` 技能）、解锁与上锁、切换到手动类模式（ArduPilot STABILIZE / ACRO，PX4 MANUAL / STABILIZED / ACRO；DRIFT 带速度阻尼辅助，不属于此类）、关闭模拟机的悬停辅助（不能开启）、射击、部署并运行机载程序，以及安全动作：急停与 `land`（其事件标注 `safety`） |
 | `full` | 本文的全部接口，与 0.3 相同 |
 
-在 `sticks` 等级下，技能 `takeoff`、`hold`、`move`、`yaw`、`goto`、`rtl`、`velocity`、`attitude`，包含这些动作的动作序列，以动作序列或轨迹方式再飞，定高、定点与自动类模式，设备级接口中的飞行类命令，以及 4 通道以上的 RC 覆盖，均返回 403 `sticks_only`（`detail.level = "sticks"`，`detail.action` 指明被拒绝的操作）。飞行 MCP 服务只列出仍可用的工具（26 个中的 18 个；每次 `tools/list` 都重新读取设置），Copilot 同样去掉这些工具，并提示模型编写程序。在这一等级下，稳定飞行由机载程序完成：智能体按自己的节奏修改程序、调整参数、查看结果，程序负责 50 Hz 的闭环。
+在 `sticks` 等级下，技能 `takeoff`、`hold`、`move`、`yaw`、`goto`、`rtl`、`velocity`、`attitude`，包含这些动作的动作序列，以动作序列或轨迹方式再飞，定高、定点与自动类模式，设备级接口中的飞行类命令，以及 4 通道以上的 RC 覆盖，均返回 403 `sticks_only`（`detail.level = "sticks"`，`detail.action` 指明被拒绝的操作）。飞行 MCP 服务只列出仍可用的工具（34 个中的 26 个；每次 `tools/list` 都重新读取设置），Copilot 同样去掉这些工具，并提示模型编写程序。在这一等级下，稳定飞行由机载程序完成：智能体按自己的节奏修改程序、调整参数、查看结果，程序负责 50 Hz 的闭环。
 
 ## 3. 坐标系与单位
 
@@ -145,6 +145,7 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | `POST /sims/{id}/assist` | 控制者或操作员 | `{on}`：模拟机悬停辅助（见下）；真机返回 `sim_only` |
 | `PUT /sims/{id}/airframe` | 控制者或操作员 | `{preset \| params, seed?}`：模拟机机体缺陷（见下） |
 | `GET /sims/{id}/airframe` | 控制者或操作员 | 机体缺陷的全部数值、取值范围与悬停油门 |
+| `PUT /sims/{id}/frame` | 控制者或操作员 | `{preset?, mass_kg?, ...}`：上锁且在地面时更换模拟机的物理机型（见[固件孪生](#固件孪生054)） |
 
 ### 技能
 
@@ -338,6 +339,49 @@ POST /api/v1/vehicles/sim-1/plan
 
 快照只携带 `vehicle.sim.airframe = {preset, seed}`：具体数值不出现在快照与程序观测中，只能在飞行中体现。事件 `sim_airframe_changed`（`data.preset`、`data.seed`、`data.by`）。模拟机在收到 `SET_MESSAGE_INTERVAL` 或 `REQUEST_MESSAGE` 时发送 `SCALED_IMU`（机载板 FRD 坐标的比力，单位 mG；角速度 mrad/s），它不属于任何数据流分组。
 
+### 固件孪生（0.5.4）
+
+固件孪生是一架以官方固件为“大脑”的模拟机：ArduCopter 或 PX4 的电脑版本（SITL），与真机同版本并加载真机参数，作为 Relay 的子进程运行，与 Relay 的物理模型锁步飞行。对 Relay 的其他部分它就是一架模拟机（`sim-N`，`kind: "sim"`，`sim.engine: "sitl"`）：认领、杆量、技能、动作序列、时间轴、程序、舞台与竞技场照常可用，控制回路、解锁检查与失控保护均来自固件本身。固件只在回环地址（127.0.0.1）上与 Relay 通信，删除、复位孪生或 Relay 退出时随之结束。运行包随安装包分发（ArduCopter 4.7.2、4.6.3、4.5.7、4.4.4、4.3.8；PX4 1.17.0、1.16.2、1.15.4、1.14.4；Windows 不含 PX4），格式见 [Autopilot runtime packs](autopilot-packs.md)（英文）。
+
+| 方法与路径 | 鉴权 | 用途 |
+|---|---|---|
+| `GET /autopilots` | – | `{platform, bundled_dir, imported_dir, packs: [{id, family, vehicle, version, git, platform, size_bytes, license, source, built, origin: bundled \| imported, sha256, usable, problem, problem_zh, twins}]}` |
+| `POST /autopilots/import` | 操作员 | `{path, sha256?}`：从本机路径导入运行包（校验 sha256 与 manifest） |
+| `DELETE /autopilots/{id}` | 操作员 | 删除导入的运行包；内置包与正在运行的包返回 `pack_unsupported` |
+| `GET /vehicles/{id}/firmware` | – | `{identity: {family, vehicle, frame, version, type, git, board, board_id, identified}, params: {received, total, complete}, frame_problem, match: {recommended, match, warning_en, warning_zh, candidates: [{pack, version, git, match}]}}` |
+| `GET /twins/profiles` | – | `{profiles: [{id, name, captured_at, updated_at, source, firmware, pack, match, frame, home, params_total, params_applied, params_excluded}]}` |
+| `POST /twins/profiles` | 应用操作 | `{from_vehicle, name?, frame?, profile?}`：从一架已连接、参数已读完的真机抓取配置；带 `profile` 时重新抓取到该配置 |
+| `GET /twins/profiles/{pid}` | – | 配置全文，含全部参数与 `excluded: [{name, reason_en, reason_zh}]`（即 JSON 导出） |
+| `PUT /twins/profiles/{pid}` | 应用操作 | `{name?, frame?, pack?, home? \| null}`；运行包须与固件一致 |
+| `DELETE /twins/profiles/{pid}` | 应用操作 | 删除配置 |
+| `POST /sims` | 应用操作 | `{count, engine: "sitl", profile?, pack?, frame?, home?}`：启动孪生；`profile` 与 `pack` 均省略时使用最新的 ArduPilot 运行包 |
+| `GET /sims/{id}/twin` | – | `{state: new \| booting \| running \| restarting \| exited \| failed \| stopped, pack, firmware, profile, instance, pid, home, frame, params: {applied, excluded, forced}, boot_s, restarts, exit, lockstep: {steps, stalls, frames, ms_per_step}}` |
+| `PUT /sims/{id}/frame` | 控制者或操作员 | `{preset?, mass_kg?, wheelbase_m?, prop_in?, cells?, capacity_mah?}`：上锁且在地面时更换模拟机机型（孪生与快速模拟均可），否则返回 `armed` |
+
+- **识别与匹配。** Relay 从 `AUTOPILOT_VERSION` 读取固件类型、版本、git 哈希与板型，并对已安装的运行包分级：`exact`（同版本且 git 相同）、`version`、`series`（同主次版本）、`nearest`、`none`。低于 `version` 时返回提示：控制回路与参数含义可能与真机不同。可手动选择同固件的任意运行包，跨固件不可选。快照中每架飞机带 `firmware_info: {family, vehicle, version, type, git, board}`（收到 `AUTOPILOT_VERSION` 前为 null）。
+- **孪生配置。** 抓取要求真机（否则 `real_only`）且参数表已读完（否则 `params_incomplete`，附 `detail.received/total`）。硬件相关参数（校准偏置、设备编号、串口、板载与输出接线，如 PX4 `CAL_*`、`SYS_AUTOSTART`，ArduPilot `INS_*OFFS*`、`SERIAL*` 等）不进入孪生，每条附中英文原因；增益、限幅、失控保护与悬停油门全部进入。未给 `frame` 时，4S 及以上或容量不小于 2000 mAh 取 `large-450`，否则取 `small-250`。
+- **机型。** 预设 `micro-120`（快速模拟缺省）、`small-250`、`large-450`，可调整质量、轴距、桨径、电池节数与容量。孪生按参数中的悬停油门换算电机推力，使其与真机以相同油门悬停。
+- **启动。** `POST /sims` 在每个固件发出第一个心跳后返回；15 s 内未出现心跳则返回 `twin_start_failed`（`detail.reason`、`detail.lines` 为进程最后 40 行输出、`detail.added`）。同时运行的孪生数受设置 `twin_limit`（缺省 8）限制，超出返回 `twin_limit`。`engine: "relay"`（缺省）不接受 `profile`、`pack` 与 `home`；`frame` 对两种引擎都适用。
+- **复位与摔机。** `POST /sims/{id}/reset` 在后台以相同配置重启孪生的固件（事件 `twin_started`，`restart: true`；失败为 `twin_start_failed`），对已坠毁的模拟机同样适用。孪生坠毁后与快速模拟一样由接触模型继续翻滚，Relay 以组件号 25 向固件发送 `STATUSTEXT` 告知坠毁。
+- **孪生不支持。** 悬停辅助开关与狗斗（`twin_unsupported`，附 `detail.operation`）；`position: false`（`invalid_request`）。无头评测只使用快速模拟机。
+
+### 串口链路与硬件在环（0.5.4）
+
+Relay 也可以经 USB 串口连接飞机：飞控自带的 USB 口，或接在数传口上的 USB 串口转换器。
+
+| 方法与路径 | 鉴权 | 用途 |
+|---|---|---|
+| `GET /serial/ports` | – | `{ports: [{device, name, description, manufacturer, vid, pid, serial_number, autopilot}]}`；`autopilot` 标记已知的飞控 USB 接口（PX4/3DR、ArduPilot、CubePilot、Holybro、mRo、ST 虚拟串口）。USB 串口转换器（CP210x、FTDI、CH340）会列出，但不标记 |
+| `POST /vehicles` | 应用操作 | 以 `{serial: {device, baud?}}` 代替 `{host, port?}`；`baud` 为波特率或 `"auto"`（依次尝试 115200、57600、921600，每个约 2 s，直到收到心跳；USB CDC 飞控忽略波特率）。快照带 `link: "udp" \| "serial"` 与 `serial: {device, baud} \| null`；`DELETE /vehicles/{id}` 关闭串口 |
+| `GET /vehicles/{id}/hitl` | – | `{id, available, reason, reason_zh, state, steps, backup, changed, mismatches, error, run, pending_restore}` |
+| `POST /vehicles/{id}/hitl` | 操作员，或应用操作 | `{action: start \| stop, confirm?: "HITL"}` → 同一状态对象 |
+
+硬件在环（HITL）让一块真实的 PX4 飞控在 Relay 的物理中运行：Relay 把全部参数备份到数据目录 `hitl-backups/<vehicle>-<time>.json`，写入 `SYS_HITL = 1` 与 HIL 四旋翼 X 机架（`SYS_AUTOSTART 1001`），重启飞控，然后以 250 Hz 发送 `HIL_SENSOR`、10 Hz 发送 `HIL_GPS`，按飞控回传的 `HIL_ACTUATOR_CONTROLS` 推进物理。电机由固件锁死。该飞机显示为“硬件在环”，引擎徽标如“硬件在环 PX4 1.16.2”，快照带 `hitl: {state}`。`stop`（或断开连接，或 Relay 退出后的下次连接）把所有被改过的参数写回，重启，重读全部参数并与备份逐项核对；不一致时以 `mismatches` 报告（`hitl_restore_mismatch`），并保留备份文件。
+
+- `state`：`idle`、`backing_up`、`writing`、`rebooting`、`running`、`restoring`、`verifying`、`restored`、`failed`。`steps`：`confirm`、`backup`、`write`、`reboot`、`run`、`restore`、`verify`，每步为 `pending`、`active`、`done`、`failed` 或 `skipped`，附中英文 `detail`。运行中 `run` 为 `{sensor_hz, gps_hz, actuator_frames, steps, since}`。任何一步失败都进入恢复。
+- `start` 要求 `confirm: "HITL"`（已拆下螺旋桨）、PX4、串口链路、已上锁，且操作员已附身；智能体会话仅在开启应用控制时可调用。不满足时返回 `hitl_unavailable`（409），附 `detail.reason` 与 `detail.reason_zh`。ArduPilot 固件早已移除 HIL，ArduPilot 飞机请使用固件孪生。Wi-Fi 数传带不动传感器数据流，因此 HITL 须经 USB。
+- 现状：PX4 协议编码、备份、恢复与核对已用模拟串口测试；真机全流程在大机到位后验证。
+
 ### 机载程序
 
 机载程序（设计 06 §2）是一段受限 Python 程序，包含 `PARAMS`、`init(ctx)` 与 `step(obs, ctx) -> Sticks`，由 Relay 在隔离的程序宿主中以 50 Hz 运行在飞机的杆量通路上。它只能看到飞机自身测得的量（`obs`：姿态、角速度、加速度、气压高度、可选的位置、电池、电机输出、对抗状态、目标），输出四个杆量与扳机。[`programs-guide.md`](programs-guide.md) 是编写程序的精简参考（Copilot 的系统提示与 MCP 工具 `program_guide` 使用同一文本）；完整文档见 [`programs.zh-CN.md`](programs.zh-CN.md)。
@@ -495,6 +539,9 @@ SDK：`dogfight_start(...)`、`dogfight_stop()`、`dogfight_status()`、`leaderb
 | `app_command` | 会话或操作员执行的界面动作（`data.action`、`data.by`） |
 | `procedure_started` / `procedure_step` / `procedure_waiting` / `procedure_finished` / `procedure_aborted` | 标定流程，带 `data.run_id`、`data.step`、`data.verdict` 或 `data.reason` |
 | `program_started` / `program_stopped` / `program_paused` / `program_resumed` / `program_faulted` / `program_host_restarted` / `program_gate` | 机载程序：部署、停止及原因、附身暂停、故障、宿主重启、真机开关 |
+| `twin_started` / `twin_exited` / `twin_start_failed` | 固件孪生：已启动（`data.family`、`version`、`pack`、`match`、`restart`、`pid`、`boot_s`）、固件进程退出（`data.code`、`lines`）、复位后重启失败（`data.reason_en`、`reason_zh`、`lines`）；`sim_added` 增加 `engine` 与 `firmware` |
+| `autopilot_pack_imported` | 导入了运行包（`data.pack`、`family`、`version`） |
+| `hitl_started` / `hitl_restored` / `hitl_failed` | 硬件在环：开始运行（`data.vehicle`、`family`、`version`、`backup`）、参数已恢复（`data.restored`、`mismatches`）、某一步失败（`data.step`、`reason_en`、`reason_zh`） |
 
 完整列表见 `web/src/api/schema.json`（`EventKind`）。错误使用统一结构，`code` 在各版本间保持稳定：
 
@@ -515,15 +562,17 @@ SDK：`dogfight_start(...)`、`dogfight_stop()`、`dogfight_status()`、`leaderb
 
 机载程序与控制等级新增：403 `sticks_only`；400 `program_invalid`、`program_param_invalid`；404 `program_not_found`、`revision_not_found`；409 `program_readonly`、`program_load_failed`、`no_program`、`program_not_paused`、`programs_not_allowed`；503 `program_host_unavailable`。狗斗与对局新增 400 `dogfight_real_aircraft`；409 `dogfight_running`、`dogfight_not_running`、`dogfight_no_aircraft`、`match_running`。客户端在没有评测接口的 Relay 上另报 `judge_unavailable`（404）。
 
+固件孪生、串口链路与硬件在环（0.5.4）新增：400 `pack_unsupported`（`detail.reason`）、`serial_unavailable`（`detail.reason`、`detail.reason_zh`：串口被占用、未找到、无心跳、缺少 pyserial；串口被占用时为 409）；404 `pack_missing`、`profile_not_found`；409 `twin_limit`、`frame_unsupported`、`twin_unsupported`（`detail.operation`、`detail.operation_zh`）、`params_incomplete`（`detail.received`、`detail.total`）、`real_only`、`hitl_unavailable`（`detail.reason`、`detail.reason_zh`）；503 `twin_start_failed`。`hitl_restore_mismatch` 在 HITL 状态与 `hitl_restored` 事件中报告，恢复流程仍会完成。
+
 ## 8. MCP 服务
 
 Relay 提供三套基于 stdio 的 Model Context Protocol 服务（JSON-RPC 2.0，只用标准库；支持协议版本 2024-11-05 至 2025-11-25），可以单独接入，也可以同时接入：
 
 | 服务 | 文件 | 工具 | 面向 |
 |---|---|---|---|
-| `anet-relay` | `mcp/anet_relay_mcp.py` | 26 个 `relay_*`（`sticks` 等级下 18 个） | 飞行：机群、认领、解锁、模式、技能、动作序列及其油门参数、时间轴序列（`relay_timeline_*`）、短时杆量、再飞、穿环航线、急停 |
+| `anet-relay` | `mcp/anet_relay_mcp.py` | 34 个 `relay_*`（`sticks` 等级下 26 个） | 飞行：机群、认领、解锁、模式、技能、动作序列及其油门参数、时间轴序列（`relay_timeline_*`，含 `acro`）、短时杆量、再飞、穿环航线、急停；固件孪生：`relay_autopilots_list`、`relay_firmware_identify`、`relay_twin_profiles_list`、`relay_twin_profile_get`、`relay_twin_profile_capture`、`relay_twin_start`、`relay_twin_status`、`relay_sim_frame`（孪生是模拟机，各等级均可用） |
 | `anet-relay-device` | `mcp/anet_relay_device_mcp.py` | 36 个 `device_*` | 设备级：设备总览、MAVLink 消息、参数读写、原始指令、单电机测试、执行器、遥控覆盖、消息频率、重启、校准、home、姿态与速度控制、飞行终止、标定流程与报告 |
-| `anet-relay-app` | `mcp/anet_relay_app_mcp.py` | 42 个 `app_*`、19 个程序工具与 4 个狗斗工具 | 应用控制：应用与窗口状态、手柄、语言、工作区、选择飞机、检查器、对话框、截图、扫描网络、连接与移除飞机、模拟机、设置、告警、记录与导出、再飞来源、附身、Copilot 窗口、全部急停；机载程序：`program_guide`、`program_*`、`challenge_list`、`challenge_submit`、`job_status`、`duel_run`、`ladder`、`airframe_set`；狗斗：`dogfight_start`、`dogfight_stop`、`dogfight_status`、`leaderboard` |
+| `anet-relay-app` | `mcp/anet_relay_app_mcp.py` | 42 个 `app_*`、`relay_serial_ports`、`relay_hitl`、19 个程序工具与 4 个狗斗工具 | 应用控制：应用与窗口状态、手柄、语言、工作区、选择飞机、检查器、对话框、截图、扫描网络、连接（`app_connect_address {host}` 或 `{serial: {device, baud}}`）与移除飞机、串口列表、模拟机（`app_sims_add {engine: relay \| sitl, profile, pack, frame, home}`；`app_sim_reset` 也可恢复已坠毁的模拟机，并重启孪生的固件）、PX4 硬件在环（`relay_hitl {vehicle, action: status \| start \| stop, confirm: "HITL"}`）、设置、告警、记录与导出、再飞来源、附身、Copilot 窗口、全部急停；机载程序：`program_guide`、`program_*`、`challenge_list`、`challenge_submit`、`job_status`、`duel_run`、`ladder`、`airframe_set`；狗斗：`dogfight_start`、`dogfight_stop`、`dogfight_status`、`leaderboard` |
 
 每套服务在启动时打开一个智能体会话，名称取 `--name`（缺省分别为 `mcp`、`mcp-device`、`mcp-app`），自动续租，并在客户端断开时关闭会话；Relay 重启后，服务在下一次调用时重新打开会话，此时需要重新认领。认领属于会话：用某一套服务控制飞机时，请用同一套服务的认领工具（`relay_claim` 或 `device_claim`）。工具参数在发往 Relay 之前校验，缺少或多余的参数以 `invalid arguments` 返回。失败以 `isError: true` 的工具结果返回，并附错误码，模型可据此应对（例如遇到 `possessed_by_human` 时等待）。
 
@@ -603,6 +652,10 @@ Relay 不在 8765 端口运行时，追加 `"--base", "http://127.0.0.1:<port>"`
 | `program_deploy(id, pid, rev, params, mode, sensors, arena, seed, airframe)` · `program_stop(id)` · `program_resume(id)` · `program_params(id, **values)` · `program_status(id)` · `program_log(id, after, limit)` · `program_allow(id, allow, confirm)` | 运行中的程序（`program_allow` 需要操作员令牌） |
 | `challenge_list()` · `challenge_submit(challenge, pid, rev, wait=True)` · `job_status(job)` · `wait_job(job)` · `duel_run(pids, rounds, seed, scenario, wait=True)` · `ladder()` · `trace(id)` | 评测、对抗与排名；没有评测接口时报 `judge_unavailable` |
 | `airframe_get(id)` · `airframe_set(id, preset, params, seed)` | 模拟机机体缺陷 |
+| `autopilots()` · `import_autopilot(path, sha256)` · `delete_autopilot(pack)` · `firmware(id)` | 运行包（导入与删除需操作员令牌），以及飞机的固件识别结果与匹配的运行包 |
+| `twin_profiles()` · `twin_profile(pid)` · `capture_twin_profile(id, name=None, frame=None, profile=None)` · `update_twin_profile(pid, name, frame, pack, home, clear_home)` · `delete_twin_profile(pid)` | 孪生配置；`frame` 为预设名或机型对象 |
+| `start_twin(profile=None, pack=None, frame=None, home=None, count=1)` · `twin(id)` · `set_frame(id, preset, mass_kg, wheelbase_m, prop_in, cells, capacity_mah)` | 启动固件孪生（返回新编号）、读取孪生详情、更换模拟机机型；`home` 为 `{lat, lon, alt_m}` 或 `(lat, lon[, alt_m])` |
+| `serial_ports()` · `connect(host=None, port=None, serial=None, baud=None)` · `hitl(id, action="status", confirm=None)` | 串口列表、经 UDP 或串口连接、PX4 硬件在环（`start` 须 `confirm="HITL"`） |
 | `app()` · `ui_state()` · `gamepads()` · `app_actions()` · `ui(action, **args)` | 应用与窗口状态、界面动作 |
 | `scan_network(networks)` · `connect_vehicle(host, port)` · `remove_vehicle(id)` · `add_sims(count, autopilot, hover_assist)` · `remove_sims(ids)` · `sim_assist(id, on)` · `settings()` · `update_settings(**patch)` · `ack_alert(id)` · `stop_all()` | 应用操作：打开会话时以会话身份调用，否则使用操作员令牌 |
 
@@ -628,5 +681,6 @@ Relay 不在 8765 端口运行时，追加 `"--base", "http://127.0.0.1:<port>"`
 - **运行轨迹：** 每条消息下方有一架小小的红色像素飞机，Copilot 工作时它在飞，旁边是阶段（等待模型、思考中及已思考字数、撰写回复、准备调用工具及参数字数、工具执行中、等待批准）与计时；该条目滚出视野时，输入框上方显示同样的条目。点击打开本次运行的轨迹：每次模型调用的耗时、输入 / 输出 / 思考 tokens 与结束原因，可展开查看完整思考、回复与请求的工具调用；每个工具的参数与完整结果。
 - **工具范围：** `flight`（飞行：状态、技能、动作序列、短时杆量、再飞、急停）、`flight+device`（另加设备级工具）、`all`（缺省，另加应用控制工具：语言、工作区、选择飞机、扫描网络、模拟机、设置、手柄、记录、窗口与截图）。工具与第 5 节的接口一一对应。
 - **安全：** 对真机的每个运动指令与设备级写入（起飞、平移、转向、悬停、降落、动作序列、再飞、电机测试、执行器、重启、校准、终止等），聊天中都会出现审批卡片，操作员批准前不会发送任何指令（120 秒未处理视为拒绝）；需要审批时浮动窗口会自动显示并提示。确认词由审批代替，Copilot 不会自行填写。接管和急停对 Copilot 与其他智能体同样有效。
-- **全部允许（0.5.2）：** 审批卡片上的**全部允许**按钮（或 设置 → Copilot → **全部允许**）批准当前命令，之后真机上的命令都不再询问。每条命令仍在对话中记录为“已自动批准”；开启期间 Copilot 标题栏始终显示红框的**全部允许**标记，点击即可关闭。Relay 自身的保护不变：预检、操作员的**允许在这架飞机上运行程序**开关、附身与急停。
+- **全部允许（0.5.2）：** 审批卡片上的**全部允许**按钮（或 设置 → Copilot → **全部允许**）批准当前命令，之后真机上的命令都不再询问。每条命令仍在对话中记录为“已自动批准”；开启期间 Copilot 标题栏始终显示红框的**全部允许**标记，点击即可关闭。Relay 自身的保护不变：预检、操作员的**允许在这架飞机上运行程序**开关、附身与急停。硬件在环例外：`relay_hitl` 的 start 与 stop 始终需要审批（0.5.4）。
+- **固件孪生与硬件在环（0.5.4）：** 在任何工具范围与两种控制等级下，Copilot 都具备孪生工具（`relay_autopilots_list`、`relay_firmware_identify`、`relay_twin_profiles_list`、`relay_twin_profile_get`、`relay_twin_profile_capture`、`relay_twin_start`、`relay_twin_status`、`relay_sim_frame`）；孪生是模拟机，这些工具无需审批。工具范围为 `all` 时另有 `relay_serial_ports`、`app_connect {serial}` 与 `relay_hitl`。`relay_hitl` 的 start 与 stop 无论对哪架飞机、即使开启了**全部允许**，都会显示审批卡片：卡片上没有**全部允许**按钮，并提示操作员确认已拆下螺旋桨。`relay_hitl` 的 status 无需审批。
 - **程序与控制等级：** Copilot 在每条消息前读取 `agent_flight_level`。在 `sticks`（缺省）等级下，它没有起飞、平移、转向、悬停、动作序列与再飞工具，系统提示会说明高层飞行不可用、稳定飞行需要编写程序；在 `full` 等级下这些工具恢复。在任何工具范围内它都具备程序工具（`program_list`、`program_get`、`program_create`、`program_update`、`program_validate`、`program_test`、`program_deploy`、`program_stop`、`program_resume`、`program_params`、`program_status`、`program_log`、`challenge_list`、`challenge_submit`、`job_status`、`duel_run`、`ladder`、`airframe_set`）以及 `relay_arm`、`relay_disarm`、`relay_mode`，系统提示末尾附有 [`programs-guide.md`](programs-guide.md)。编写与修改程序无需审批；在真机上部署或恢复程序、解锁与切换模式，与其他运动指令一样需要操作员批准。`program_deploy {arm: true}` 随部署一并解锁；在 `full` 等级下，动作序列工具接受 `tuning`，`relay_plan_tune` 可在飞行中调整序列油门，Copilot 因此能完成编写、测试、试飞与调参的完整流程。

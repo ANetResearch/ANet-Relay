@@ -85,20 +85,22 @@ with RelayClient() as relay:                          # http://127.0.0.1:8765
 claude mcp add anet-relay-app -- python3 /path/to/ANet-Relay/mcp/anet_relay_app_mcp.py --name claude-code-app   # 或任意 MCP 客户端
 ```
 
-三个 MCP 服务器分别覆盖飞行（26 个工具）、直到单个电机的设备层（36 个）和整个应用（65 个）。详见 [MCP Servers](https://github.com/ANetResearch/ANet-Relay/wiki/MCP-Servers)。
+三个 MCP 服务器分别覆盖飞行与固件孪生（34 个工具）、直到单个电机的设备层（36 个）和包括硬件在环在内的整个应用（67 个）。详见 [MCP Servers](https://github.com/ANetResearch/ANet-Relay/wiki/MCP-Servers)。
 
 ## 包含什么
 
 | | |
 |---|---|
-| **机队链路** | UDP 14550 上的 MAVLink 2，子网扫描，在线 / 降级 / 丢失状态，完整遥测、参数与原始消息检查器 |
+| **机队链路** | UDP 14550 或 USB 串口上的 MAVLink 2（波特率自动识别），子网扫描，在线 / 降级 / 丢失状态，完整遥测、参数与原始消息检查器 |
 | **控制** | 接管、认领与会话，50 Hz 摇杆，技能与序列（Full 级别），可覆盖一切的急停与全部急停 |
-| **仿真** | 最多 8 架，ArduPilot 或 PX4 风格自驾仪，悬停辅助，带种子的机体缺陷（重心偏移、电机不均、桨叶损伤） |
+| **仿真** | 最多 8 架，ArduPilot 或 PX4 风格自驾仪，悬停辅助，机型预设（120 g、250 mm、450 mm），特技模式（给定机体角速度，可翻滚、倒飞），刚体触地使摔机后弹起、翻滚并停在最终姿态，带种子的机体缺陷（重心偏移、电机不均、桨叶损伤） |
+| **固件孪生** | 官方 ArduCopter（4.3.8 至 4.7.2）与 PX4（1.14.4 至 1.17.0）SITL 固件随安装包分发，以真机的版本与参数在 Relay 的物理中飞行：识别固件、生成孪生配置、启动孪生。每个运行包约 5 至 6 MB（压缩后 2 至 3 MB），每个安装包增加 25 至 30 MB；Windows 只含 ArduPilot（[飞控运行包](docs/autopilot-packs.md)） |
+| **硬件在环** | PX4，经 USB：Relay 备份飞控参数，切换到 HITL，由物理模型向飞控提供传感器数据（电机由固件锁死），结束后恢复并逐项核对全部参数。ArduPilot 已移除 HIL，请使用固件孪生 |
 | **程序与 Lab** | 50 Hz 受限 Python、单元测试、10 个评测挑战、Elo 对决，以及包含每发子弹与爆炸的轨迹回放 |
 | **竞技场** | 虚拟子弹、碰撞、比赛、狗斗与跨局域网排行榜 |
 | **真实飞机** | ESP8266 桥接后的 PX4 或 ArduPilot，带确认词的飞前检查、台架流程、飞行健康诊断、FPV 画中画 |
 | **记录** | 每次飞行存入本地 SQLite：曲线、事件与控制轨道、三维回放、CSV 与 JSON |
-| **SITL** | PX4 + Gazebo 或 ArduPilot SITL 作为普通 MAVLink 飞机接入（[说明](docs/simulation.zh-CN.md)） |
+| **外部 SITL** | 自行运行的 PX4 + Gazebo 或 ArduPilot SITL 作为普通 MAVLink 飞机接入（[说明](docs/simulation.zh-CN.md)） |
 
 ## 下载
 
@@ -112,7 +114,7 @@ claude mcp add anet-relay-app -- python3 /path/to/ANet-Relay/mcp/anet_relay_app_
 
 ## 文档
 
-**[Wiki](https://github.com/ANetResearch/ANet-Relay/wiki/Home-zh-CN)** 提供使用指南：安装、操控、真机、物理、碰撞、竞技场、狗斗、程序、Lab、Agent、MCP、Copilot、SITL、排障与常见问题。随代码版本化的参考文档：[Agent API](docs/agent-api.zh-CN.md) · [机载程序](docs/programs.zh-CN.md) · [仿真](docs/simulation.zh-CN.md) · [硬件](docs/hardware.zh-CN.md) · [飞行调参](docs/flight-tuning.zh-CN.md) · [设计文档](docs/design/)。
+**[Wiki](https://github.com/ANetResearch/ANet-Relay/wiki/Home-zh-CN)** 提供使用指南：安装、操控、真机、物理、碰撞、竞技场、狗斗、程序、Lab、Agent、MCP、Copilot、SITL、排障与常见问题。随代码版本化的参考文档：[Agent API](docs/agent-api.zh-CN.md) · [机载程序](docs/programs.zh-CN.md) · [仿真](docs/simulation.zh-CN.md) · [飞控运行包（英文）](docs/autopilot-packs.md) · [硬件](docs/hardware.zh-CN.md) · [飞行调参](docs/flight-tuning.zh-CN.md) · [设计文档](docs/design/)。
 
 ## 安全
 
