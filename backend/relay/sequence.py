@@ -6,7 +6,7 @@ simulated and a real aircraft. File layout (UTF-8 JSON, suffix ``.ars``, "ANet R
     {
       "format": "ars", "version": 1,
       "name": "takeoff, hover 5 s, land",
-      "mode": "althold",                      # stabilize | althold | poshold
+      "mode": "althold",                      # stabilize | acro | althold | poshold
       "duration_s": 14.0,
       "trim": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "throttle": 0.0},
       "tracks": {
@@ -21,9 +21,10 @@ Each key starts a block, the operation the editor shows: ``{t, v, ease, label?}`
 from ``t`` until the next key (``hold``, the default) or moves it linearly from ``v`` to the next key's
 value (``ramp``); the block lasts until the next key. Before the first key a track holds its first value,
 after the last key its last value; a missing track is centred
-(throttle: 0.5 in the hold modes, 0 in stabilize). Sticks are the Relay convention: roll / pitch / yaw
--1..1 (right, forward, clockwise +), throttle 0..1. ``trim`` is added to every frame and can change while
-the sequence flies; it is how a drift is cancelled without editing the tracks.
+(throttle: 0.5 in the hold modes, 0 in stabilize and acro). Sticks are the Relay convention: roll / pitch /
+yaw -1..1 (right, forward, clockwise +), throttle 0..1. ``trim`` is added to every frame and can change
+while the sequence flies; it is how a drift is cancelled without editing the tracks. ``acro`` (11 §9) flies
+ArduPilot / PX4 ACRO: the roll / pitch / yaw sticks are body rates and nothing levels the aircraft.
 """
 
 from __future__ import annotations
@@ -46,9 +47,11 @@ TRIM_LIMITS = {"roll": 0.3, "pitch": 0.3, "yaw": 0.3, "throttle": 0.2}
 # portable mode -> the autopilot's own name
 MODES: dict[str, dict[str, str]] = {
     "stabilize": {modes.ARDUPILOT: "STABILIZE", modes.PX4: "STABILIZED"},
+    "acro": {modes.ARDUPILOT: "ACRO", modes.PX4: "ACRO"},
     "althold": {modes.ARDUPILOT: "ALT_HOLD", modes.PX4: "ALTCTL"},
     "poshold": {modes.ARDUPILOT: "LOITER", modes.PX4: "POSCTL"},
 }
+MANUAL_MODES = ("stabilize", "acro")  # the throttle stick is the collective output
 RECORD_TOLERANCE = 0.015  # stick units a simplified recording may deviate from the samples
 RECORD_MAX_GAP_S = 2.0  # longest stretch between kept keys of a recording
 
@@ -100,7 +103,7 @@ def normalise(raw: Any) -> dict[str, Any]:
         raise SequenceError("version", f"unsupported (this Relay reads version {VERSION})")
     mode = raw.get("mode", "althold")
     if mode not in MODES:
-        raise SequenceError("mode", "must be stabilize, althold or poshold")
+        raise SequenceError("mode", "must be stabilize, acro, althold or poshold")
     end = raw.get("end", "disarm")
     if end not in ENDS:
         raise SequenceError("end", "must be disarm or hold")
@@ -185,7 +188,7 @@ def portable_mode(autopilot: str | None, name: str | None) -> str | None:
 
 def rest_value(track: str, mode: str) -> float:
     if track == "throttle":
-        return 0.5 if mode != "stabilize" else 0.0
+        return 0.0 if mode in MANUAL_MODES else 0.5
     return 0.0
 
 

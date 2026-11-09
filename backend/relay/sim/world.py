@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from . import collide
-from .physics import DT, IXX, IYY, IZZ, MASS
+from .physics import DT, MASS
 
 Vec3 = tuple[float, float, float]
 
@@ -36,7 +36,6 @@ PAIR_DISTANCE = 2.0 * collide.CRAFT_RADIUS
 EVENT_GAP_S = 0.25  # one report per pair while a bounce settles; a crash is always reported
 REPORT_V = 0.2  # m/s: slower contacts (one aircraft resting on another) are resolved but not reported
 CONTACT_MEMORY_S = 1.0  # how long obs.collision shows a contact
-_INERTIA = (IXX, IYY, IZZ)
 
 
 @dataclass
@@ -140,8 +139,7 @@ class World:
 
     @staticmethod
     def _mass(sim: Any) -> float:
-        af = sim.quad.active_airframe()
-        return af.mass if af is not None else MASS
+        return sim.quad.body_mass()  # the frame's mass, or the airframe's take-off weight (11 §8.1)
 
     def apply_contact(
         self,
@@ -160,7 +158,7 @@ class World:
         terminal's ``COLLIDE`` once it has checked it against its own state (07 §2)."""
         quad = body.sim.quad
         s = quad.s
-        kick = collide.rate_kick(dv, n, s.q, self._mass(body.sim), _INERTIA)
+        kick = collide.rate_kick(dv, n, s.q, self._mass(body.sim), quad.inertia)
         ox, oy, oz = body.offset
         local = (point[0] - ox, point[1] - oy, point[2] - oz)
         reason = f"collision with {other_label or other}" if crash else None

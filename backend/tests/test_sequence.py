@@ -260,3 +260,71 @@ def test_joining_and_stopping_in_the_air_never_drop_the_throttle(svc, stepper):
     assert svc.stop_sequence(vid, agent)["after"] == "sticks"
     stepper.run(0.5, [session])
     assert v.skill.active and v.skill.out.throttle == pytest.approx(0.62)  # not the 0 the timeline ends on
+
+
+def acro_doc():
+    """Spool, climb in ACRO, a short roll pulse and back, then down: rates on the sticks, manual throttle."""
+    return {
+        "format": "ars",
+        "version": 1,
+        "name": "acro roll pulse",
+        "mode": "acro",
+        "tracks": {
+            "throttle": [
+                {"t": 0.0, "v": 0.0},
+                {"t": 0.5, "v": 0.7},
+                {"t": 2.0, "v": 0.5},
+                {"t": 4.0, "v": 0.0},
+            ],
+            "roll": [{"t": 0.0, "v": 0.0}, {"t": 2.5, "v": 0.1}, {"t": 2.7, "v": -0.1}, {"t": 2.9, "v": 0.0}],
+        },
+        "duration_s": 5.0,
+        "end": "hold",
+    }
+
+
+def test_acro_mode_document_rules():
+    """11 §9: ``acro`` is ArduPilot / PX4 ACRO; like stabilize its missing throttle track rests at 0."""
+    doc = seqmod.normalise(acro_doc())
+    assert doc["mode"] == "acro"
+    assert (
+        seqmod.autopilot_mode("acro", "ArduPilot") == "ACRO"
+        and seqmod.autopilot_mode("acro", "PX4") == "ACRO"
+    )
+    assert (
+        seqmod.portable_mode("ArduPilot", "ACRO") == "acro" and seqmod.portable_mode("PX4", "ACRO") == "acro"
+    )
+    assert seqmod.rest_value("throttle", "acro") == 0.0 and seqmod.rest_value("throttle", "althold") == 0.5
+    bare = seqmod.normalise(
+        {
+            "format": "ars",
+            "version": 1,
+            "mode": "acro",
+            "tracks": {"roll": [{"t": 0, "v": 0}, {"t": 1, "v": 0}]},
+        }
+    )
+    assert seqmod.sample(bare, 0.0) == (0.0, 0.0, 0.0, 0.0)
+    rec = seqmod.from_rows(
+        [(0.0, 0.1, 0.0, 0.0, 0.4), (1.0, 0.0, 0.0, 0.0, 0.5)], mode="ACRO", autopilot="PX4"
+    )
+    assert rec["mode"] == "acro"
+    with pytest.raises(seqmod.SequenceError) as info:
+        seqmod.normalise({**acro_doc(), "mode": "ACRO"})
+    assert info.value.field == "mode" and "acro" in str(info.value)
+
+
+@pytest.mark.parametrize("flavour", ["ardupilot", "px4"])
+def test_acro_sequence_flies_in_acro_with_hover_assist_off(svc, stepper, flavour):
+    vid, v = boot(svc, stepper, flavour)
+    session, agent = open_agent(svc)
+    svc.claim(vid, agent)
+    svc.set_sim_assist(vid, False, agent)  # a manual-throttle timeline needs no barometer
+    out = svc.run_sequence(vid, agent, acro_doc())
+    assert out["sequence"]["mode"] == "acro"
+    heights = []
+    stepper.until(lambda: v.skill.view()["progress_s"] >= 2.4, 15, [session])
+    assert v.driver.sim.mode == "ACRO" and v.mode == "ACRO" and v.armed
+    while v.skill.active and v.skill.view()["progress_s"] < 3.2:
+        stepper.run(0.05, [session])
+        heights.append(v.driver.sim.quad.s.p[2])
+    assert max(heights) > 0.5 and not v.driver.sim.crashed
