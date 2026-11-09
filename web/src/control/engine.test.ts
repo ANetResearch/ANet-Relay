@@ -359,7 +359,7 @@ describe('buttons', () => {
 
 // ---------------------------------------------------------------------------------------------- WP-C (05 §6)
 
-const sim = (id: string, over: Partial<Vehicle> = {}) => vehicle(id, { sim: { hover_assist: true, turbulence: 0.3, airframe: { preset: 'ideal' as const, seed: 0 } }, ...over })
+const sim = (id: string, over: Partial<Vehicle> = {}) => vehicle(id, { sim: { hover_assist: true, turbulence: 0.3, airframe: { preset: 'ideal' as const, seed: 0 }, engine: 'relay' as const, firmware: null, frame: 'micro-120' }, ...over })
 const tx = (index: number, axes: number[], buttons: number[] = []) => gp(index, axes, buttons, 'EdgeTX RadioMaster TX16S Joystick')
 const nonStd = (p: GamepadLike): GamepadLike => ({ ...p, mapping: '' })
 const fires = (h: { calls: string[] }) => h.calls.filter((c) => c.startsWith('fire'))
@@ -453,7 +453,7 @@ describe('throttle continuity (05 §6.2)', () => {
     expect(Math.abs(settled - before)).toBeGreaterThan(0.05)
   })
   it('a sim with hover assist off centres the throttle on 0.5', () => {
-    const v = sim('sim-1', { mode: 'STABILIZE', mode_class: 'manual', sim: { hover_assist: false, turbulence: 0.3, airframe: { preset: 'ideal' as const, seed: 0 } }, calibration: { signs: { roll: 1, pitch: 1, yaw: 1 }, hover: 0.3 } })
+    const v = sim('sim-1', { mode: 'STABILIZE', mode_class: 'manual', sim: { hover_assist: false, turbulence: 0.3, airframe: { preset: 'ideal' as const, seed: 0 }, engine: 'relay' as const, firmware: null, frame: 'micro-120' }, calibration: { signs: { roll: 1, pitch: 1, yaw: 1 }, hover: 0.3 } })
     const { h, step } = harness([v])
     h.pads = [gp(0)]
     step(20, 2)
@@ -475,12 +475,12 @@ describe('hover assist input (05 §6.3)', () => {
     step(20, 2)
     press(h, step, 3)
     expect(h.calls).toContain('assist sim-1 false')
-    v.sim = { hover_assist: false, turbulence: 0.3, airframe: { preset: 'ideal' as const, seed: 0 } }
+    v.sim = { hover_assist: false, turbulence: 0.3, airframe: { preset: 'ideal' as const, seed: 0 }, engine: 'relay' as const, firmware: null, frame: 'micro-120' }
     v.mode = 'STABILIZE'
     v.mode_class = 'manual'
     press(h, step, 3)
     expect(h.calls).toContain('assist sim-1 true')
-    v.sim = { hover_assist: true, turbulence: 0.3, airframe: { preset: 'ideal' as const, seed: 0 } }
+    v.sim = { hover_assist: true, turbulence: 0.3, airframe: { preset: 'ideal' as const, seed: 0 }, engine: 'relay' as const, firmware: null, frame: 'micro-120' }
     press(h, step, 3)
     expect(h.calls.at(-1)).toBe('mode sim-1 ALT_HOLD')
 
@@ -559,7 +559,7 @@ describe('transmitters (05 §6.3)', () => {
     expect(step().awaiting['sim-1']).toBeUndefined()
   })
   it('switch bindings: stop at once, hover assist by position, arm held 1 s, fire', () => {
-    const { h, step, possess } = harness([sim('sim-1', { mode: 'STABILIZE', mode_class: 'manual', sim: { hover_assist: false, turbulence: 0.3, airframe: { preset: 'ideal' as const, seed: 0 } } })])
+    const { h, step, possess } = harness([sim('sim-1', { mode: 'STABILIZE', mode_class: 'manual', sim: { hover_assist: false, turbulence: 0.3, airframe: { preset: 'ideal' as const, seed: 0 }, engine: 'relay' as const, firmware: null, frame: 'micro-120' } })])
     h.profiles = {
       'EdgeTX RadioMaster TX16S Joystick': {
         id: 'EdgeTX RadioMaster TX16S Joystick',

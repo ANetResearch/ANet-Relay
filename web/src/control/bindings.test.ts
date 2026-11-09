@@ -69,7 +69,7 @@ describe('mode toggle', () => {
 describe('hover assist action and H5 (05 §6.3)', () => {
   const modes = ['STABILIZE', 'ALT_HOLD', 'LOITER']
   it('switches a sim by whether it holds altitude now', () => {
-    const s = (hover_assist: boolean, mode_class: 'manual' | 'althold' | 'position') => ({ kind: 'sim' as const, mode_class, modes, sim: { hover_assist, turbulence: 0, airframe: { preset: 'ideal' as const, seed: 0 } } })
+    const s = (hover_assist: boolean, mode_class: 'manual' | 'althold' | 'position') => ({ kind: 'sim' as const, mode_class, modes, sim: { hover_assist, turbulence: 0, airframe: { preset: 'ideal' as const, seed: 0 }, engine: 'relay' as const, firmware: null, frame: 'micro-120' } })
     expect(assistAction(s(true, 'althold'))).toEqual({ kind: 'assist', on: false })
     expect(assistAction(s(true, 'position'))).toEqual({ kind: 'assist', on: false })
     expect(assistAction(s(false, 'manual'))).toEqual({ kind: 'assist', on: true })

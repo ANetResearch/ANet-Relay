@@ -109,6 +109,27 @@
     },
     "Leaderboard": {
       "$ref": "#/$defs/Leaderboard"
+    },
+    "AutopilotPacks": {
+      "$ref": "#/$defs/AutopilotPacks"
+    },
+    "AutopilotPack": {
+      "$ref": "#/$defs/AutopilotPack"
+    },
+    "VehicleFirmware": {
+      "$ref": "#/$defs/VehicleFirmware"
+    },
+    "TwinProfiles": {
+      "$ref": "#/$defs/TwinProfiles"
+    },
+    "TwinProfile": {
+      "$ref": "#/$defs/TwinProfile"
+    },
+    "SimTwin": {
+      "$ref": "#/$defs/SimTwin"
+    },
+    "SimFrame": {
+      "$ref": "#/$defs/SimFrame"
     }
   },
   "required": [
@@ -146,7 +167,14 @@
     "Ladder",
     "Trace",
     "DogfightView",
-    "Leaderboard"
+    "Leaderboard",
+    "AutopilotPacks",
+    "AutopilotPack",
+    "VehicleFirmware",
+    "TwinProfiles",
+    "TwinProfile",
+    "SimTwin",
+    "SimFrame"
   ],
   "additionalProperties": false,
   "$defs": {
@@ -688,6 +716,172 @@
         "yaw"
       ],
       "title": "Attitude",
+      "type": "object"
+    },
+    "AutopilotPack": {
+      "properties": {
+        "id": {
+          "description": "ardupilot-copter-<version> or px4-<version>",
+          "type": "string"
+        },
+        "family": {
+          "enum": [
+            "ardupilot",
+            "px4"
+          ],
+          "type": "string"
+        },
+        "vehicle": {
+          "const": "copter",
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "git": {
+          "description": "source commit, 8 to 40 hex digits",
+          "type": "string"
+        },
+        "platform": {
+          "enum": [
+            "linux-x64",
+            "mac-arm64",
+            "mac-x64",
+            "win-x64"
+          ],
+          "type": "string"
+        },
+        "size_bytes": {
+          "type": "integer"
+        },
+        "license": {
+          "type": "string"
+        },
+        "source": {
+          "description": "URL of the source tag",
+          "type": "string"
+        },
+        "built": {
+          "description": "official (upstream binary) or ci",
+          "type": "string"
+        },
+        "origin": {
+          "description": "installed with Relay, or imported (deletable)",
+          "enum": [
+            "bundled",
+            "imported"
+          ],
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "digest of the pack's tarball, when the index lists it"
+        },
+        "usable": {
+          "description": "the pack can run on this computer",
+          "type": "boolean"
+        },
+        "problem": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "why it cannot (English)"
+        },
+        "problem_zh": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "twins": {
+          "default": 0,
+          "description": "firmware twins running on this pack (GET /autopilots)",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "family",
+        "vehicle",
+        "version",
+        "git",
+        "platform",
+        "size_bytes",
+        "license",
+        "source",
+        "built",
+        "origin",
+        "sha256",
+        "usable",
+        "problem",
+        "problem_zh",
+        "twins"
+      ],
+      "title": "AutopilotPack",
+      "type": "object"
+    },
+    "AutopilotPacks": {
+      "description": "``GET /autopilots``: the packs of this platform, bundled first.",
+      "properties": {
+        "platform": {
+          "anyOf": [
+            {
+              "enum": [
+                "linux-x64",
+                "mac-arm64",
+                "mac-x64",
+                "win-x64"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bundled_dir": {
+          "type": "string"
+        },
+        "imported_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "packs": {
+          "items": {
+            "$ref": "#/$defs/AutopilotPack"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "platform",
+        "bundled_dir",
+        "imported_dir",
+        "packs"
+      ],
+      "title": "AutopilotPacks",
       "type": "object"
     },
     "Battery": {
@@ -1917,6 +2111,328 @@
       "title": "Events",
       "type": "object"
     },
+    "ExcludedParam": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "reason_en": {
+          "type": "string"
+        },
+        "reason_zh": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "reason_en",
+        "reason_zh"
+      ],
+      "title": "ExcludedParam",
+      "type": "object"
+    },
+    "FirmwareCandidate": {
+      "properties": {
+        "pack": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "git": {
+          "type": "string"
+        },
+        "match": {
+          "enum": [
+            "exact",
+            "version",
+            "series",
+            "nearest",
+            "none"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "pack",
+        "version",
+        "git",
+        "match"
+      ],
+      "title": "FirmwareCandidate",
+      "type": "object"
+    },
+    "FirmwareIdentity": {
+      "properties": {
+        "family": {
+          "anyOf": [
+            {
+              "enum": [
+                "ardupilot",
+                "px4"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "vehicle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "frame": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "quad / hexa / ... from HEARTBEAT type"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "anyOf": [
+            {
+              "enum": [
+                "dev",
+                "alpha",
+                "beta",
+                "rc",
+                "official"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "git": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "board": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "board_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "ArduPilot bootloader board id, PX4 USB product id"
+        },
+        "identified": {
+          "description": "AUTOPILOT_VERSION received",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "family",
+        "vehicle",
+        "frame",
+        "version",
+        "type",
+        "git",
+        "board",
+        "board_id",
+        "identified"
+      ],
+      "title": "FirmwareIdentity",
+      "type": "object"
+    },
+    "FirmwareInfo": {
+      "description": "The aircraft's firmware identity (11 §4) from HEARTBEAT and AUTOPILOT_VERSION; null fields are\nnot reported by the aircraft (or not decoded yet).",
+      "properties": {
+        "family": {
+          "anyOf": [
+            {
+              "enum": [
+                "ardupilot",
+                "px4"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "vehicle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "copter / plane / rover / ... from HEARTBEAT type"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "x.y.z"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "enum": [
+                "dev",
+                "alpha",
+                "beta",
+                "rc",
+                "official"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "release type"
+        },
+        "git": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "first 8 hex digits of the firmware's git hash"
+        },
+        "board": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "flight controller board name for common boards, e.g. Pixracer"
+        }
+      },
+      "required": [
+        "family",
+        "vehicle",
+        "version",
+        "type",
+        "git",
+        "board"
+      ],
+      "title": "FirmwareInfo",
+      "type": "object"
+    },
+    "FirmwareMatch": {
+      "properties": {
+        "recommended": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "pack id; null when no pack of this firmware is installed"
+        },
+        "match": {
+          "enum": [
+            "exact",
+            "version",
+            "series",
+            "nearest",
+            "none"
+          ],
+          "type": "string"
+        },
+        "warning": {
+          "description": "series and below: the control loop may differ from the aircraft's",
+          "type": "boolean"
+        },
+        "warning_en": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "warning_zh": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidates": {
+          "description": "every usable pack of the same firmware, best first",
+          "items": {
+            "$ref": "#/$defs/FirmwareCandidate"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "recommended",
+        "match",
+        "warning",
+        "warning_en",
+        "warning_zh",
+        "candidates"
+      ],
+      "title": "FirmwareMatch",
+      "type": "object"
+    },
     "Fleet": {
       "properties": {
         "t": {
@@ -2770,6 +3286,26 @@
         "error"
       ],
       "title": "Listen",
+      "type": "object"
+    },
+    "ParamProgress": {
+      "properties": {
+        "received": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "complete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "received",
+        "total",
+        "complete"
+      ],
+      "title": "ParamProgress",
       "type": "object"
     },
     "PlanView": {
@@ -4614,6 +5150,259 @@
       "title": "SimAirframe",
       "type": "object"
     },
+    "SimFirmware": {
+      "description": "A firmware twin's firmware (11 §10): runtime pack, match level against its profile, process state.",
+      "properties": {
+        "family": {
+          "enum": [
+            "ardupilot",
+            "px4"
+          ],
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "pack": {
+          "type": "string"
+        },
+        "match": {
+          "anyOf": [
+            {
+              "enum": [
+                "exact",
+                "version",
+                "series",
+                "nearest",
+                "none"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "against the profile's firmware; null without a profile"
+        },
+        "state": {
+          "description": "running: the firmware flies; restarting after a reset; exited",
+          "enum": [
+            "new",
+            "booting",
+            "running",
+            "restarting",
+            "exited",
+            "failed",
+            "stopped"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "family",
+        "version",
+        "pack",
+        "match",
+        "state"
+      ],
+      "title": "SimFirmware",
+      "type": "object"
+    },
+    "SimFrame": {
+      "description": "``PUT /sims/{id}/frame``.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "engine": {
+          "enum": [
+            "relay",
+            "sitl"
+          ],
+          "type": "string"
+        },
+        "frame": {
+          "$ref": "#/$defs/SimFrameView"
+        }
+      },
+      "required": [
+        "id",
+        "engine",
+        "frame"
+      ],
+      "title": "SimFrame",
+      "type": "object"
+    },
+    "SimFrameView": {
+      "properties": {
+        "preset": {
+          "type": "string"
+        },
+        "mass_kg": {
+          "type": "number"
+        },
+        "wheelbase_m": {
+          "type": "number"
+        },
+        "prop_in": {
+          "type": "number"
+        },
+        "cells": {
+          "type": "integer"
+        },
+        "capacity_mah": {
+          "type": "number"
+        },
+        "thrust_to_weight": {
+          "description": "derived from the hover thrust parameter on a twin",
+          "type": "number"
+        }
+      },
+      "required": [
+        "preset",
+        "mass_kg",
+        "wheelbase_m",
+        "prop_in",
+        "cells",
+        "capacity_mah",
+        "thrust_to_weight"
+      ],
+      "title": "SimFrameView",
+      "type": "object"
+    },
+    "SimTwin": {
+      "description": "``GET /sims/{id}/twin``.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "engine": {
+          "const": "sitl",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "new",
+            "booting",
+            "running",
+            "restarting",
+            "exited",
+            "failed",
+            "stopped"
+          ],
+          "type": "string"
+        },
+        "pack": {
+          "$ref": "#/$defs/AutopilotPack"
+        },
+        "firmware": {
+          "$ref": "#/$defs/TwinFirmwareRef"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TwinProfileRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "instance": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "n of the loopback ports (11 §2)"
+        },
+        "pid": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "home": {
+          "$ref": "#/$defs/TwinHome"
+        },
+        "frame": {
+          "$ref": "#/$defs/TwinFrameView"
+        },
+        "params": {
+          "$ref": "#/$defs/TwinParams"
+        },
+        "ports": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "boot_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "restarts": {
+          "type": "integer"
+        },
+        "exit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TwinExit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lockstep": {
+          "$ref": "#/$defs/TwinLockstep"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "engine",
+        "state",
+        "pack",
+        "firmware",
+        "profile",
+        "instance",
+        "pid",
+        "home",
+        "frame",
+        "params",
+        "ports",
+        "boot_s",
+        "restarts",
+        "exit",
+        "lockstep"
+      ],
+      "title": "SimTwin",
+      "type": "object"
+    },
     "SimView": {
       "description": "Simulator flight model (05 §5.2, WP-C); null on real aircraft.",
       "properties": {
@@ -4627,12 +5416,40 @@
         },
         "airframe": {
           "$ref": "#/$defs/AirframeRef"
+        },
+        "engine": {
+          "default": "relay",
+          "description": "relay: fast simulator; sitl: twin",
+          "enum": [
+            "relay",
+            "sitl"
+          ],
+          "type": "string"
+        },
+        "firmware": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SimFirmware"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "frame": {
+          "default": "micro-120",
+          "description": "frame preset of the physics (11 §8.1)",
+          "type": "string"
         }
       },
       "required": [
         "hover_assist",
         "turbulence",
-        "airframe"
+        "airframe",
+        "engine",
+        "firmware",
+        "frame"
       ],
       "title": "SimView",
       "type": "object"
@@ -5364,6 +6181,559 @@
       "title": "TraceShot",
       "type": "object"
     },
+    "TwinExit": {
+      "properties": {
+        "code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lines": {
+          "description": "the last 40 lines of the firmware's output",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "lines"
+      ],
+      "title": "TwinExit",
+      "type": "object"
+    },
+    "TwinFirmwareRef": {
+      "properties": {
+        "family": {
+          "enum": [
+            "ardupilot",
+            "px4"
+          ],
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "pack": {
+          "type": "string"
+        },
+        "match": {
+          "anyOf": [
+            {
+              "enum": [
+                "exact",
+                "version",
+                "series",
+                "nearest",
+                "none"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "family",
+        "version",
+        "pack",
+        "match"
+      ],
+      "title": "TwinFirmwareRef",
+      "type": "object"
+    },
+    "TwinFrame": {
+      "properties": {
+        "preset": {
+          "enum": [
+            "micro-120",
+            "small-250",
+            "large-450"
+          ],
+          "type": "string"
+        },
+        "mass_kg": {
+          "type": "number"
+        },
+        "wheelbase_m": {
+          "type": "number"
+        },
+        "prop_in": {
+          "type": "number"
+        },
+        "cells": {
+          "type": "integer"
+        },
+        "capacity_mah": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "preset",
+        "mass_kg",
+        "wheelbase_m",
+        "prop_in",
+        "cells",
+        "capacity_mah"
+      ],
+      "title": "TwinFrame",
+      "type": "object"
+    },
+    "TwinFrameView": {
+      "properties": {
+        "preset": {
+          "type": "string"
+        },
+        "mass_kg": {
+          "type": "number"
+        },
+        "wheelbase_m": {
+          "type": "number"
+        },
+        "prop_in": {
+          "type": "number"
+        },
+        "cells": {
+          "type": "integer"
+        },
+        "capacity_mah": {
+          "type": "number"
+        },
+        "thrust_to_weight": {
+          "description": "derived from the hover thrust parameter on a twin",
+          "type": "number"
+        },
+        "inertia": {
+          "description": "[Ixx, Iyy, Izz] kg m^2",
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "preset",
+        "mass_kg",
+        "wheelbase_m",
+        "prop_in",
+        "cells",
+        "capacity_mah",
+        "thrust_to_weight",
+        "inertia"
+      ],
+      "title": "TwinFrameView",
+      "type": "object"
+    },
+    "TwinHome": {
+      "properties": {
+        "lat": {
+          "type": "number"
+        },
+        "lon": {
+          "type": "number"
+        },
+        "alt_m": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "lat",
+        "lon",
+        "alt_m"
+      ],
+      "title": "TwinHome",
+      "type": "object"
+    },
+    "TwinLockstep": {
+      "properties": {
+        "steps": {
+          "description": "250 Hz world steps",
+          "type": "integer"
+        },
+        "stalls": {
+          "description": "steps the firmware did not answer within the tick's wait",
+          "type": "integer"
+        },
+        "frames": {
+          "description": "firmware frames (ArduPilot JSON frames, PX4 HIL exchanges)",
+          "type": "integer"
+        },
+        "ms_per_step": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "wall time per world step, ms"
+        }
+      },
+      "required": [
+        "steps",
+        "stalls",
+        "frames",
+        "ms_per_step"
+      ],
+      "title": "TwinLockstep",
+      "type": "object"
+    },
+    "TwinParams": {
+      "properties": {
+        "applied": {
+          "description": "profile parameters the twin takes",
+          "type": "integer"
+        },
+        "excluded": {
+          "description": "profile parameters it leaves out, with the reason",
+          "items": {
+            "$ref": "#/$defs/ExcludedParam"
+          },
+          "type": "array"
+        },
+        "forced": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "values Relay sets for the lockstep (SIM_RATE_HZ)",
+          "type": "object"
+        }
+      },
+      "required": [
+        "applied",
+        "excluded",
+        "forced"
+      ],
+      "title": "TwinParams",
+      "type": "object"
+    },
+    "TwinProfile": {
+      "description": "``GET /twins/profiles/{id}`` (also the export): every parameter and the ones a twin leaves out.",
+      "properties": {
+        "id": {
+          "description": "tp-<8 hex>",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "captured_at": {
+          "type": "number"
+        },
+        "updated_at": {
+          "type": "number"
+        },
+        "source": {
+          "$ref": "#/$defs/TwinProfileSource"
+        },
+        "firmware": {
+          "$ref": "#/$defs/TwinProfileFirmware"
+        },
+        "pack": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "the runtime pack the twin starts"
+        },
+        "match": {
+          "enum": [
+            "exact",
+            "version",
+            "series",
+            "nearest",
+            "none"
+          ],
+          "type": "string"
+        },
+        "frame": {
+          "$ref": "#/$defs/TwinFrame"
+        },
+        "home": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TwinHome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "params_total": {
+          "type": "integer"
+        },
+        "params_applied": {
+          "type": "integer"
+        },
+        "params_excluded": {
+          "type": "integer"
+        },
+        "params": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "excluded": {
+          "items": {
+            "$ref": "#/$defs/ExcludedParam"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "captured_at",
+        "updated_at",
+        "source",
+        "firmware",
+        "pack",
+        "match",
+        "frame",
+        "home",
+        "params_total",
+        "params_applied",
+        "params_excluded",
+        "params",
+        "excluded"
+      ],
+      "title": "TwinProfile",
+      "type": "object"
+    },
+    "TwinProfileFirmware": {
+      "properties": {
+        "family": {
+          "enum": [
+            "ardupilot",
+            "px4"
+          ],
+          "type": "string"
+        },
+        "vehicle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "git": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "board": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "board_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "family",
+        "vehicle",
+        "version",
+        "type",
+        "git",
+        "board",
+        "board_id"
+      ],
+      "title": "TwinProfileFirmware",
+      "type": "object"
+    },
+    "TwinProfileRef": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "TwinProfileRef",
+      "type": "object"
+    },
+    "TwinProfileSource": {
+      "properties": {
+        "vehicle": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "vehicle",
+        "label"
+      ],
+      "title": "TwinProfileSource",
+      "type": "object"
+    },
+    "TwinProfileSummary": {
+      "properties": {
+        "id": {
+          "description": "tp-<8 hex>",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "captured_at": {
+          "type": "number"
+        },
+        "updated_at": {
+          "type": "number"
+        },
+        "source": {
+          "$ref": "#/$defs/TwinProfileSource"
+        },
+        "firmware": {
+          "$ref": "#/$defs/TwinProfileFirmware"
+        },
+        "pack": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "the runtime pack the twin starts"
+        },
+        "match": {
+          "enum": [
+            "exact",
+            "version",
+            "series",
+            "nearest",
+            "none"
+          ],
+          "type": "string"
+        },
+        "frame": {
+          "$ref": "#/$defs/TwinFrame"
+        },
+        "home": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TwinHome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "params_total": {
+          "type": "integer"
+        },
+        "params_applied": {
+          "type": "integer"
+        },
+        "params_excluded": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "captured_at",
+        "updated_at",
+        "source",
+        "firmware",
+        "pack",
+        "match",
+        "frame",
+        "home",
+        "params_total",
+        "params_applied",
+        "params_excluded"
+      ],
+      "title": "TwinProfileSummary",
+      "type": "object"
+    },
+    "TwinProfiles": {
+      "properties": {
+        "profiles": {
+          "items": {
+            "$ref": "#/$defs/TwinProfileSummary"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "profiles"
+      ],
+      "title": "TwinProfiles",
+      "type": "object"
+    },
     "UiCommandMessage": {
       "description": "Server -> window over the operator WebSocket.",
       "properties": {
@@ -5816,6 +7186,17 @@
             }
           ]
         },
+        "firmware_info": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FirmwareInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "sysid": {
           "anyOf": [
             {
@@ -6173,6 +7554,7 @@
         "host",
         "autopilot",
         "firmware",
+        "firmware_info",
         "sysid",
         "bridge",
         "link",
@@ -6218,6 +7600,78 @@
         "programs_allowed"
       ],
       "title": "Vehicle",
+      "type": "object"
+    },
+    "VehicleFirmware": {
+      "description": "``GET /vehicles/{id}/firmware``.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "real",
+            "sim"
+          ],
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "firmware": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "the snapshot's version string"
+        },
+        "identity": {
+          "$ref": "#/$defs/FirmwareIdentity"
+        },
+        "params": {
+          "$ref": "#/$defs/ParamProgress"
+        },
+        "frame_problem": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "why a twin cannot fly this frame; null for quad X"
+        },
+        "frame_problem_zh": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "match": {
+          "$ref": "#/$defs/FirmwareMatch"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "firmware",
+        "identity",
+        "params",
+        "frame_problem",
+        "frame_problem_zh",
+        "match"
+      ],
+      "title": "VehicleFirmware",
       "type": "object"
     }
   }

@@ -239,7 +239,7 @@ function localVehicle(host: DogfightHost, c: CraftState, now: number, startedAt:
     throttle_pct: c.alive ? 56 : 0, flight_time_s: now - startedAt, armed_time_s: now - startedAt,
     controller: p.controller.kind === 'agent' ? 'agent' : 'program',
     claim: p.controller.kind === 'agent' ? { session_id: 's-7f3a', name: p.controller.name, since: startedAt, suspended: false } : null,
-    sim: { hover_assist: false, turbulence: 0.3, airframe: { preset: 'typical', seed: 7 } },
+    sim: { hover_assist: false, turbulence: 0.3, airframe: { preset: 'typical', seed: 7 }, engine: 'relay', firmware: null, frame: 'micro-120' },
     program: p.controller.kind === 'program'
       ? {
           id: p.controller.name, name: p.controller.name, rev: 1, state: c.alive ? (p.role === 'rammer' ? 'pursue' : 'fire') : 'recover', status: 'running', reason: null, mode: 'pilot',

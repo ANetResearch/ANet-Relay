@@ -42,6 +42,11 @@ function base(over: Partial<V> & Pick<V, 'id' | 'label' | 'kind'>): V {
     host: null,
     autopilot: 'ArduPilot',
     firmware: sim ? 'Relay SIM 0.1' : 'ArduCopter 4.5.7',
+    firmware_info: sim
+      ? null
+      : over.autopilot === 'PX4'
+        ? { family: 'px4', vehicle: 'copter', version: '1.15.2', type: 'official', git: 'ea0ef1a1', board: 'Pixhawk 6C (fmu-v6c)' }
+        : { family: 'ardupilot', vehicle: 'copter', version: '4.5.7', type: 'official', git: '2a3dc4b7', board: 'Cube Orange' }, // 11 §10
     sysid: 1,
     bridge: sim ? null : { version: 'mavesp8266 1.2.2', source: 'udp' },
     link: { state: 'ok', heartbeat_age_s: 0.4, rx_hz: 42, tx_hz: 51, loss_pct: 0.4, rtt_ms: 18 },
@@ -82,7 +87,7 @@ function base(over: Partial<V> & Pick<V, 'id' | 'label' | 'kind'>): V {
     course: null,
     procedure: null, // bench procedure (WP-B)
     record_session: null,
-    sim: sim ? { hover_assist: true, turbulence: 0.3, airframe: { preset: 'typical', seed: 4242 } } : null, // WP-2a airframe
+    sim: sim ? { hover_assist: true, turbulence: 0.3, airframe: { preset: 'typical', seed: 4242 }, engine: 'relay', firmware: null, frame: 'micro-120' } : null, // WP-2a airframe
     program: null, // WP-1 onboard program
     programs_allowed: sim,
     ...over,

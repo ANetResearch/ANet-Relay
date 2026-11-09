@@ -41,6 +41,13 @@ export interface RelaySchema {
   Trace: Trace
   DogfightView: DogfightView
   Leaderboard: Leaderboard
+  AutopilotPacks: AutopilotPacks
+  AutopilotPack: AutopilotPack
+  VehicleFirmware: VehicleFirmware
+  TwinProfiles: TwinProfiles
+  TwinProfile: TwinProfile
+  SimTwin: SimTwin
+  SimFrame: SimFrame
 }
 /**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
@@ -107,6 +114,7 @@ export interface Vehicle {
   host: string | null
   autopilot: ('PX4' | 'ArduPilot') | null
   firmware: string | null
+  firmware_info: FirmwareInfo | null
   sysid: number | null
   bridge: Bridge | null
   link: Link
@@ -153,6 +161,36 @@ export interface Vehicle {
    * real aircraft: the operator allowed programs (reset when the link drops)
    */
   programs_allowed: boolean
+}
+/**
+ * The aircraft's firmware identity (11 §4) from HEARTBEAT and AUTOPILOT_VERSION; null fields are
+ * not reported by the aircraft (or not decoded yet).
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "FirmwareInfo".
+ */
+export interface FirmwareInfo {
+  family: ('ardupilot' | 'px4') | null
+  /**
+   * copter / plane / rover / ... from HEARTBEAT type
+   */
+  vehicle: string | null
+  /**
+   * x.y.z
+   */
+  version: string | null
+  /**
+   * release type
+   */
+  type: ('dev' | 'alpha' | 'beta' | 'rc' | 'official') | null
+  /**
+   * first 8 hex digits of the firmware's git hash
+   */
+  git: string | null
+  /**
+   * flight controller board name for common boards, e.g. Pixracer
+   */
+  board: string | null
 }
 /**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
@@ -491,6 +529,15 @@ export interface SimView {
    */
   turbulence: number
   airframe: AirframeRef
+  /**
+   * relay: fast simulator; sitl: twin
+   */
+  engine: 'relay' | 'sitl'
+  firmware: SimFirmware | null
+  /**
+   * frame preset of the physics (11 §8.1)
+   */
+  frame: string
 }
 /**
  * The snapshot's view of a simulator airframe: preset and seed only, never the values (06 §4).
@@ -501,6 +548,25 @@ export interface SimView {
 export interface AirframeRef {
   preset: 'ideal' | 'typical' | 'rough' | 'custom'
   seed: number
+}
+/**
+ * A firmware twin's firmware (11 §10): runtime pack, match level against its profile, process state.
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "SimFirmware".
+ */
+export interface SimFirmware {
+  family: 'ardupilot' | 'px4'
+  version: string
+  pack: string
+  /**
+   * against the profile's firmware; null without a profile
+   */
+  match: ('exact' | 'version' | 'series' | 'nearest' | 'none') | null
+  /**
+   * running: the firmware flies; restarting after a reset; exited
+   */
+  state: 'new' | 'booting' | 'running' | 'restarting' | 'exited' | 'failed' | 'stopped'
 }
 /**
  * The aircraft's bench procedure run, current or last (WP-B, 05 §4.4).
@@ -1892,4 +1958,414 @@ export interface LeaderboardRow {
 export interface LeaderboardController {
   kind: 'program' | 'agent' | 'human' | 'none'
   name: string
+}
+/**
+ * ``GET /autopilots``: the packs of this platform, bundled first.
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "AutopilotPacks".
+ */
+export interface AutopilotPacks {
+  platform: ('linux-x64' | 'mac-arm64' | 'mac-x64' | 'win-x64') | null
+  bundled_dir: string
+  imported_dir: string | null
+  packs: AutopilotPack[]
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "AutopilotPack".
+ */
+export interface AutopilotPack {
+  /**
+   * ardupilot-copter-<version> or px4-<version>
+   */
+  id: string
+  family: 'ardupilot' | 'px4'
+  vehicle: 'copter'
+  version: string
+  /**
+   * source commit, 8 to 40 hex digits
+   */
+  git: string
+  platform: 'linux-x64' | 'mac-arm64' | 'mac-x64' | 'win-x64'
+  size_bytes: number
+  license: string
+  /**
+   * URL of the source tag
+   */
+  source: string
+  /**
+   * official (upstream binary) or ci
+   */
+  built: string
+  /**
+   * installed with Relay, or imported (deletable)
+   */
+  origin: 'bundled' | 'imported'
+  /**
+   * digest of the pack's tarball, when the index lists it
+   */
+  sha256: string | null
+  /**
+   * the pack can run on this computer
+   */
+  usable: boolean
+  /**
+   * why it cannot (English)
+   */
+  problem: string | null
+  problem_zh: string | null
+  /**
+   * firmware twins running on this pack (GET /autopilots)
+   */
+  twins: number
+}
+/**
+ * ``GET /vehicles/{id}/firmware``.
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "VehicleFirmware".
+ */
+export interface VehicleFirmware {
+  id: string
+  kind: 'real' | 'sim'
+  label: string
+  /**
+   * the snapshot's version string
+   */
+  firmware: string | null
+  identity: FirmwareIdentity
+  params: ParamProgress
+  /**
+   * why a twin cannot fly this frame; null for quad X
+   */
+  frame_problem: string | null
+  frame_problem_zh: string | null
+  match: FirmwareMatch
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "FirmwareIdentity".
+ */
+export interface FirmwareIdentity {
+  family: ('ardupilot' | 'px4') | null
+  vehicle: string | null
+  /**
+   * quad / hexa / ... from HEARTBEAT type
+   */
+  frame: string | null
+  version: string | null
+  type: ('dev' | 'alpha' | 'beta' | 'rc' | 'official') | null
+  git: string | null
+  board: string | null
+  /**
+   * ArduPilot bootloader board id, PX4 USB product id
+   */
+  board_id: number | null
+  /**
+   * AUTOPILOT_VERSION received
+   */
+  identified: boolean
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ParamProgress".
+ */
+export interface ParamProgress {
+  received: number
+  total: number
+  complete: boolean
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "FirmwareMatch".
+ */
+export interface FirmwareMatch {
+  /**
+   * pack id; null when no pack of this firmware is installed
+   */
+  recommended: string | null
+  match: 'exact' | 'version' | 'series' | 'nearest' | 'none'
+  /**
+   * series and below: the control loop may differ from the aircraft's
+   */
+  warning: boolean
+  warning_en: string | null
+  warning_zh: string | null
+  /**
+   * every usable pack of the same firmware, best first
+   */
+  candidates: FirmwareCandidate[]
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "FirmwareCandidate".
+ */
+export interface FirmwareCandidate {
+  pack: string
+  version: string
+  git: string
+  match: 'exact' | 'version' | 'series' | 'nearest' | 'none'
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TwinProfiles".
+ */
+export interface TwinProfiles {
+  profiles: TwinProfileSummary[]
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TwinProfileSummary".
+ */
+export interface TwinProfileSummary {
+  /**
+   * tp-<8 hex>
+   */
+  id: string
+  name: string
+  captured_at: number
+  updated_at: number
+  source: TwinProfileSource
+  firmware: TwinProfileFirmware
+  /**
+   * the runtime pack the twin starts
+   */
+  pack: string | null
+  match: 'exact' | 'version' | 'series' | 'nearest' | 'none'
+  frame: TwinFrame
+  home: TwinHome | null
+  params_total: number
+  params_applied: number
+  params_excluded: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TwinProfileSource".
+ */
+export interface TwinProfileSource {
+  vehicle: string
+  label: string
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TwinProfileFirmware".
+ */
+export interface TwinProfileFirmware {
+  family: 'ardupilot' | 'px4'
+  vehicle: string | null
+  version: string | null
+  type: string | null
+  git: string | null
+  board: string | null
+  board_id: number | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TwinFrame".
+ */
+export interface TwinFrame {
+  preset: 'micro-120' | 'small-250' | 'large-450'
+  mass_kg: number
+  wheelbase_m: number
+  prop_in: number
+  cells: number
+  capacity_mah: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TwinHome".
+ */
+export interface TwinHome {
+  lat: number
+  lon: number
+  alt_m: number
+}
+/**
+ * ``GET /twins/profiles/{id}`` (also the export): every parameter and the ones a twin leaves out.
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TwinProfile".
+ */
+export interface TwinProfile {
+  /**
+   * tp-<8 hex>
+   */
+  id: string
+  name: string
+  captured_at: number
+  updated_at: number
+  source: TwinProfileSource
+  firmware: TwinProfileFirmware
+  /**
+   * the runtime pack the twin starts
+   */
+  pack: string | null
+  match: 'exact' | 'version' | 'series' | 'nearest' | 'none'
+  frame: TwinFrame
+  home: TwinHome | null
+  params_total: number
+  params_applied: number
+  params_excluded: number
+  params: {
+    [k: string]: number | undefined
+  }
+  excluded: ExcludedParam[]
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "ExcludedParam".
+ */
+export interface ExcludedParam {
+  name: string
+  reason_en: string
+  reason_zh: string
+}
+/**
+ * ``GET /sims/{id}/twin``.
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "SimTwin".
+ */
+export interface SimTwin {
+  id: string
+  label: string
+  engine: 'sitl'
+  state: 'new' | 'booting' | 'running' | 'restarting' | 'exited' | 'failed' | 'stopped'
+  pack: AutopilotPack
+  firmware: TwinFirmwareRef
+  profile: TwinProfileRef | null
+  /**
+   * n of the loopback ports (11 §2)
+   */
+  instance: number | null
+  pid: number | null
+  home: TwinHome
+  frame: TwinFrameView
+  params: TwinParams
+  ports: {
+    [k: string]: number | undefined
+  } | null
+  boot_s: number | null
+  restarts: number
+  exit: TwinExit | null
+  lockstep: TwinLockstep
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TwinFirmwareRef".
+ */
+export interface TwinFirmwareRef {
+  family: 'ardupilot' | 'px4'
+  version: string
+  pack: string
+  match: ('exact' | 'version' | 'series' | 'nearest' | 'none') | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TwinProfileRef".
+ */
+export interface TwinProfileRef {
+  id: string
+  name: string | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TwinFrameView".
+ */
+export interface TwinFrameView {
+  preset: string
+  mass_kg: number
+  wheelbase_m: number
+  prop_in: number
+  cells: number
+  capacity_mah: number
+  /**
+   * derived from the hover thrust parameter on a twin
+   */
+  thrust_to_weight: number
+  /**
+   * [Ixx, Iyy, Izz] kg m^2
+   */
+  inertia: number[]
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TwinParams".
+ */
+export interface TwinParams {
+  /**
+   * profile parameters the twin takes
+   */
+  applied: number
+  /**
+   * profile parameters it leaves out, with the reason
+   */
+  excluded: ExcludedParam[]
+  /**
+   * values Relay sets for the lockstep (SIM_RATE_HZ)
+   */
+  forced: {
+    [k: string]: number | undefined
+  }
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TwinExit".
+ */
+export interface TwinExit {
+  code: number | null
+  /**
+   * the last 40 lines of the firmware's output
+   */
+  lines: string[]
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "TwinLockstep".
+ */
+export interface TwinLockstep {
+  /**
+   * 250 Hz world steps
+   */
+  steps: number
+  /**
+   * steps the firmware did not answer within the tick's wait
+   */
+  stalls: number
+  /**
+   * firmware frames (ArduPilot JSON frames, PX4 HIL exchanges)
+   */
+  frames: number
+  /**
+   * wall time per world step, ms
+   */
+  ms_per_step: number | null
+}
+/**
+ * ``PUT /sims/{id}/frame``.
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "SimFrame".
+ */
+export interface SimFrame {
+  id: string
+  engine: 'relay' | 'sitl'
+  frame: SimFrameView
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "SimFrameView".
+ */
+export interface SimFrameView {
+  preset: string
+  mass_kg: number
+  wheelbase_m: number
+  prop_in: number
+  cells: number
+  capacity_mah: number
+  /**
+   * derived from the hover thrust parameter on a twin
+   */
+  thrust_to_weight: number
 }
