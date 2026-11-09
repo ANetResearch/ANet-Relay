@@ -45,6 +45,7 @@ import itertools
 import logging
 import secrets
 import threading
+import time
 from collections import deque
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
@@ -76,6 +77,9 @@ LOG_RING = 500
 FPS_WINDOW_S = 1.0
 RATE_CHECK_S = 3.0
 RATE_MIN_HZ = 40.0
+ARM_PRIME_S = (
+    0.6  # zero-throttle sticks reach the autopilot before an arming deployment changes mode and arms
+)
 ERROR_LOG_PERIOD_S = 1.0
 CONFIRM_WORD = "PROGRAM"
 MODES = ("pilot", "copilot")
@@ -400,6 +404,10 @@ class ProgramService:
         )
         if armed:
             return {"ok": True, "armed": True, "already": True}
+        # the autopilot must see the zero-throttle sticks before the mode change and the arm command
+        self.fleet.call(lambda: self._idle(self.fleet._vehicle(vid), self.fleet.clock()))
+        if self.fleet.threaded:
+            time.sleep(ARM_PRIME_S)
         try:
             if modes.mode_class(autopilot, mode) != "manual":
                 # programs fly the throttle itself, as the MCP deploy does: STABILIZE (PX4 STABILIZED)
@@ -712,6 +720,16 @@ class ProgramService:
 
     # ====================================================================== status changes
 
+    def _idle(self, v: Vehicle, t: float) -> None:
+        """Disarmed: centred sticks at zero throttle. A real autopilot arms a pilot mode only with stick
+        input present (PX4 "No manual control input", ArduPilot "Throttle below failsafe"), and only with the
+        throttle down; releasing the sticks here left nothing for it to see. A person's live sticks win."""
+        h = v.sticks
+        if h is not None and h.source == "human" and self.fleet.clock() - h.t <= STICK_TIMEOUT_S:
+            return
+        v.sticks = StickInput(0.0, 0.0, 0.0, 0.0, t=t, source="program")
+        v.rc_frame = None
+
     def _release_sticks(self, v: Vehicle | None) -> None:
         if v is not None and v.sticks is not None and v.sticks.source == "program":
             v.sticks = None
@@ -960,7 +978,7 @@ class ProgramService:
 
     def _write(self, r: Run, v: Vehicle, values: tuple[float, float, float, float], t: float) -> None:
         if not v.armed:
-            self._release_sticks(v)  # nothing to fly, and a raised throttle would block arming
+            self._idle(v, t)  # nothing to fly yet: hold the throttle down so the autopilot will arm
             return
         v.sticks = StickInput(values[0], values[1], values[2], values[3], t=t, source="program")
         v.rc_frame = None

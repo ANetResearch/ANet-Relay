@@ -20,6 +20,8 @@ import { CourseFinishCard, CourseHud } from '@/course/CourseHud'
 import { VideoPip } from '@/video/VideoPip'
 import { TraceLayer } from '@/lab/TraceLayer' // WP-3
 import { TraceReplayBar } from '@/lab/TraceReplayBar' // WP-3
+import { SequenceDock } from '@/sequence/SequenceDock' // stick timelines (10 §2)
+import { useSequence } from '@/sequence/store'
 import { useLayoutMode, type LayoutMode } from './layout'
 
 const SIZES: Record<LayoutMode, { fleet: number; inspector: number }> = {
@@ -83,6 +85,7 @@ export function FlyWorkspace() {
   const sheetOpen = useUi((s) => s.inspectorSheetOpen)
   const setSheet = useUi((s) => s.setInspectorSheet)
   const selected = useSelectedId()
+  const sequenceOpen = useSequence((s) => s.open)
   const fleetRef = React.useRef<PanelImperativeHandle | null>(null)
   const inspRef = React.useRef<PanelImperativeHandle | null>(null)
   const compact = mode === 'compact'
@@ -154,7 +157,19 @@ export function FlyWorkspace() {
         </ResizablePanel>
         <ResizableHandle className="gutter bg-transparent" />
         <ResizablePanel id="stage" minSize={360} className={cn('min-w-0', enterStage.className)} style={enterStage.style}>
-          <StageFrame />
+          {sequenceOpen ? (
+            <ResizablePanelGroup orientation="vertical" className="h-full" id="fly-stage">
+              <ResizablePanel id="stage-view" minSize={160} className="min-h-0">
+                <StageFrame />
+              </ResizablePanel>
+              <ResizableHandle className="gutter bg-transparent" />
+              <ResizablePanel id="sequence" defaultSize={400} minSize={280} maxSize={600} className="min-h-0">
+                <SequenceDock />
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          ) : (
+            <StageFrame />
+          )}
         </ResizablePanel>
         <ResizableHandle className="gutter bg-transparent" disabled={compact} />
         <ResizablePanel

@@ -1,6 +1,7 @@
 // Inspector → Overview → Airframe (06 §4, WP-2a): the assembly defects of a simulated aircraft. Preset, seed,
 // one slider per value and Randomize. The values come from GET /sims/{vid}/airframe (operator or controller);
-// the snapshot only names the preset and seed. They act only with hover assist off.
+// the snapshot only names the preset and seed. They act with hover assist off, or with it on when `with_assist`
+// is set (10 §3), so a timeline sequence can be tuned against a drifting airframe in altitude hold.
 import * as React from 'react'
 import { api, RelayApiError, type AirframeBody, type SimAirframe } from '@/api'
 import { cn } from '@/lib/utils'
@@ -11,6 +12,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/ui/compon
 import { Input } from '@/ui/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/components/ui/select'
 import { Slider } from '@/ui/components/ui/slider'
+import { Switch } from '@/ui/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/components/ui/tooltip'
 import { Icon, StateIcon } from '@/ui/icons'
 import { useAT, type AirframeKey } from './airframe.strings'
@@ -52,6 +54,7 @@ export const AIRFRAME_GROUPS: { title: AirframeKey; fields: AirframeField[] }[] 
       { id: 'cg_y', label: 'af.p.cg_y', limit: 'cg_offset_cm', step: 0.05, get: (p) => p.cg_offset_cm[1] ?? 0, patch: (p, v) => ({ cg_offset_cm: vec(p.cg_offset_cm, 1, v) }), text: signed(2, 'cm') },
       { id: 'trim_roll', label: 'af.p.trim_roll', limit: 'level_trim_deg', step: 0.1, get: (p) => p.level_trim_deg[0] ?? 0, patch: (p, v) => ({ level_trim_deg: vec(p.level_trim_deg, 0, v) }), text: signed(1, '°') },
       { id: 'trim_pitch', label: 'af.p.trim_pitch', limit: 'level_trim_deg', step: 0.1, get: (p) => p.level_trim_deg[1] ?? 0, patch: (p, v) => ({ level_trim_deg: vec(p.level_trim_deg, 1, v) }), text: signed(1, '°') },
+      { id: 'arm_bias', label: 'af.p.arm_bias', limit: 'arm_bias_deg', step: 0.1, get: (p) => p.arm_bias_deg ?? 0, patch: (_p, v) => ({ arm_bias_deg: v }), text: (v) => `± ${v.toFixed(1)} °` },
     ],
   },
   {
@@ -164,7 +167,7 @@ export function airframeShown(
   return polled ?? (own && own.base === base ? own.data : null)
 }
 
-function AirframeBodyView({ id, refKey, assist }: { id: string; refKey: string; assist: boolean }) {
+function AirframeBodyView({ id, refKey, assist, onActive }: { id: string; refKey: string; assist: boolean; onActive(active: boolean): void }) {
   const t = useAT()
   const key = `${id}|${refKey}|${assist}`
   const base = `${id}|${assist}`
@@ -175,6 +178,10 @@ function AirframeBodyView({ id, refKey, assist }: { id: string; refKey: string; 
   // preset or seed (our own edit turns the preset into custom) refetches.
   const [open, setOpen] = React.useState(false)
   const data = airframeShown(own, key, base, poll.data)
+  const active = data?.active
+  React.useEffect(() => {
+    if (active !== undefined) onActive(active)
+  }, [active, onActive])
 
   const send = (body: AirframeBody) => {
     setBusy(true)
@@ -266,6 +273,23 @@ export function AirframeEditor({
           <TooltipContent side="bottom">{t('af.randomizeHint')}</TooltipContent>
         </Tooltip>
       </div>
+      <div className="flex min-h-8 items-center gap-2" data-airframe-with-assist={p.with_assist ? 'on' : 'off'}>
+        <Tooltip>
+          <TooltipTrigger render={<span className="min-w-0 flex-1 truncate text-[12px] text-[var(--g400)]" />}>{t('af.withAssist')}</TooltipTrigger>
+          <TooltipContent side="bottom" className="max-w-[280px]">
+            {t('af.withAssistHint')}
+          </TooltipContent>
+        </Tooltip>
+        <Switch checked={Boolean(p.with_assist)} disabled={busy} onCheckedChange={(on: boolean) => send({ params: { with_assist: on } })} aria-label={t('af.withAssist')} />
+      </div>
+      {data.active ? (
+        <div className="flex h-7 items-center gap-2">
+          <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--g400)]">{t('af.levelNow')}</span>
+          <span className="num text-[11px] text-[var(--g100)]" data-airframe-level-now="">
+            {t('af.levelNowValue', { roll: (data.level_now_deg?.[0] ?? 0).toFixed(2), pitch: (data.level_now_deg?.[1] ?? 0).toFixed(2) })}
+          </span>
+        </div>
+      ) : null}
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger className="flex h-6 w-full items-center gap-2 rounded-sm text-left text-hud-sub text-[var(--g300)] outline-none hover:text-[var(--g100)] focus-visible:ring-1 focus-visible:ring-ring" data-airframe-values="">
           <Icon icon="sliders" className="size-3.5" />
@@ -311,11 +335,17 @@ export function AirframeEditor({
 
 /** Shown for simulators only; the body mounts per (aircraft, preset, seed, assist) so it refetches on change. */
 export function AirframeGroup({ vehicleId }: { vehicleId: string }) {
-  const t = useAT()
   const v = useVehicle(vehicleId)
   if (!v || v.kind !== 'sim' || !v.sim) return null
   const sim = v.sim
-  const active = !sim.hover_assist
+  return <AirframeBlock id={v.id} refKey={`${sim.airframe.preset}:${sim.airframe.seed}:${v.armed}`} assist={sim.hover_assist} />
+}
+
+function AirframeBlock({ id, refKey, assist }: { id: string; refKey: string; assist: boolean }) {
+  const t = useAT()
+  const [withAssist, setWithAssist] = React.useState(false)
+  const onActive = React.useCallback((on: boolean) => setWithAssist(on && assist), [assist])
+  const active = !assist || withAssist
   return (
     <Block
       title={t('af.title')}
@@ -325,7 +355,7 @@ export function AirframeGroup({ vehicleId }: { vehicleId: string }) {
         </span>
       }
     >
-      <AirframeBodyView id={v.id} refKey={`${sim.airframe.preset}:${sim.airframe.seed}`} assist={sim.hover_assist} />
+      <AirframeBodyView id={id} refKey={refKey} assist={assist} onActive={onActive} />
     </Block>
   )
 }

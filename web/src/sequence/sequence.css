@@ -1,0 +1,135 @@
+/* Timeline dock (10 §2): lieflat, gray scale with red for the playhead and recording only. */
+.seq-dock {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+  outline: none;
+}
+.seq-head,
+.seq-run {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.seq-run {
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+}
+.seq-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--g50);
+  margin-right: 4px;
+}
+.seq-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.seq-tracks {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.seq-labels {
+  flex: none;
+  border-right: 1px solid var(--border);
+}
+.seq-label {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 10px;
+  border-top: 1px solid var(--border);
+}
+.seq-scroll {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.seq-side {
+  flex: none;
+  width: 300px;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+.seq-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.seq-ruler { fill: var(--g950); }
+.seq-tick { fill: var(--g500); font-size: 10px; font-variant-numeric: tabular-nums; }
+.seq-grid { stroke: var(--g800); stroke-width: 1; }
+.seq-grid-minor { stroke: var(--g850, var(--g800)); stroke-width: 1; stroke-dasharray: 2 3; }
+.seq-row { fill: var(--g900); }
+.seq-row-alt { fill: color-mix(in oklch, var(--g900), var(--g950) 40%); }
+.seq-zero { stroke: var(--g700); stroke-width: 1; stroke-dasharray: 3 3; }
+.seq-block { cursor: ns-resize; }
+.seq-block-hit { fill: transparent; }
+.seq-block-fill { fill: var(--g700); opacity: 0.55; transition: opacity 120ms ease; }
+.seq-block-line { stroke: var(--g200); stroke-width: 1.5; }
+.seq-block-edge { stroke: var(--g600); stroke-width: 1; }
+.seq-block-grip { fill: transparent; cursor: ew-resize; }
+.seq-block:hover .seq-block-fill { opacity: 0.75; }
+.seq-block.is-selected .seq-block-fill { fill: var(--g300); opacity: 0.55; }
+.seq-block.is-selected .seq-block-line { stroke: var(--g50); stroke-width: 2; }
+.seq-block.is-selected .seq-block-edge { stroke: var(--g50); }
+.seq-block-text { fill: var(--g100); font-size: 10px; pointer-events: none; font-variant-numeric: tabular-nums; }
+.seq-block-dur { fill: var(--g400); font-size: 9px; pointer-events: none; font-variant-numeric: tabular-nums; }
+.seq-cursor { stroke: var(--g100); stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
+.seq-playhead { stroke: var(--r400); stroke-width: 2; pointer-events: none; }
+.seq-pair { cursor: pointer; }
+.seq-pair-box { fill: var(--g950); stroke: var(--g600); stroke-width: 1; }
+.seq-pair-dot { fill: var(--g100); }
+.seq-pair-tick { stroke: var(--g700); stroke-width: 1; }
+.seq-pair:hover .seq-pair-box { stroke: var(--g300); }
+.seq-pair.is-at .seq-pair-box { stroke: var(--g50); }
+.seq-pad {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--g950);
+  cursor: grab;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.seq-pad:active { cursor: grabbing; }
+.seq-pad-cross {
+  position: absolute;
+  inset: 50% 8px auto 8px;
+  border-top: 1px dashed var(--g700);
+}
+.seq-pad-cross::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: calc(-1 * (88px / 2 - 8px));
+  height: calc(88px - 16px);
+  border-left: 1px dashed var(--g700);
+}
+.seq-pad-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--g50);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--g50), transparent 80%);
+  transition: transform 60ms linear;
+}

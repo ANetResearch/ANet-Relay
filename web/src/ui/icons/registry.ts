@@ -13,7 +13,8 @@ import {
   VideoOff, Wifi, WifiOff, X, BatteryFull, BatteryMedium, BatteryLow, BatteryWarning, Drone, ArrowDownUp, Ellipsis,
   Plane, PlaneTakeoff, PlaneLanding, Crosshair, Network, Link2Off, Power, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
   ArrowUpToLine, ArrowDownToLine, RotateCw, ListOrdered, Sparkles, SendHorizontal, Hourglass, KeyRound, Stethoscope,
-  FlaskConical, Code, Save, ListChecks, Swords, Trophy, GitCompare, CopyPlus,
+  FlaskConical, Code, Save, ListChecks, Swords, Trophy, GitCompare, CopyPlus, Undo2, Redo2, Scissors, Circle,
+  Download, Upload, ZoomIn, ZoomOut, ChartNoAxesGantt, BetweenHorizontalStart,
 } from 'lucide'
 import type { IconNode } from './types'
 
@@ -120,6 +121,17 @@ export const ICONS = {
   'judge': Trophy,
   'diff': GitCompare,
   'duplicate': CopyPlus,
+  // stick timelines (10 §2)
+  'seq.timeline': ChartNoAxesGantt,
+  'seq.undo': Undo2,
+  'seq.redo': Redo2,
+  'seq.split': Scissors,
+  'seq.insert': BetweenHorizontalStart,
+  'seq.record': Circle,
+  'seq.import': Upload,
+  'seq.export': Download,
+  'seq.zoomIn': ZoomIn,
+  'seq.zoomOut': ZoomOut,
 } as const satisfies Record<string, IconNode>
 
 export type IconKey = keyof typeof ICONS

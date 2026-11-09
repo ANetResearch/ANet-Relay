@@ -172,6 +172,33 @@ def plan_tuning(request: Request, vid: str, body: schemas.PlanTuning) -> dict[st
     return service(request).tune_plan(vid, actor(request, "control"), body.model_dump(exclude_none=True))
 
 
+@router.post("/vehicles/{vid}/sequence", tags=["control"], responses=ERRORS)
+def sequence_run(request: Request, vid: str, body: schemas.SequenceBody) -> dict[str, Any]:
+    """Fly an ``.ars`` stick timeline (10 §2); arms first on the ground (real aircraft: confirm "ARM")."""
+    return service(request).run_sequence(
+        vid, actor(request, "control"), body.sequence, body.confirm, body.speed, body.start_at
+    )
+
+
+@router.patch("/vehicles/{vid}/sequence", tags=["control"], responses=ERRORS)
+def sequence_edit(request: Request, vid: str, body: schemas.SequenceEditBody) -> dict[str, Any]:
+    """Change the flying sequence: new tracks (blocks not yet flown) and / or the trim, at once."""
+    trim = body.trim.model_dump(exclude_none=True) if body.trim else None
+    return service(request).edit_sequence(vid, actor(request, "control"), body.sequence, trim)
+
+
+@router.post("/vehicles/{vid}/sequence/stop", tags=["control"], responses=ERRORS)
+def sequence_stop(request: Request, vid: str) -> dict[str, Any]:
+    """Stop the timeline; in the air an altitude-hold sequence hands over to the hold skill."""
+    return service(request).stop_sequence(vid, actor(request, "control"))
+
+
+@router.post("/vehicles/{vid}/sequence/record", tags=["control"], responses=ERRORS)
+def sequence_record(request: Request, vid: str, body: schemas.SequenceRecordBody) -> dict[str, Any]:
+    """Record the sticks sent while armed; ``stop`` returns them as an ``.ars`` document."""
+    return service(request).record_sequence(vid, actor(request, "control"), body.action, body.name or "")
+
+
 @router.post("/vehicles/{vid}/refly", tags=["control"], responses=ERRORS)
 def refly(request: Request, vid: str, body: schemas.ReflyBody) -> dict[str, Any]:
     """Fly a record again as a plan, a path or its recorded sticks (04 §4)."""

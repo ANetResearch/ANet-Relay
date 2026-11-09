@@ -45,6 +45,10 @@
 <td><img src="docs/media/readme/dogfight.webp" alt="体素竞技场中四旋翼互射红色曳光弹，其中一架炸成体素" width="100%" /></td>
 </tr>
 <tr>
+<td><h3>时间轴序列</h3>油门、俯仰、横滚、偏航四行操作块排在同一时间轴上，每个变化时刻画出两个摇杆的位置。拖动操作块或摇杆、用方向键微调，飞行中用全局微调抵消漂移，也可以用手柄飞一遍录下来。保存为 <code>.ars</code> 文件，模拟机与真机通用。</td>
+<td><img src="docs/media/readme/timeline.webp" alt="舞台下方的时间轴面板：摇杆位置、油门与方向操作块、红色播放头和两个摇杆面板" width="100%" /></td>
+</tr>
+<tr>
 <td><img src="docs/media/readme/physics.webp" alt="碰撞球内的四旋翼，带旋翼推力箭头与反扭矩弧线" width="100%" /></td>
 <td><h3>参照 Gazebo 的旋翼物理</h3>六自由度刚体，四个旋翼参照 Gazebo <code>MulticopterMotorModel</code> 建模，串级飞控，250 Hz 下的碰撞体积与实体圆环。结果可复现，评测时比实时快 13 倍。</td>
 </tr>
@@ -81,7 +85,7 @@ with RelayClient() as relay:                          # http://127.0.0.1:8765
 claude mcp add anet-relay-app -- python3 /path/to/ANet-Relay/mcp/anet_relay_app_mcp.py --name claude-code-app   # 或任意 MCP 客户端
 ```
 
-三个 MCP 服务器分别覆盖飞行（21 个工具）、直到单个电机的设备层（36 个）和整个应用（65 个）。详见 [MCP Servers](https://github.com/ANetResearch/ANet-Relay/wiki/MCP-Servers)。
+三个 MCP 服务器分别覆盖飞行（26 个工具）、直到单个电机的设备层（36 个）和整个应用（65 个）。详见 [MCP Servers](https://github.com/ANetResearch/ANet-Relay/wiki/MCP-Servers)。
 
 ## 包含什么
 

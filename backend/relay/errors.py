@@ -115,6 +115,11 @@ CATALOGUE: dict[str, tuple[int, str, str]] = {
     "armed": (409, "Disarm the aircraft first.", "须先给飞机上锁。"),
     "not_airborne": (409, "The aircraft must be in the air first.", "飞机须先起飞。"),
     "no_plan": (409, "No plan is running on this aircraft.", "这架飞机没有正在执行的动作序列。"),
+    "no_sequence": (
+        409,
+        "No timeline sequence is flying on this aircraft.",
+        "这架飞机没有正在执行的时间轴序列。",
+    ),
     "crashed": (409, "The aircraft has crashed. Reset it before flying.", "飞机已坠毁，复位后才能继续飞行。"),
     "capability_missing": (
         409,

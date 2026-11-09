@@ -19,6 +19,7 @@ import { isWindowSource, sourceOf } from './bindings'
 import { Calibration } from './Calibration'
 import { CourseGroup } from './CourseGroup'
 import { ActionsBlock, PlanBlock } from './FlightActions'
+import { SequenceEntry } from '@/sequence/SequenceEntry' // 10 §2
 import { MotorTest } from './MotorTest'
 import { PreflightList } from './PreflightList'
 import { Sticks } from './Sticks'
@@ -246,6 +247,7 @@ export function ControlTab({ vehicleId }: ControlTabProps) {
       <ModeBlock v={v} />
       <ActionsBlock v={v} />
       <PlanBlock v={v} />
+      <SequenceEntry />
       <CourseGroup vehicleId={v.id} />
       <ProgramGroup vehicleId={v.id} /> {/* WP-3: onboard program (06 §2.6, §7) */}
       <Calibration vehicle={v} focus={calibFocus} onFocused={clearFocus} />

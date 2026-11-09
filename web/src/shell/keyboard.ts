@@ -69,9 +69,14 @@ export function overlayOpen(): boolean {
   return false
 }
 
-export function inTextField(el: Element | null = typeof document !== 'undefined' ? document.activeElement : null): boolean {
+export function inTextField(
+  el: Element | null = typeof document !== 'undefined' ? document.activeElement : null,
+  ownKeys = true,
+): boolean {
   if (!el || !(el instanceof HTMLElement)) return false
   if (el.isContentEditable) return true
+  // an editor that handles its own keys (the timeline dock, 10 §2): flight and shell hotkeys step aside
+  if (ownKeys && el.closest('[data-own-keys]')) return true
   const tag = el.tagName
   if (tag === 'TEXTAREA' || tag === 'SELECT') return true
   if (tag === 'INPUT') {
@@ -111,7 +116,8 @@ function onKeyDown(e: KeyboardEvent): void {
   const overlay = overlayOpen()
   if (combo === 'escape') {
     if (overlay) return
-    if (text) {
+    // Esc keeps its stop meaning inside an editor with its own keys; only a real text field takes it
+    if (inTextField(undefined, false)) {
       ;(document.activeElement as HTMLElement | null)?.blur()
       return
     }

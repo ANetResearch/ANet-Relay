@@ -37,6 +37,54 @@ TUNING = {
     "additionalProperties": False,
 }
 
+_ARS_KEY = {
+    "type": "object",
+    "properties": {
+        "t": {"type": "number", "minimum": 0, "description": "seconds"},
+        "v": {
+            "type": "number",
+            "description": "throttle 0..1; roll / pitch / yaw -1..1 (right, forward, clockwise +)",
+        },
+        "ease": {"type": "string", "enum": ["hold", "ramp"]},
+        "label": {"type": "string", "maxLength": 40},
+    },
+    "required": ["t", "v"],
+}
+ARS_TRIM = {
+    "type": "object",
+    "description": "added to every frame (stick units); a forward drift takes a negative pitch",
+    "properties": {
+        "roll": {"type": "number", "minimum": -0.3, "maximum": 0.3},
+        "pitch": {"type": "number", "minimum": -0.3, "maximum": 0.3},
+        "yaw": {"type": "number", "minimum": -0.3, "maximum": 0.3},
+        "throttle": {"type": "number", "minimum": -0.2, "maximum": 0.2},
+    },
+    "additionalProperties": False,
+}
+# 10 §2: an .ars stick timeline; each key starts a block that holds (or ramps to the next key)
+ARS = {
+    "type": "object",
+    "description": 'an .ars timeline: {"format": "ars", "version": 1, "mode", "tracks": {throttle, pitch, '
+    'roll, yaw: [{t, v, ease?, label?}]}, "trim"?, "duration_s"?, "end"?: disarm | hold}',
+    "properties": {
+        "format": {"type": "string", "enum": ["ars"]},
+        "version": {"type": "integer", "enum": [1]},
+        "name": {"type": "string", "maxLength": 80},
+        "mode": {"type": "string", "enum": ["stabilize", "althold", "poshold"]},
+        "duration_s": {"type": "number", "maximum": 600},
+        "trim": ARS_TRIM,
+        "tracks": {
+            "type": "object",
+            "properties": {
+                k: {"type": "array", "items": _ARS_KEY} for k in ("throttle", "pitch", "roll", "yaw")
+            },
+            "additionalProperties": False,
+        },
+        "end": {"type": "string", "enum": ["disarm", "hold"]},
+    },
+    "required": ["format", "version", "mode", "tracks"],
+}
+
 SERVER_NAME = "anet-relay"
 
 INSTRUCTIONS = (
@@ -70,6 +118,12 @@ STICKS_TOOL_NAMES = frozenset(
         "relay_stop",
         "relay_course_start",
         "relay_sticks_for",
+        # 10 §2: timelines are sticks; at this level Relay accepts them in stabilize only
+        "relay_timeline_run",
+        "relay_timeline_edit",
+        "relay_timeline_stop",
+        "relay_timeline_record",
+        "relay_timeline_from_record",
     }
 )
 STICKS_INSTRUCTIONS = (
@@ -247,6 +301,52 @@ TOOLS = [
         ["vehicle", "tuning"],
     ),
     _tool(
+        "relay_timeline_run",
+        "Fly an .ars stick timeline: four tracks of blocks (throttle, pitch, roll, yaw) on one time line "
+        "in its mode; arms first on the ground (real aircraft: confirm ARM). The same file flies a "
+        "simulator and a real aircraft. Waits for the end unless wait is false.",
+        {
+            "vehicle": VID,
+            "sequence": ARS,
+            "confirm": {"type": "string", "enum": ["ARM"], "description": "real aircraft on the ground"},
+            "start_at": {"type": "number", "minimum": 0},
+            "speed": {"type": "number", "minimum": 0.25, "maximum": 2},
+            "wait": WAIT,
+        },
+        ["vehicle", "sequence"],
+    ),
+    _tool(
+        "relay_timeline_edit",
+        "Change the flying timeline at once: new tracks (blocks not yet flown change, the time line "
+        "keeps its place) and / or the trim.",
+        {"vehicle": VID, "sequence": ARS, "trim": ARS_TRIM},
+        ["vehicle"],
+    ),
+    _tool(
+        "relay_timeline_stop",
+        "Stop the timeline without cutting anything; in the air an altitude-hold timeline hands over "
+        "to a hold.",
+        {"vehicle": VID},
+        ["vehicle"],
+    ),
+    _tool(
+        "relay_timeline_record",
+        "start / stop recording the sticks sent to the aircraft while armed; stop returns an .ars timeline.",
+        {
+            "vehicle": VID,
+            "action": {"type": "string", "enum": ["start", "stop"]},
+            "name": {"type": "string", "maxLength": 80},
+        },
+        ["vehicle", "action"],
+    ),
+    _tool(
+        "relay_timeline_from_record",
+        "A flight record's sticks (arming to disarming) as an .ars timeline.",
+        {"session_id": {"type": "integer", "minimum": 1}},
+        ["session_id"],
+        read_only=True,
+    ),
+    _tool(
         "relay_goto",
         "Fly to x (east), y (north), z (up) metres in the aircraft's position frame. The target "
         "must be inside the safety volume around the aircraft's origin.",
@@ -365,6 +465,8 @@ def _dispatch(r: RelayClient, name: str, a: dict) -> Any:
         }
     if name == "relay_vehicle":
         return r.vehicle(vid)
+    if name == "relay_timeline_from_record":
+        return {"sequence": r.timeline_from_record(int(a["session_id"]))}
     if name == "relay_topology":
         return r.topology()
     if name == "relay_events":
@@ -406,6 +508,22 @@ def _dispatch(r: RelayClient, name: str, a: dict) -> Any:
     if name == "relay_plan_tune":
         t = a.get("tuning") or {}
         return r.plan_tune(vid, climb=t.get("climb"), hover=t.get("hover"))
+    if name == "relay_timeline_run":
+        skill = r.timeline_run(
+            vid,
+            a["sequence"],
+            confirm=a.get("confirm"),
+            start_at=float(a.get("start_at") or 0.0),
+            speed=float(a.get("speed") or 1.0),
+            wait=wait,
+        )
+        return {"skill": skill}
+    if name == "relay_timeline_edit":
+        return r.timeline_edit(vid, sequence=a.get("sequence"), trim=a.get("trim"))
+    if name == "relay_timeline_stop":
+        return r.timeline_stop(vid)
+    if name == "relay_timeline_record":
+        return r.timeline_record(vid, a["action"], name=a.get("name"))
     if name == "relay_goto":
         return {
             "skill": r.goto(vid, float(a["x"]), float(a["y"]), float(a["z"]), yaw=a.get("yaw"), wait=wait)

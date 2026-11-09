@@ -310,7 +310,7 @@ export interface SticksView {
   yaw: number
   throttle: number
   age_s: number
-  source: 'human' | 'agent' | 'program'
+  source: 'human' | 'agent' | 'program' | 'relay'
 }
 /**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
@@ -324,6 +324,18 @@ export interface SkillView {
   name: string
   state: 'running' | 'done' | 'failed'
   detail: string | null
+  /**
+   * sequence: seconds into the time line
+   */
+  progress_s: number | null
+  /**
+   * sequence: length of the time line
+   */
+  duration_s: number | null
+  /**
+   * sequence: mode | arm | play | end | hold
+   */
+  phase: string | null
 }
 /**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
@@ -645,6 +657,9 @@ export interface Event {
     | 'plan_failed'
     | 'plan_cancelled'
     | 'plan_tuned'
+    | 'sequence_started'
+    | 'sequence_edited'
+    | 'sequence_recording'
     | 'device_command'
     | 'motor_test'
     | 'motor_test_stopped'
@@ -927,9 +942,13 @@ export interface SimAirframe {
   seed: number
   params: AirframeParams
   /**
-   * the defects act now (hover assist off)
+   * the defects act now (hover assist off, or with_assist)
    */
   active: boolean
+  /**
+   * [roll, pitch] level error of this flight: calibration error plus the arming bias, deg
+   */
+  level_now_deg: number[]
   /**
    * level hover throttle 0..1 out of ground effect at full battery; null: cannot lift
    */
@@ -978,6 +997,14 @@ export interface AirframeParams {
    * attitude, rate and acceleration noise multiplier
    */
   imu_noise: number
+  /**
+   * random level error of up to this many degrees per axis, new at every arming
+   */
+  arm_bias_deg: number
+  /**
+   * the defects act with hover assist on as well (altitude hold keeps the height)
+   */
+  with_assist: boolean
 }
 /**
  * What the Relay window currently shows (04 §3.1).

@@ -12,6 +12,7 @@ application operation when ``agents_app_control`` is on. Programs never see the 
 
 from __future__ import annotations
 
+import math
 import random
 from collections.abc import Callable
 from typing import Any
@@ -23,6 +24,14 @@ from .sim.airframe import GENERATED, LIMITS, SEED_MAX, Airframe, resolve
 PRESET_ZH = {"ideal": "理想", "typical": "典型", "rough": "粗糙", "custom": "自定义"}
 PRESET_EN = {"ideal": "ideal", "typical": "typical", "rough": "rough", "custom": "custom"}
 DEFAULT_PRESETS = GENERATED  # what sim_airframe_default may name
+
+
+def _level_now(sim: Any) -> list[float]:
+    """This flight's level error in degrees (roll, pitch): the calibration error plus the arming bias."""
+    model = sim.quad.airframe
+    if model is None:
+        return [0.0, 0.0]
+    return [round(math.degrees(model.trim[0]), 2) + 0.0, round(math.degrees(model.trim[1]), 2) + 0.0]
 
 
 def _system_seed() -> int:
@@ -58,7 +67,8 @@ class AirframeOps:
             "preset": af.preset,
             "seed": af.seed,
             "params": af.params(),
-            "active": not sim.hover_assist,
+            "active": not sim.hover_assist or af.with_assist,
+            "level_now_deg": _level_now(sim),
             "hover_throttle": af.hover_throttle(),
             "limits": {name: list(bounds) for name, bounds in LIMITS.items()},
         }

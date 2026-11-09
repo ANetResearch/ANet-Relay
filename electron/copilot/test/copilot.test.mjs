@@ -345,6 +345,27 @@ test("sequence throttle tuning reaches the plan and the live tuning route", asyn
   assert.ok(!toolsFor(relay, "all", undefined, "sticks").some((t) => t.name === "relay_plan_tune"), "a plan tool: full flight level only");
 });
 
+test("timeline tools (10 §2) fly an .ars sequence, adjust its trim and work at the sticks level", async () => {
+  const ars = { format: "ars", version: 1, mode: "althold", tracks: { throttle: [{ t: 0, v: 0.5 }, { t: 0.5, v: 0.75 }] } };
+  const relay = stubRelay({
+    "GET /vehicles/sim-1": { ...SIM, armed: false, skill: { id: 7, name: "sequence", state: "done", detail: "played 3.0 s", progress_s: 3, duration_s: 3, phase: "end" } },
+    "POST /vehicles/sim-1/claim": {},
+    "POST /vehicles/sim-1/sequence": { id: "sim-1", skill: { id: 7, name: "sequence", state: "running" } },
+    "PATCH /vehicles/sim-1/sequence": { id: "sim-1", trim: { pitch: -0.04 } },
+  });
+  const tools = Object.fromEntries(toolsFor(relay, "all", undefined, "full").map((t) => [t.name, t]));
+  const out = await tools.relay_timeline_run.execute("1", { vehicle: "sim-1", sequence: ars, start_at: 1 });
+  assert.match(out.content[0].text, /"state":"done"/);
+  const run = relay.calls.find((c) => c.path === "/vehicles/sim-1/sequence" && c.method === "POST");
+  assert.deepEqual(run.body, { sequence: ars, confirm: "ARM", start_at: 1 });
+  await tools.relay_timeline_edit.execute("1", { vehicle: "sim-1", trim: { pitch: -0.04 } });
+  assert.deepEqual(relay.calls.at(-1), { method: "PATCH", path: "/vehicles/sim-1/sequence", body: { trim: { pitch: -0.04 } } });
+  const sticks = toolsFor(relay, "all", undefined, "sticks").map((t) => t.name);
+  for (const name of ["relay_timeline_run", "relay_timeline_edit", "relay_timeline_stop", "relay_timeline_record", "relay_timeline_from_record"]) {
+    assert.ok(sticks.includes(name), `${name} at the sticks level`);
+  }
+});
+
 test("program_deploy with arm sends the confirm word the approval stands for", async () => {
   const relay = stubRelay({ "GET /vehicles/sim-1": SIM, "POST /vehicles/sim-1/claim": {}, "POST /vehicles/sim-1/program": { id: "sim-1", program: {}, arm: { ok: true } } });
   const tools = Object.fromEntries(toolsFor(relay, "all").map((t) => [t.name, t]));

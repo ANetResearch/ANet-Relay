@@ -76,7 +76,7 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | `sticks`（缺省） | 推杆（WebSocket 流、`POST /vehicles/{id}/sticks`、`sticks` 技能）、解锁与上锁、切换到手动类模式（ArduPilot STABILIZE / ACRO，PX4 MANUAL / STABILIZED / ACRO；DRIFT 带速度阻尼辅助，不属于此类）、关闭模拟机的悬停辅助（不能开启）、射击、部署并运行机载程序，以及安全动作：急停与 `land`（其事件标注 `safety`） |
 | `full` | 本文的全部接口，与 0.3 相同 |
 
-在 `sticks` 等级下，技能 `takeoff`、`hold`、`move`、`yaw`、`goto`、`rtl`、`velocity`、`attitude`，包含这些动作的动作序列，以动作序列或轨迹方式再飞，定高、定点与自动类模式，设备级接口中的飞行类命令，以及 4 通道以上的 RC 覆盖，均返回 403 `sticks_only`（`detail.level = "sticks"`，`detail.action` 指明被拒绝的操作）。飞行 MCP 服务只列出仍可用的工具（21 个中的 13 个；每次 `tools/list` 都重新读取设置），Copilot 同样去掉这些工具，并提示模型编写程序。在这一等级下，稳定飞行由机载程序完成：智能体按自己的节奏修改程序、调整参数、查看结果，程序负责 50 Hz 的闭环。
+在 `sticks` 等级下，技能 `takeoff`、`hold`、`move`、`yaw`、`goto`、`rtl`、`velocity`、`attitude`，包含这些动作的动作序列，以动作序列或轨迹方式再飞，定高、定点与自动类模式，设备级接口中的飞行类命令，以及 4 通道以上的 RC 覆盖，均返回 403 `sticks_only`（`detail.level = "sticks"`，`detail.action` 指明被拒绝的操作）。飞行 MCP 服务只列出仍可用的工具（26 个中的 18 个；每次 `tools/list` 都重新读取设置），Copilot 同样去掉这些工具，并提示模型编写程序。在这一等级下，稳定飞行由机载程序完成：智能体按自己的节奏修改程序、调整参数、查看结果，程序负责 50 Hz 的闭环。
 
 ## 3. 坐标系与单位
 
@@ -132,6 +132,11 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | `POST /vehicles/{id}/plan` | 控制者 | `{steps, name?, confirm?, tuning?}`：执行动作序列（见下文） |
 | `PATCH /vehicles/{id}/plan/tuning` | 控制者 | `{climb?, hover?}`：飞行中修改序列的油门参数 |
 | `POST /vehicles/{id}/plan/cancel` | 控制者 | 取消正在执行的序列；空中的飞机原地悬停 |
+| `POST /vehicles/{id}/sequence` | 控制者 | `{sequence, confirm?, speed?, start_at?}`：执行 `.ars` 时间轴序列（见下） |
+| `PATCH /vehicles/{id}/sequence` | 控制者 | `{sequence?, trim?}`：飞行中立即修改时间轴 |
+| `POST /vehicles/{id}/sequence/stop` | 控制者 | 停止时间轴；空中的定高序列交给悬停 |
+| `POST /vehicles/{id}/sequence/record` | 控制者 | `{action: start \| stop, name?}`：记录解锁期间发出的杆量，`stop` 返回 `.ars` 文档 |
+| `GET /history/sessions/{sid}/sequence` | – | 记录中的杆量，转换为 `.ars` 文档 |
 | `GET /history/sessions/{sid}/refly` | – | 某次飞行记录可用于再飞的来源：`plan`、`path`、`sticks` 与 `recommended` |
 | `POST /vehicles/{id}/refly` | 控制者 | `{session_id, mode?, speed?, confirm?}`：按记录再飞一次（见下文） |
 | `POST /vehicles/{id}/course/start` | 控制者 | `{course_id}`（缺省 `cage-loop`） |
@@ -183,6 +188,32 @@ POST /api/v1/vehicles/sim-1/plan
 **油门参数（0.5.2）。** 没有定位估计的飞机在定高模式下用油门杆执行 `takeoff`、`hover`、`move`、`yaw` 以及 PX4 的 `land`。`tuning: {climb, hover}` 设置这些杆量：`climb`（0.55–1，缺省 0.72）用于离地与爬升，`hover`（0.35–0.65，缺省 0.5）用于保持高度；接近、下降与落地缓冲的杆量随 `hover` 平移，`climb` 须比 `hover` 至少高 0.05。飞机飞不起来时调高 `climb`，悬停时下沉则调高 `hover`。`PATCH /vehicles/{id}/plan/tuning` 可在序列飞行中修改任一值，最后一步或取消后留下的悬停期间同样有效；正在执行的步骤立即采用（没有序列时返回 `no_plan`）。有定位估计时起飞与悬停由飞控完成，不应用油门参数。
 
 `sdk/python/examples/bench_routine.py` 执行上面的序列：`python3 sdk/python/examples/bench_routine.py --vehicle sim-1`；真机加 `--arm-real`。
+
+### 时间轴序列（`.ars`，0.5.3）
+
+时间轴是同一时间线上的四条杆量轨道：`throttle` 取 0..1；`pitch`、`roll`、`yaw` 取 -1..1，前、右、顺时针为正。序列以可移植的模式执行：`stabilize`、`althold` 或 `poshold`，在 ArduPilot 上对应 STABILIZE / ALT_HOLD / LOITER，在 PX4 上对应 STABILIZED / ALTCTL / POSCTL。同一个文件可在模拟机与真机上执行。文件后缀为 `.ars`（ANet Relay Sequence）：
+
+```json
+{"format": "ars", "version": 1, "name": "起飞-悬停-降落", "mode": "althold", "duration_s": 19,
+ "trim": {"roll": 0, "pitch": -0.04, "yaw": 0, "throttle": 0},
+ "tracks": {"throttle": [{"t": 0, "v": 0.5}, {"t": 0.5, "v": 0.75, "label": "climb"}, {"t": 3, "v": 0.5, "label": "hover"},
+                         {"t": 8, "v": 0.3, "label": "descend"}, {"t": 17, "v": 0}],
+            "pitch": [{"t": 0, "v": 0}, {"t": 4, "v": -0.08, "ease": "ramp"}, {"t": 6, "v": 0}]},
+ "end": "disarm"}
+```
+
+每个键开始一个操作块，持续到下一个键：`hold`（缺省）保持 `v`，`ramp` 线性过渡到下一个键的值。缺少的轨道居中：油门在定高与定点模式下为 0.5，在自稳模式下为 0。`trim` 叠加到每一帧（roll、pitch、yaw ±0.3，throttle ±0.2）：往前飘时调负的俯仰微调，不必改轨道。`end: "disarm"` 在飞机报告 `landed: ground` 后以零油门上锁；`hold` 保持悬停。着陆状态为 `unknown` 时按空中处理。时长 ≤ 600 s，每条轨道 ≤ 4000 个键；错误会指明字段，例如 `sequence tracks.throttle[1].t: keys must be in time order`。
+
+`POST /vehicles/{id}/sequence` 依次切换模式、在地面解锁、播放；真机解锁须带 `confirm: "ARM"`。飞机的 `skill` 为 `{name: "sequence", progress_s, duration_s, phase: mode | arm | play | end | hold}`。
+
+- `PATCH`：替换轨道和/或微调。尚未执行的操作块立即生效，模式不可改；没有正在执行的序列时返回 `no_sequence`。
+- `POST .../sequence/stop`：停止时间轴，不切断任何东西。
+- `POST .../sequence/record`：飞机解锁期间以 20 Hz 记录它收到的杆量，来源可以是操作员、动作序列、程序或时间轴，结束后简化为操作块返回。
+- `GET /history/sessions/{sid}/sequence`：对一条记录做同样的转换。
+
+限制：关闭悬停辅助的模拟机只能执行 `stabilize`；`poshold` 需要 `position` 能力；`sticks` 飞行等级下的会话只能执行 `stabilize`。事件：`sequence_started`、`sequence_edited`、`sequence_recording`。
+
+**解锁需要杆量输入。** PX4 与 ArduPilot 只有在看到飞手输入时才接受杆量模式下的解锁，否则分别报 "No manual control input" 和 "Throttle below failsafe"；模拟机现在也照此处理。没有任何杆量输入时，`POST /arm` 先发送居中的零油门杆量（来源 `relay`），等待 0.4 s 后再解锁。以 `arm` 部署的程序在上锁期间持续发送零油门杆量。
 
 ### 再飞（按历史飞行再飞一次）
 
@@ -288,7 +319,7 @@ POST /api/v1/vehicles/sim-1/plan
 
 ### 模拟机机体缺陷
 
-悬停辅助关闭时，模拟机还带有真实飞机的装配缺陷（设计 06 §4）；悬停辅助开启时这些缺陷不生效，辅助模型保持不变。
+悬停辅助关闭时，模拟机还带有真实飞机的装配缺陷（设计 06 §4）。悬停辅助开启时这些缺陷默认不生效；设置 `with_assist`（0.5.3）后，重心偏移、水平误差、电机、桨叶、噪声与重量在定高下同样生效，可在一架会像真机一样倾斜和漂移的模拟机上调好时间轴序列。
 
 | 参数 | 范围 | 效果 |
 |---|---|---|
@@ -298,6 +329,8 @@ POST /api/v1/vehicles/sim-1/plan
 | `motor_gain` | 4 × ±0.08 | 电机 1–4（ArduPilot X 型顺序）的效率偏差：偏航漂移（同样按 70 % / 2 s 修正）与轻微倾斜扰动；SERVO_OUTPUT_RAW 中各电机输出不同 |
 | `prop_damage`、`damaged_prop` | 0–1、电机 1–4 | 该桨推力最多下降 30 %；满油门时 VIBRATION 最多增加 50 m/s²，加速度计与陀螺噪声增加，姿态抖动 |
 | `imu_noise` | 0–5 | ATTITUDE（倍数为 1 时横滚俯仰 0.08°、航向 0.15°、角速度 0.6°/s）与 SCALED_IMU（0.06 m/s²）的噪声倍数 |
+| `arm_bias_deg` | 0–3° | 每次解锁在横滚、俯仰上各抽取不超过该值的随机水平误差，叠加到 `level_trim_deg`（对应每次起飞都不同的陀螺偏置）；由种子与解锁次数决定，可复现。`GET` 以 `level_now_deg` 报告本次飞行的误差 |
+| `with_assist` | 布尔 | 悬停辅助开启时缺陷同样生效（电压、地效与紊流仍需关闭悬停辅助） |
 
 预设按种子（0 – 2^31−1）确定性生成：`ideal`（全零，即悬停辅助关闭时的原模型）、`typical`（缺省：重心偏移 0.25 cm 以内、水平误差 0.4° 以内、电机 2 % 以内、噪声 ×1）、`rough`（重心偏移 0.7–1.4 cm、水平误差 1–2°、电机 8 % 以内、一支桨受损 20–50 %、载重 5–20 g、噪声 ×2：朴素悬停 20 s 漂移数米）与 `custom`（显式数值）。
 
@@ -488,7 +521,7 @@ Relay 提供三套基于 stdio 的 Model Context Protocol 服务（JSON-RPC 2.0�
 
 | 服务 | 文件 | 工具 | 面向 |
 |---|---|---|---|
-| `anet-relay` | `mcp/anet_relay_mcp.py` | 21 个 `relay_*`（`sticks` 等级下 13 个） | 飞行：机群、认领、解锁、模式、技能、动作序列及其油门参数、短时杆量、再飞、穿环航线、急停 |
+| `anet-relay` | `mcp/anet_relay_mcp.py` | 26 个 `relay_*`（`sticks` 等级下 18 个） | 飞行：机群、认领、解锁、模式、技能、动作序列及其油门参数、时间轴序列（`relay_timeline_*`）、短时杆量、再飞、穿环航线、急停 |
 | `anet-relay-device` | `mcp/anet_relay_device_mcp.py` | 36 个 `device_*` | 设备级：设备总览、MAVLink 消息、参数读写、原始指令、单电机测试、执行器、遥控覆盖、消息频率、重启、校准、home、姿态与速度控制、飞行终止、标定流程与报告 |
 | `anet-relay-app` | `mcp/anet_relay_app_mcp.py` | 42 个 `app_*`、19 个程序工具与 4 个狗斗工具 | 应用控制：应用与窗口状态、手柄、语言、工作区、选择飞机、检查器、对话框、截图、扫描网络、连接与移除飞机、模拟机、设置、告警、记录与导出、再飞来源、附身、Copilot 窗口、全部急停；机载程序：`program_guide`、`program_*`、`challenge_list`、`challenge_submit`、`job_status`、`duel_run`、`ladder`、`airframe_set`；狗斗：`dogfight_start`、`dogfight_stop`、`dogfight_status`、`leaderboard` |
 

@@ -20,6 +20,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -71,6 +72,7 @@ from .errors import RelayError, err
 from .events import EventBus
 from .fleet_airframe import AirframeOps  # WP-2a airframe defects (06 §4)
 from .fleet_device import DeviceOps
+from .fleet_sequence import SequenceOps  # stick timelines, .ars (10 §2)
 from .fleet_sim import SimOps
 from .fleet_world import WorldOps  # WP-A collisions (07 §2)
 from .flighthealth import FlightHealth
@@ -127,6 +129,7 @@ PX4_INTERVALS = (
     (M.MAVLINK_MSG_ID_VIBRATION, 2),
 )
 SIM_POSITION_HZ = 50.0
+ARM_PRIME_S = 0.4  # zero-throttle sticks reach the autopilot before an arm command (10 §1)
 BATTERY_SUSTAIN_S = 2.0
 BATTERY_HYSTERESIS_V = 0.05
 POSITION_ABORT_S = 1.0
@@ -203,6 +206,7 @@ class Vehicle:
         self.motor_until = 0.0  # clock time until which a motor test may still be spinning
         self.deferred: list[tuple[float, Callable[[Any], None]]] = []
         self.refly: dict[str, Any] | None = None  # the re-fly in progress (04 §4)
+        self.seq_record: dict[str, Any] | None = None  # sticks being recorded into a sequence (10 §2)
         self.procedure: Any = None  # bench procedure run, current or last (WP-B, 05 §4.3)
         self.health = FlightHealth()
         self.position_lost_since: float | None = None
@@ -355,7 +359,7 @@ class Vehicle:
         return auth.controller(self.auth, claim is not None and sessions.alive(claim.session_id))
 
 
-class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps, WorldOps):
+class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, WorldOps):
     def __init__(
         self,
         settings: Settings | None = None,
@@ -562,6 +566,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps, WorldOps):
                 log.exception("program tick failed")
             for v in list(self.vehicles.values()):
                 self._stick_tick(v, now)
+                self._sequence_record_tick(v, now)
                 self._device_tick(v, now)
                 self._plan_tick(v)
                 self._refly_tick(v)
@@ -1227,7 +1232,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps, WorldOps):
         # MANUAL, as a keyboard script leaves it) becomes altitude hold when the setting asks for it: with a
         # manual throttle every stick wobble is a climb or a sink, which reads as "unsteady after take-off".
         if modes.accepts_sticks(v.autopilot, v.mode) and (
-            v.mode in modes.HOLD_STICK_MODES or v.landed == "air" or target not in modes.HOLD_STICK_MODES
+            v.mode in modes.HOLD_STICK_MODES or v.airborne() or target not in modes.HOLD_STICK_MODES
         ):
             return
         v.driver.set_mode(target)
@@ -1657,10 +1662,16 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps, WorldOps):
         force: bool = False,
         authorised: bool = False,
     ) -> dict[str, Any]:
-        """``authorised``: the caller already checked the actor (a program deployment that arms, 09 §2)."""
+        """``authorised``: the caller already checked the actor (a program deployment that arms, 09 §2).
+
+        A stick mode arms only with pilot input present (PX4 "No manual control input", ArduPilot "Throttle
+        below failsafe", 10 §1): with no live sticks Relay first sends centred zero-throttle sticks, and
+        gives the autopilot ``ARM_PRIME_S`` to see them before the arm command."""
         t0 = self.clock()
+        primed = False
 
         def start() -> None:
+            nonlocal primed
             v = self._vehicle(vid)
             if (on or actor.kind == "session") and not authorised:
                 self._check_control(v, actor)
@@ -1674,9 +1685,28 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps, WorldOps):
             elif on:
                 self._arm_checks(v, confirm)
                 v.stop_window_until = 0.0
+                primed = self._prime_sticks(v)
+                if primed and self.threaded:
+                    return  # the arm command follows once the autopilot has seen the sticks
             v.driver.arm(on, force=on and force)
 
         self.call(start)
+        if primed and self.threaded:
+            time.sleep(ARM_PRIME_S)
+
+            def send() -> None:
+                # the fleet lock was free during the wait: an e-stop, a control change or a dropped stream
+                # cancels the arm rather than arming behind it
+                v = self._vehicle(vid)
+                if not authorised:
+                    self._check_control(v, actor)
+                self._require_link(v)
+                if v.stop_seq is not None or v.sticks is None or v.sticks.source != "relay":
+                    raise err("arm_rejected", reason="cancelled while the sticks were being primed")
+                v.sticks = replace(v.sticks, t=self.clock())  # keep them alive across the arming
+                v.driver.arm(True)
+
+            self.call(send)
         if not wait or not self.threaded:
             return {"id": vid, "armed": None, "pending": True}
         deadline = t0 + 3.0
@@ -1689,6 +1719,21 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps, WorldOps):
                 raise err("arm_rejected", reason=reason, ack=ack["result_name"], statustext=texts)
             time.sleep(0.05)
         raise err("arm_rejected", reason="no confirmation from the autopilot")
+
+    def _prime_sticks(self, v: Vehicle) -> bool:
+        """Centred zero-throttle sticks for arming when nothing else feeds the aircraft; True when sent."""
+        if v.armed or not modes.accepts_sticks(v.autopilot, v.mode):
+            return False  # armed already: zero throttle would be a descent, the repeated arm is harmless
+        if (v.skill is not None and v.skill.active) or v.rc_frame is not None:
+            return False
+        now = self.clock()
+        if v.sticks is not None and now - v.sticks.t <= STICK_TIMEOUT_S:
+            # live sticks: send them once more now, so they are ahead of the arm command on the link
+            v.driver.send_sticks(v.sticks, v.calibration.signs.as_dict())
+            return False
+        v.sticks = StickInput(0.0, 0.0, 0.0, 0.0, t=now, source="relay")
+        v.driver.send_sticks(v.sticks, v.calibration.signs.as_dict())
+        return True
 
     def _arm_probe(self, vid: str, t0: float) -> tuple[bool, dict | None, list[str]]:
         v = self._vehicle(vid)

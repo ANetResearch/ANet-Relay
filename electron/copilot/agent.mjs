@@ -36,6 +36,8 @@ const MOTION_TOOLS = new Set([
   "relay_land",
   "relay_plan",
   "relay_plan_tune",
+  "relay_timeline_run",
+  "relay_timeline_edit",
   "relay_sticks_for",
   "relay_refly",
 ]);
@@ -55,6 +57,12 @@ export const STICKS_TOOLS = new Set([
   "relay_release",
   "relay_stop",
   "relay_sticks_for",
+  // 10 §2: timelines are sticks; at this level Relay accepts them in stabilize only
+  "relay_timeline_run",
+  "relay_timeline_edit",
+  "relay_timeline_stop",
+  "relay_timeline_record",
+  "relay_timeline_from_record",
 ]);
 /** Device tools Relay refuses at "sticks" for every session (attitude and velocity targets fly for the agent). */
 const STICKS_HIDDEN_DEVICE = new Set(["device_attitude", "device_velocity"]);
@@ -178,6 +186,42 @@ const TUNING = Type.Object(
   },
   { description: "climb must stay at least 0.05 above hover" },
 )
+/** 10 §2: one block of a timeline track: the stick from t until the next key (hold) or moving to it (ramp). */
+const ARS_KEY = Type.Object({
+  t: Type.Number({ minimum: 0, description: "seconds" }),
+  v: Type.Number({ description: "stick: throttle 0..1, roll/pitch/yaw -1..1 (right, forward, clockwise +)" }),
+  ease: Type.Optional(Type.Union([Type.Literal("hold"), Type.Literal("ramp")])),
+  label: Type.Optional(Type.String({ maxLength: 40 })),
+});
+const ARS_TRIM = Type.Object(
+  {
+    roll: Type.Optional(Type.Number({ minimum: -0.3, maximum: 0.3 })),
+    pitch: Type.Optional(Type.Number({ minimum: -0.3, maximum: 0.3, description: "drifts forward: negative" })),
+    yaw: Type.Optional(Type.Number({ minimum: -0.3, maximum: 0.3 })),
+    throttle: Type.Optional(Type.Number({ minimum: -0.2, maximum: 0.2 })),
+  },
+  { description: "added to every frame; changes while flying through relay_timeline_edit" },
+);
+const ARS = Type.Object(
+  {
+    format: Type.Literal("ars"),
+    version: Type.Literal(1),
+    name: Type.Optional(Type.String({ maxLength: 80 })),
+    mode: Type.Union([Type.Literal("stabilize"), Type.Literal("althold"), Type.Literal("poshold")], {
+      description: "althold: throttle 0.5 holds height; stabilize: the throttle is thrust (simulators with hover assist off)",
+    }),
+    duration_s: Type.Optional(Type.Number({ maximum: 600 })),
+    trim: Type.Optional(ARS_TRIM),
+    tracks: Type.Object({
+      throttle: Type.Optional(Type.Array(ARS_KEY)),
+      pitch: Type.Optional(Type.Array(ARS_KEY)),
+      roll: Type.Optional(Type.Array(ARS_KEY)),
+      yaw: Type.Optional(Type.Array(ARS_KEY)),
+    }),
+    end: Type.Optional(Type.Union([Type.Literal("disarm"), Type.Literal("hold")])),
+  },
+  { description: "an .ars timeline sequence (keys in time order per track)" },
+);
 const STEP = Type.Object(
   {
     action: Type.Union(["takeoff", "hover", "move", "yaw", "land"].map((a) => Type.Literal(a))),
@@ -193,7 +237,7 @@ const STEP = Type.Object(
 
 /** Build the Copilot tool list on a Relay API client. */
 export function relayTools(relay) {
-  const { vehicle, claimFor, waitSkill, skill, waitPlan } = flightHelpers(relay);
+  const { vehicle, claimFor, waitSkill, skill, waitPlan, waitTimeline } = flightHelpers(relay);
 
   return [
     {
@@ -330,6 +374,70 @@ export function relayTools(relay) {
       },
     },
     {
+      name: "relay_timeline_run",
+      label: "Fly a timeline",
+      description:
+        "Fly an .ars stick timeline and wait for it: four tracks of blocks (throttle, pitch, roll, yaw) on one time line, flown in its mode; arms first on the ground. " +
+        "Use it to tune a take-off / hover / land by hand-set sticks: e.g. throttle [{t:0,v:0.5},{t:0.5,v:0.75,label:'climb'},{t:3,v:0.5,label:'hover'},{t:8,v:0.3,label:'descend'},{t:17,v:0}] in althold. " +
+        "start_at starts part-way in. The same file flies a simulator and a real aircraft; tune it on a simulator with airframe with_assist and a level error first.",
+      parameters: Type.Object({
+        vehicle: VID,
+        sequence: ARS,
+        start_at: Type.Optional(Type.Number({ minimum: 0 })),
+        speed: Type.Optional(Type.Number({ minimum: 0.25, maximum: 2 })),
+      }),
+      executionMode: "sequential",
+      execute: async (_id, p, signal, onUpdate) => {
+        await claimFor(p.vehicle);
+        const started = await relay.call("POST", `/vehicles/${enc(p.vehicle)}/sequence`, {
+          sequence: p.sequence,
+          confirm: "ARM",
+          ...(p.start_at ? { start_at: p.start_at } : {}),
+          ...(p.speed ? { speed: p.speed } : {}),
+        });
+        return text(await waitTimeline(p.vehicle, started.skill.id, signal, onUpdate, p.speed ?? 1));
+      },
+    },
+    {
+      name: "relay_timeline_edit",
+      label: "Adjust the timeline in flight",
+      description:
+        "Change the flying timeline at once: new tracks (blocks not yet flown take effect; the time line keeps its place; the mode cannot change) and / or trim {roll, pitch, yaw, throttle}. " +
+        "Read relay_vehicle while it flies: a steady forward drift is cancelled with a negative pitch trim, a drift right with a negative roll trim.",
+      parameters: Type.Object({ vehicle: VID, sequence: Type.Optional(ARS), trim: Type.Optional(ARS_TRIM) }),
+      execute: async (_id, p) => {
+        await claimFor(p.vehicle);
+        return text(
+          await relay.call("PATCH", `/vehicles/${enc(p.vehicle)}/sequence`, {
+            ...(p.sequence ? { sequence: p.sequence } : {}),
+            ...(p.trim ? { trim: p.trim } : {}),
+          }),
+        );
+      },
+    },
+    {
+      name: "relay_timeline_stop",
+      label: "Stop the timeline",
+      description: "Stop the timeline without cutting anything: in the air an altitude-hold timeline hands over to a hold, a stabilize one keeps its last sticks.",
+      parameters: Type.Object({ vehicle: VID }),
+      execute: async (_id, p) => text(await relay.call("POST", `/vehicles/${enc(p.vehicle)}/sequence/stop`)),
+    },
+    {
+      name: "relay_timeline_record",
+      label: "Record a timeline",
+      description: "start: record the sticks sent to the aircraft while it is armed (by anyone: the operator's gamepad, a plan, a program). stop: returns them as an .ars timeline to edit and fly again.",
+      parameters: Type.Object({ vehicle: VID, action: Type.Union([Type.Literal("start"), Type.Literal("stop")]), name: Type.Optional(Type.String({ maxLength: 80 })) }),
+      execute: async (_id, p) =>
+        text(await relay.call("POST", `/vehicles/${enc(p.vehicle)}/sequence/record`, { action: p.action, ...(p.name ? { name: p.name } : {}) })),
+    },
+    {
+      name: "relay_timeline_from_record",
+      label: "Timeline from a record",
+      description: "A flight record's sticks (arming to disarming) as an .ars timeline, simplified to blocks.",
+      parameters: Type.Object({ session_id: Type.Integer({ minimum: 1 }) }),
+      execute: async (_id, p) => text(await relay.call("GET", `/history/sessions/${p.session_id}/sequence`)),
+    },
+    {
       name: "relay_cancel",
       label: "Cancel sequence",
       description: "Cancel a running sequence; an airborne aircraft holds where it is.",
@@ -430,8 +538,10 @@ export function systemPrompt(lang, scope = "all", level = "full") {
   parts.push(
     "Tool sets:",
     sticks
-      ? "- relay_* (flight): read status, set a manual mode, arm and disarm, push the sticks for a few seconds (relay_sticks_for), land as a safety action, release the claim and stop."
-      : "- relay_* (flight): read status and fly with takeoff, hover, move, yaw, land, whole sequences (relay_plan), timed stick pushes (relay_sticks_for), arming, manual modes and flying a recorded flight again (relay_refly).",
+      ? "- relay_* (flight): read status, set a manual mode, arm and disarm, push the sticks for a few seconds (relay_sticks_for), fly stick timelines in stabilize (relay_timeline_*), land as a safety action, release the claim and stop."
+      : "- relay_* (flight): read status and fly with takeoff, hover, move, yaw, land, whole sequences (relay_plan), stick timelines (relay_timeline_*: .ars files of throttle / pitch / roll / yaw blocks, trimmed and edited in flight, recorded from any flight), timed stick pushes (relay_sticks_for), arming, manual modes and flying a recorded flight again (relay_refly).",
+    // 10 §2-§3: the timeline tuning loop
+    "- Timelines: to tune a take-off / hover / land for an aircraft without a position estimate, write an .ars timeline, fly it on a simulator with airframe_set {params: {level_trim_deg, cg_offset_cm, with_assist: true}} so it drifts like the real one, watch relay_vehicle, cancel the drift with relay_timeline_edit trim (forward drift: negative pitch) and adjust block values and lengths; then fly the same timeline on the real aircraft.",
     "- program_*, challenge_*, job_status, duel_run, ladder, airframe_set (programs): write, check, test, judge and deploy onboard flight programs that fly the aircraft at 50 Hz, tune them live, read their status and log, run duels, and set simulator airframe defects. The guide at the end of these instructions explains how to write them.",
     // WP-B (07 §3-§4)
     "- dogfight_start, dogfight_stop, dogfight_status, leaderboard (arena): start a timed dogfight of simulated aircraft in one call (Relay adds the simulators, arms them and deploys a program per role; the programs fly with sticks only), stop it, read its state and the leaderboard of this terminal and its LAN peers.",

@@ -192,6 +192,16 @@
         "imu_noise": {
           "description": "attitude, rate and acceleration noise multiplier",
           "type": "number"
+        },
+        "arm_bias_deg": {
+          "default": 0.0,
+          "description": "random level error of up to this many degrees per axis, new at every arming",
+          "type": "number"
+        },
+        "with_assist": {
+          "default": false,
+          "description": "the defects act with hover assist on as well (altitude hold keeps the height)",
+          "type": "boolean"
         }
       },
       "required": [
@@ -202,7 +212,9 @@
         "motor_gain",
         "prop_damage",
         "damaged_prop",
-        "imu_noise"
+        "imu_noise",
+        "arm_bias_deg",
+        "with_assist"
       ],
       "title": "AirframeParams",
       "type": "object"
@@ -1781,6 +1793,9 @@
             "plan_failed",
             "plan_cancelled",
             "plan_tuned",
+            "sequence_started",
+            "sequence_edited",
+            "sequence_recording",
             "device_command",
             "motor_test",
             "motor_test_stopped",
@@ -4554,8 +4569,15 @@
           "$ref": "#/$defs/AirframeParams"
         },
         "active": {
-          "description": "the defects act now (hover assist off)",
+          "description": "the defects act now (hover assist off, or with_assist)",
           "type": "boolean"
+        },
+        "level_now_deg": {
+          "description": "[roll, pitch] level error of this flight: calibration error plus the arming bias, deg",
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
         },
         "hover_throttle": {
           "anyOf": [
@@ -4585,6 +4607,7 @@
         "seed",
         "params",
         "active",
+        "level_now_deg",
         "hover_throttle",
         "limits"
       ],
@@ -4640,13 +4663,52 @@
               "type": "null"
             }
           ]
+        },
+        "progress_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "sequence: seconds into the time line"
+        },
+        "duration_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "sequence: length of the time line"
+        },
+        "phase": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "sequence: mode | arm | play | end | hold"
         }
       },
       "required": [
         "id",
         "name",
         "state",
-        "detail"
+        "detail",
+        "progress_s",
+        "duration_s",
+        "phase"
       ],
       "title": "SkillView",
       "type": "object"
@@ -4765,7 +4827,8 @@
           "enum": [
             "human",
             "agent",
-            "program"
+            "program",
+            "relay"
           ],
           "type": "string"
         }

@@ -134,6 +134,15 @@ export const api = {
     op<Ok>('POST', `/vehicles/${enc(id)}/plan`, { steps, ...opts }),
   tunePlan: (id: string, tuning: PlanTuning) => op<Ok>('PATCH', `/vehicles/${enc(id)}/plan/tuning`, tuning),
   cancelPlan: (id: string) => op<Ok>('POST', `/vehicles/${enc(id)}/plan/cancel`),
+  // stick timelines, .ars (10 §2)
+  runSequence: (id: string, sequence: unknown, opts?: { confirm?: string; speed?: number; start_at?: number }) =>
+    op<Ok>('POST', `/vehicles/${enc(id)}/sequence`, { sequence, ...opts }),
+  editSequence: (id: string, body: { sequence?: unknown; trim?: Record<string, number> }) =>
+    op<Ok>('PATCH', `/vehicles/${enc(id)}/sequence`, body),
+  stopSequence: (id: string) => op<Ok>('POST', `/vehicles/${enc(id)}/sequence/stop`),
+  recordSequence: (id: string, action: 'start' | 'stop', name?: string) =>
+    op<Ok>('POST', `/vehicles/${enc(id)}/sequence/record`, name ? { action, name } : { action }),
+  historySequence: (sid: number | string) => op<Ok>('GET', `/history/sessions/${enc(String(sid))}/sequence`),
   courseStart: (id: string, courseId: string) => op<Ok>('POST', `/vehicles/${enc(id)}/course/start`, { course_id: courseId }),
   courseStop: (id: string) => op<Ok>('POST', `/vehicles/${enc(id)}/course/stop`),
   stop: (id: string) => op<Ok>('POST', `/vehicles/${enc(id)}/stop`),

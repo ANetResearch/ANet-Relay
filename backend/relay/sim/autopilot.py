@@ -130,6 +130,7 @@ _PX4_BEHAVIOUR = {
 PILOT_NEEDED = {"stab", "althold"}
 POSITION_BEHAVIOURS = {"loiter", "guided", "rtl", "hold", "takeoff"}
 MANUAL_THROTTLE = {"stab"}
+PILOT_BEHAVIOURS = MANUAL_THROTTLE | {"althold", "loiter"}  # arming needs stick input present
 
 # ArduPilot REQUEST_DATA_STREAM groups.
 STREAM_GROUPS = {
@@ -304,7 +305,7 @@ class FlightController:
     def update(self, cmd: Command, quad: Quad, dt: float) -> list[float]:
         s = quad.s
         roll, pitch = s.roll, s.pitch
-        af = quad.airframe if quad.effects else None
+        af = quad.active_airframe()
         if af is not None:  # the board's level is off by the calibration error (06 §4)
             roll -= af.trim[0]
             pitch -= af.trim[1]
@@ -948,6 +949,10 @@ class SimAutopilot:
             and self.pilot[3] > 0.5 + DEADBAND / 2
         ):
             problem = "Throttle too high"
+        elif behaviour in PILOT_BEHAVIOURS and self._pilot(now) is None and self._needs_pilot():
+            # a pilot mode arms only with stick input present
+            # (ArduPilot: throttle failsafe; PX4: COM_RC_IN_MODE)
+            problem = "Throttle below failsafe" if self.flavour == ARDUPILOT else "No manual control input"
         if problem:
             self._text(
                 M.MAV_SEVERITY_CRITICAL,
@@ -955,6 +960,8 @@ class SimAutopilot:
             )
             return M.MAV_RESULT_FAILED if self.flavour == ARDUPILOT else M.MAV_RESULT_DENIED
         self.armed = True
+        if self.quad.airframe is not None:
+            self.quad.airframe.rearm()  # this flight's level error (arm_bias_deg)
         self.ground_t = now
         self.airborne_t = None
         self.next_heartbeat = 0.0
@@ -1549,6 +1556,11 @@ class SimAutopilot:
         """One 250 Hz step of the flight controller and the flight model."""
         self.t = (self.t or 0.0) + DT
         self._inner(self.t)
+
+    def _needs_pilot(self) -> bool:
+        if self.flavour == ARDUPILOT:
+            return self.param("FS_THR_ENABLE", 1) != 0
+        return int(self.param("COM_RC_IN_MODE", 3)) != 4
 
     def _pilot(self, now: float) -> tuple[float, float, float, float] | None:
         if self.pilot is None or self.pilot_t is None:

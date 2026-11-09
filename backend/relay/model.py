@@ -56,7 +56,7 @@ class StickInput:
     yaw: float
     throttle: float
     t: float = 0.0  # monotonic arrival time
-    source: Literal["human", "agent", "program"] = "agent"
+    source: Literal["human", "agent", "program", "relay"] = "agent"  # relay: arming keep-alive (10 §1)
     conn: str | None = None  # WebSocket connection that sent it, if any
 
     @staticmethod

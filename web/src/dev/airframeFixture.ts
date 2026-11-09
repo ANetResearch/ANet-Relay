@@ -14,9 +14,10 @@ const LIMITS: SimAirframe['limits'] = {
   prop_damage: [0, 1],
   damaged_prop: [1, 4],
   imu_noise: [0, 5],
+  arm_bias_deg: [0, 3],
 }
 
-const IDEAL: Params = { mass_kg: 0.12, payload_kg: 0, cg_offset_cm: [0, 0], level_trim_deg: [0, 0], motor_gain: [0, 0, 0, 0], prop_damage: 0, damaged_prop: 1, imu_noise: 0 }
+const IDEAL: Params = { mass_kg: 0.12, payload_kg: 0, cg_offset_cm: [0, 0], level_trim_deg: [0, 0], motor_gain: [0, 0, 0, 0], prop_damage: 0, damaged_prop: 1, imu_noise: 0, arm_bias_deg: 0, with_assist: false }
 
 function rng(seed: number): () => number {
   let s = seed >>> 0 || 1
@@ -45,6 +46,8 @@ export function fixtureParams(preset: Preset, seed: number): Params {
     prop_damage: rough ? r3(span(0.2, 0.5)) : 0,
     damaged_prop: 1 + Math.floor(u() * 4),
     imu_noise: rough ? 2 : 1,
+    arm_bias_deg: 0,
+    with_assist: false,
   }
 }
 
@@ -67,7 +70,7 @@ export function startAirframeFixture(onChange: (id: string, preset: Preset, seed
   const view = (id: string, assist: boolean): SimAirframe => {
     const f = frames.get(id) ?? { preset: 'typical', seed: 4242, params: fixtureParams('typical', 4242) }
     frames.set(id, f)
-    return { id, preset: f.preset, seed: f.seed, params: f.params, active: !assist, hover_throttle: hoverThrottle(f.params), limits: LIMITS }
+    return { id, preset: f.preset, seed: f.seed, params: f.params, active: !assist || Boolean(f.params.with_assist), level_now_deg: f.params.level_trim_deg.slice(0, 2), hover_throttle: hoverThrottle(f.params), limits: LIMITS }
   }
   return {
     handle(method, path, body, assist) {

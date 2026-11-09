@@ -29,7 +29,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 __all__ = ["DEFAULT_BASE", "RelayClient", "RelayError"]
-__version__ = "0.5.2"
+__version__ = "0.5.3"
 
 DEFAULT_BASE = os.environ.get("RELAY_API", "http://127.0.0.1:8765")
 API = "/api/v1"
@@ -383,6 +383,66 @@ class RelayClient:
         """Change the throttle tuning of the aircraft's sequence while it flies (09 §3)."""
         body = _drop_none(climb=climb, hover=hover)
         return self.request("PATCH", f"/vehicles/{vehicle_id}/plan/tuning", body, auth="session")
+
+    # ------------------------------------------------------------ stick timelines (.ars, 10 §2)
+
+    def timeline_run(
+        self,
+        vehicle_id: str,
+        sequence: dict,
+        confirm: str | None = None,
+        start_at: float = 0.0,
+        speed: float = 1.0,
+        wait: bool = True,
+        timeout: float | None = None,
+    ) -> dict:
+        """Fly an ``.ars`` timeline (``load_ars(path)`` reads a file); arms first on the ground.
+
+        With ``wait`` it returns the finished skill view and raises ``timeline_failed`` when it stops early.
+        ``timeout`` defaults to the timeline's remaining length at ``speed`` plus 60 s.
+        """
+        body: dict[str, Any] = {"sequence": sequence, "speed": speed}
+        if confirm:
+            body["confirm"] = confirm
+        if start_at:
+            body["start_at"] = start_at
+        started = self._post(f"/vehicles/{vehicle_id}/sequence", body)["skill"]
+        if not wait:
+            return started
+        if timeout is None:
+            timeout = 60.0 + (float(sequence.get("duration_s") or 600.0) - start_at) / speed
+        return self.wait_timeline(vehicle_id, started["id"], timeout)
+
+    def timeline_edit(self, vehicle_id: str, sequence: dict | None = None, trim: dict | None = None) -> dict:
+        """Change the flying timeline: new tracks and / or trim ``{roll, pitch, yaw, throttle}``, at once."""
+        body = _drop_none(sequence=sequence, trim=trim)
+        return self.request("PATCH", f"/vehicles/{vehicle_id}/sequence", body, auth="session")
+
+    def timeline_stop(self, vehicle_id: str) -> dict:
+        """Stop the timeline; in the air an altitude-hold timeline hands over to a hold."""
+        return self._post(f"/vehicles/{vehicle_id}/sequence/stop", {})
+
+    def timeline_record(self, vehicle_id: str, action: str, name: str | None = None) -> dict:
+        """``start`` / ``stop`` recording the sticks sent while armed; ``stop`` returns the sequence."""
+        return self._post(f"/vehicles/{vehicle_id}/sequence/record", _drop_none(action=action, name=name))
+
+    def timeline_from_record(self, session_id: int) -> dict:
+        """A flight record's sticks as an ``.ars`` document."""
+        return self.request("GET", f"/history/sessions/{session_id}/sequence", auth="session")
+
+    def wait_timeline(self, vehicle_id: str, skill_id: int, timeout: float = 660.0) -> dict:
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            skill = self.vehicle(vehicle_id).get("skill") or {}
+            if skill.get("id") != skill_id:
+                raise RelayError("timeline_failed", 409, "the timeline was replaced by another command")
+            if skill.get("state") == "done":
+                return skill
+            if skill.get("state") != "running":
+                reason = f"timeline stopped: {skill.get('detail')}"
+                raise RelayError("timeline_failed", 409, reason, detail=skill)
+            time.sleep(0.25)
+        raise RelayError("timeline", 0, f"timeline {skill_id} did not finish in {timeout:g} s")
 
     def wait_plan(self, vehicle_id: str, plan_id: int, timeout: float = 180.0) -> dict:
         """Wait until plan ``plan_id`` finishes; raises RelayError('plan_failed') unless it ends done."""
@@ -1236,3 +1296,21 @@ class _WebSocket:
             self.sock.close()
         except OSError:
             pass
+
+
+def load_ars(path: str) -> dict:
+    """Read an ``.ars`` timeline file (10 §2); Relay checks it again before flying it."""
+    with open(path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    if not isinstance(doc, dict) or doc.get("format") != "ars":
+        raise ValueError(f"{path} is not an .ars timeline")
+    return doc
+
+
+def save_ars(path: str, sequence: dict) -> None:
+    """Write an ``.ars`` timeline file."""
+    if not path.endswith(".ars"):
+        path += ".ars"
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(sequence, fh, ensure_ascii=False, indent=2)
+        fh.write("\n")

@@ -47,6 +47,12 @@ def history_export(request: Request, sid: int, fmt: str = Query("csv", pattern="
     )
 
 
+@router.get("/history/sessions/{sid}/sequence", tags=["records"], responses=ERRORS)
+def record_sequence(request: Request, sid: int) -> dict[str, Any]:
+    """The record's sticks as an ``.ars`` sequence document (10 §2)."""
+    return service(request).record_to_sequence(sid)
+
+
 @router.get("/history/sessions/{sid}/refly", tags=["records"], responses=ERRORS)
 def history_refly(request: Request, sid: int) -> dict[str, Any]:
     """How a record can be flown again: plan, path or recorded sticks (04 §4)."""

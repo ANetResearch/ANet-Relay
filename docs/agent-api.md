@@ -76,7 +76,7 @@ Setting `agent_flight_level` (design 06 §5) decides what agent sessions may fly
 | `sticks` (default) | Push sticks (WebSocket stream, `POST /vehicles/{id}/sticks`, the `sticks` skill), arm and disarm, switch to a manual mode (ArduPilot STABILIZE / ACRO, PX4 MANUAL / STABILIZED / ACRO; not DRIFT, which assists), switch a simulator's hover assist off (not on), fire, deploy and run onboard programs, and the safety actions: emergency stop and `land` (its events carry `safety`) |
 | `full` | Everything in this guide, as in 0.3 |
 
-At `sticks` the skills `takeoff`, `hold`, `move`, `yaw`, `goto`, `rtl`, `velocity` and `attitude`, plans that contain them, re-fly as a plan or a path, altitude, position and automatic modes, the flight commands of the device interface and RC overrides above channel 4 return 403 `sticks_only` with `detail.level = "sticks"` and `detail.action`. The flight MCP server lists only the tools that still work (13 of 21; it reads the setting on every `tools/list`), and Copilot drops the same tools and tells its model to write programs. Stable flight at this level is the job of an onboard program: the agent works at its own pace on the program, its parameters and its results, and the program closes the 50 Hz loop.
+At `sticks` the skills `takeoff`, `hold`, `move`, `yaw`, `goto`, `rtl`, `velocity` and `attitude`, plans that contain them, re-fly as a plan or a path, altitude, position and automatic modes, the flight commands of the device interface and RC overrides above channel 4 return 403 `sticks_only` with `detail.level = "sticks"` and `detail.action`. The flight MCP server lists only the tools that still work (18 of 26; it reads the setting on every `tools/list`), and Copilot drops the same tools and tells its model to write programs. Stable flight at this level is the job of an onboard program: the agent works at its own pace on the program, its parameters and its results, and the program closes the 50 Hz loop.
 
 ## 3. Frames and units
 
@@ -132,6 +132,11 @@ All paths are under `/api/v1`. Bodies are JSON.
 | `POST /vehicles/{id}/plan` | controller | `{steps, name?, confirm?, tuning?}`: run a sequence of skills (below) |
 | `PATCH /vehicles/{id}/plan/tuning` | controller | `{climb?, hover?}`: change the plan's throttle tuning while it flies |
 | `POST /vehicles/{id}/plan/cancel` | controller | Cancel the running plan; an airborne aircraft holds where it is |
+| `POST /vehicles/{id}/sequence` | controller | `{sequence, confirm?, speed?, start_at?}`: fly an `.ars` stick timeline (below) |
+| `PATCH /vehicles/{id}/sequence` | controller | `{sequence?, trim?}`: change the flying timeline at once |
+| `POST /vehicles/{id}/sequence/stop` | controller | Stop the timeline; in the air an altitude-hold timeline hands over to a hold |
+| `POST /vehicles/{id}/sequence/record` | controller | `{action: start \| stop, name?}`: record the sticks sent while armed; `stop` returns an `.ars` document |
+| `GET /history/sessions/{sid}/sequence` | – | A record's sticks as an `.ars` document |
 | `GET /history/sessions/{sid}/refly` | – | What a flight record can be flown again from: `plan`, `path`, `sticks` and `recommended` |
 | `POST /vehicles/{id}/refly` | controller | `{session_id, mode?, speed?, confirm?}`: fly a record again (see below) |
 | `POST /vehicles/{id}/course/start` | controller | `{course_id}` (default `cage-loop`) |
@@ -183,6 +188,25 @@ The vehicle's `plan` field reports `{id, name, state, index, count, steps, resul
 **Throttle tuning (0.5.2).** Aircraft without a position estimate fly `takeoff`, `hover`, `move`, `yaw` and the PX4 `land` on the throttle stick in altitude hold. `tuning: {climb, hover}` sets those sticks: `climb` (0.55–1, default 0.72) lifts the aircraft off and climbs, `hover` (0.35–0.65, default 0.5) holds the height; the approach, descent and flare sticks keep their distance to `hover`, and `climb` must stay at least 0.05 above `hover`. Raise `climb` when the aircraft does not lift off and `hover` when it sinks while hovering. `PATCH /vehicles/{id}/plan/tuning` changes either value while the plan flies, also during the hold its last step or a cancel left behind; the step in flight takes it at once (`no_plan` without a plan). With a position estimate the autopilot flies take-off and holds itself and the tuning is not applied.
 
 `sdk/python/examples/bench_routine.py` flies the sequence above: `python3 sdk/python/examples/bench_routine.py --vehicle sim-1`; on a real aircraft add `--arm-real`.
+
+### Stick timelines (`.ars`, 0.5.3)
+
+A timeline is four stick tracks (`throttle` 0..1; `pitch`, `roll`, `yaw` -1..1, forward, right and clockwise positive) on one time line, flown in a portable mode: `stabilize`, `althold` or `poshold` (STABILIZE / ALT_HOLD / LOITER on ArduPilot, STABILIZED / ALTCTL / POSCTL on PX4). The same file flies a simulator and a real aircraft. Files use the suffix `.ars` (ANet Relay Sequence):
+
+```json
+{"format": "ars", "version": 1, "name": "takeoff, hover, land", "mode": "althold", "duration_s": 19,
+ "trim": {"roll": 0, "pitch": -0.04, "yaw": 0, "throttle": 0},
+ "tracks": {"throttle": [{"t": 0, "v": 0.5}, {"t": 0.5, "v": 0.75, "label": "climb"}, {"t": 3, "v": 0.5, "label": "hover"},
+                         {"t": 8, "v": 0.3, "label": "descend"}, {"t": 17, "v": 0}],
+            "pitch": [{"t": 0, "v": 0}, {"t": 4, "v": -0.08, "ease": "ramp"}, {"t": 6, "v": 0}]},
+ "end": "disarm"}
+```
+
+Each key starts a block that lasts until the next key: `hold` (default) keeps the stick at `v`, `ramp` moves it linearly to the next key's value. A missing track is centred (throttle 0.5 in the hold modes, 0 in stabilize). `trim` (roll, pitch, yaw ±0.3, throttle ±0.2) is added to every frame: cancel a forward drift with a negative pitch trim instead of editing the tracks. `end: "disarm"` disarms with zero throttle once the aircraft reports `landed: ground`; `hold` keeps holding (an `unknown` landed state counts as airborne). At most 600 s and 4000 keys per track; errors name the field, for example `sequence tracks.throttle[1].t: keys must be in time order`.
+
+`POST /vehicles/{id}/sequence` switches the mode, arms on the ground (real aircraft: `confirm: "ARM"`), then plays; the vehicle's `skill` is `{name: "sequence", progress_s, duration_s, phase: mode | arm | play | end | hold}`. `PATCH` replaces the tracks (blocks not yet flown take effect at once; the mode cannot change) and / or the trim; `no_sequence` when none flies. `POST .../sequence/stop` stops without cutting anything. `POST .../sequence/record` records, at 20 Hz while armed, whatever sticks the aircraft receives (operator, plan, program, timeline) and returns them simplified to blocks; `GET /history/sessions/{sid}/sequence` does the same for a record. A simulator with hover assist off flies `stabilize` only; `poshold` needs `position`; at the `sticks` flight level sessions fly `stabilize` only. Events `sequence_started`, `sequence_edited`, `sequence_recording`.
+
+**Arming needs stick input.** PX4 and ArduPilot arm a stick mode only while they see pilot input ("No manual control input", "Throttle below failsafe"); simulators now behave the same. When nothing feeds the aircraft, `POST /arm` first sends centred zero-throttle sticks (source `relay`) and waits 0.4 s; programs deployed with `arm` keep zero-throttle sticks while disarmed.
 
 ### Re-fly (fly a past flight again)
 
@@ -288,7 +312,7 @@ Every simulated aircraft has `hover_assist` (default: setting `sim_hover_assist`
 
 ### Simulator airframe defects
 
-With hover assist off a simulated aircraft also flies with the assembly defects of a real one (design 06 §4). With hover assist on they wait; the assisted model is unchanged.
+With hover assist off a simulated aircraft also flies with the assembly defects of a real one (design 06 §4). With hover assist on they wait, unless `with_assist` is set (0.5.3): then the CG offset, level error, motors, propeller, noise and weight act in altitude hold too, so a timeline can be tuned against an airframe that tilts and drifts like the real one.
 
 | Value | Range | Effect |
 |---|---|---|
@@ -298,6 +322,8 @@ With hover assist off a simulated aircraft also flies with the assembly defects 
 | `motor_gain` | 4 × ±0.08 | Efficiency deviation of motors 1–4 (ArduPilot X order): yaw drift (same 70 % / 2 s correction) and a small tilt disturbance; the motor outputs in SERVO_OUTPUT_RAW differ |
 | `prop_damage`, `damaged_prop` | 0–1, motor 1–4 | That propeller loses up to 30 % thrust; VIBRATION rises by up to 50 m/s² at full throttle, accelerometer and gyro noise rise, the attitude jitters |
 | `imu_noise` | 0–5 | Noise multiplier on ATTITUDE (0.08° roll and pitch, 0.15° yaw, 0.6°/s rates at 1) and SCALED_IMU (0.06 m/s²) |
+| `arm_bias_deg` | 0–3° | A new random level error of up to this much on roll and pitch at every arming, added to `level_trim_deg` (a gyro bias that differs from flight to flight); repeatable from the seed and the arm count. `GET` reports this flight's error as `level_now_deg` |
+| `with_assist` | boolean | The defects also act with hover assist on (voltage, ground effect and turbulence still need it off) |
 
 Presets, generated deterministically from a seed (0 – 2^31−1): `ideal` (all zero: exactly the hover-assist-off model), `typical` (default: CG within 0.25 cm, level error within 0.4°, motors within 2 %, noise ×1), `rough` (CG 0.7–1.4 cm, level error 1–2°, motors within 8 %, one propeller 20–50 % damaged, 5–20 g payload, noise ×2: a naive hover drifts several metres in 20 s) and `custom` (explicit values).
 
@@ -488,7 +514,7 @@ Relay ships three stdio Model Context Protocol servers (JSON-RPC 2.0, standard l
 
 | Server | File | Tools | Scope |
 |---|---|---|---|
-| `anet-relay` | `mcp/anet_relay_mcp.py` | 21 `relay_*` (13 at the `sticks` level) | Flight: fleet, claims, arm, mode, skills, plans and their throttle tuning, timed sticks, re-fly, courses, stop |
+| `anet-relay` | `mcp/anet_relay_mcp.py` | 26 `relay_*` (18 at the `sticks` level) | Flight: fleet, claims, arm, mode, skills, plans and their throttle tuning, stick timelines (`relay_timeline_*`), timed sticks, re-fly, courses, stop |
 | `anet-relay-device` | `mcp/anet_relay_device_mcp.py` | 36 `device_*` | Device level: overview, MAVLink messages, parameter reads and writes, raw commands, single-motor tests, actuators, RC override, message rates, reboot, calibration, home, attitude and velocity control, flight termination, bench procedures and their reports |
 | `anet-relay-app` | `mcp/anet_relay_app_mcp.py` | 42 `app_*`, 19 program tools and 4 dogfight tools | Application control: app and window state, controllers, language, workspace, selection, inspector, dialogs, screenshots, network scan, connecting and removing aircraft, simulators, settings, alerts, records and export, re-fly sources, possession, the Copilot window, stop-all; onboard programs: `program_guide`, `program_*`, `challenge_list`, `challenge_submit`, `job_status`, `duel_run`, `ladder`, `airframe_set`; dogfights: `dogfight_start`, `dogfight_stop`, `dogfight_status`, `leaderboard` |
 

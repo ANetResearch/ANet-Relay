@@ -120,6 +120,12 @@ class SimPilot(MavCommands):
     def _write(self, data: bytes) -> None:
         self.sim.receive(data, self.t)
 
+    def arm(self, on: bool, force: bool = False) -> None:
+        # a pilot with the transmitter on: a pilot mode arms only with stick input present (10 §1)
+        if on and self.sticks is None:
+            self.send_sticks(StickInput(0.0, 0.0, 0.0, 0.0))
+        super().arm(on, force=force)
+
     def run(self, seconds: float, dt: float = 0.02) -> None:
         end = self.t + seconds
         while self.t < end - 1e-9:

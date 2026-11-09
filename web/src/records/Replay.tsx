@@ -22,6 +22,37 @@ import { useRecordsCtl } from './ctl'
 import { exitReplay, setReplay, useReplay, type ReplayFrame } from './replayState'
 import { StageView } from './StageView'
 import { VoxelLoader } from '@/ui/voxel/VoxelLoader'
+import { notifyError } from '@/shell/notify'
+import { useUi } from '@/store/ui'
+import { parseArs } from '@/sequence/model'
+import { useSequence } from '@/sequence/store'
+import { useST } from '@/sequence/strings'
+
+/** The record's sticks as a timeline sequence (10 §2): opens in the dock under the stage for editing. */
+function OpenAsSequence({ id }: { id: number }) {
+  const st = useST()
+  const [busy, setBusy] = React.useState(false)
+  const open = async () => {
+    setBusy(true)
+    try {
+      const doc = parseArs(JSON.stringify(await api.historySequence(id)))
+      useSequence.getState().load(doc)
+      useSequence.getState().setOpen(true)
+      useUi.getState().setWorkspace('fly')
+      notify(st('seq.recorded', { t: `${doc.duration_s.toFixed(1)} s` }))
+    } catch (e) {
+      notifyError(e)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Button variant="outline" size="sm" className="gap-1.5" disabled={busy} onClick={() => void open()} data-records-sequence="">
+      <Icon icon="seq.timeline" />
+      {st('seq.openRecord')}
+    </Button>
+  )
+}
 
 const SPEEDS = [1, 4, 16] as const
 const COURSE_RINGS: Record<string, [AnyKey, number]> = { 'cage-loop': ['course.cageLoop', 4], slalom: ['course.slalom', 6], climb: ['course.climb', 5] }
@@ -256,6 +287,7 @@ export function Replay({ record, focusT }: { record: RecordSummary; focusT: numb
           <Icon icon="folder" />
           {t('records.exportJson')}
         </Button>
+        <OpenAsSequence id={record.id} />
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto py-3">
         <Summary d={d} />

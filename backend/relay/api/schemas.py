@@ -143,7 +143,7 @@ class SticksView(_Model):
     yaw: float
     throttle: float
     age_s: float
-    source: Literal["human", "agent", "program"]  # program: WP-1 onboard program
+    source: Literal["human", "agent", "program", "relay"]  # program: WP-1 onboard program; relay: arming
 
 
 class SkillView(_Model):
@@ -151,6 +151,9 @@ class SkillView(_Model):
     name: str
     state: Literal["running", "done", "failed"]
     detail: str | None
+    progress_s: float | None = Field(default=None, description="sequence: seconds into the time line")
+    duration_s: float | None = Field(default=None, description="sequence: length of the time line")
+    phase: str | None = Field(default=None, description="sequence: mode | arm | play | end | hold")
 
 
 PlanAction = Literal[
@@ -269,6 +272,13 @@ class AirframeParams(_Model):
     prop_damage: float = Field(description="damage of one propeller 0..1 (thrust loss, vibration)")
     damaged_prop: int = Field(description="the damaged propeller's motor number 1-4")
     imu_noise: float = Field(description="attitude, rate and acceleration noise multiplier")
+    arm_bias_deg: float = Field(
+        default=0.0, description="random level error of up to this many degrees per axis, new at every arming"
+    )
+    with_assist: bool = Field(
+        default=False,
+        description="the defects act with hover assist on as well (altitude hold keeps the height)",
+    )
 
 
 class SimAirframe(_Model):
@@ -278,7 +288,11 @@ class SimAirframe(_Model):
     preset: AirframePreset
     seed: int
     params: AirframeParams
-    active: bool = Field(description="the defects act now (hover assist off)")
+    active: bool = Field(description="the defects act now (hover assist off, or with_assist)")
+    level_now_deg: list[float] = Field(
+        default_factory=lambda: [0.0, 0.0],
+        description="[roll, pitch] level error of this flight: calibration error plus the arming bias, deg",
+    )
     hover_throttle: float | None = Field(
         description="level hover throttle 0..1 out of ground effect at full battery; null: cannot lift"
     )
@@ -462,6 +476,9 @@ EventKind = Literal[
     "plan_failed",
     "plan_cancelled",
     "plan_tuned",
+    "sequence_started",
+    "sequence_edited",
+    "sequence_recording",
     "device_command",
     "motor_test",
     "motor_test_stopped",
@@ -786,6 +803,34 @@ class PlanBody(_Body):
     tuning: PlanTuning | None = Field(default=None, description="throttle tuning, adjustable while flying")
 
 
+class SequenceTrim(_Body):
+    """Offsets added to every frame of the sequence (stick units); adjustable while it flies."""
+
+    roll: float | None = Field(default=None, ge=-0.3, le=0.3)
+    pitch: float | None = Field(default=None, ge=-0.3, le=0.3, description="+ forward; pull back with -")
+    yaw: float | None = Field(default=None, ge=-0.3, le=0.3)
+    throttle: float | None = Field(default=None, ge=-0.2, le=0.2)
+
+
+class SequenceBody(_Body):
+    sequence: dict[str, Any] = Field(description='an ``.ars`` document: {"format": "ars", "version": 1, ...}')
+    confirm: str | None = Field(default=None, description='"ARM" when a real aircraft starts on the ground')
+    speed: float = Field(default=1.0, ge=0.25, le=2.0, description="time scale")
+    start_at: float = Field(default=0.0, ge=0.0, description="start this many seconds into the time line")
+
+
+class SequenceEditBody(_Body):
+    sequence: dict[str, Any] | None = Field(
+        default=None, description="new tracks; the blocks not yet flown take effect at once"
+    )
+    trim: SequenceTrim | None = None
+
+
+class SequenceRecordBody(_Body):
+    action: Literal["start", "stop"]
+    name: str | None = Field(default=None, max_length=80)
+
+
 class ReflyBody(_Body):
     session_id: int
     mode: Literal["auto", "plan", "path", "sticks"] = "auto"
@@ -840,6 +885,8 @@ class AirframeParamsBody(_Body):
     prop_damage: float | None = None
     damaged_prop: int | None = None
     imu_noise: float | None = None
+    arm_bias_deg: float | None = None
+    with_assist: bool | None = None
 
 
 class AirframeBody(_Body):

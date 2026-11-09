@@ -19,12 +19,15 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from . import sequence as sequence_mod
 from .mav import modes
 from .mav.mavlink import M
 from .model import StickInput
 
 NEUTRAL = StickInput(roll=0.0, pitch=0.0, yaw=0.0, throttle=0.5, source="agent")
 RETRY_S = 1.2
+ARM_PRIME_S = 0.3  # sticks reach the autopilot before a skill sends the arm command
+LANDED_THROTTLE = 0.3  # a timeline throttle at or below this lets the autopilot disarm after landing
 REPLAY_MODE_GRACE_S = 3.0  # time a replay gives the autopilot to take a recorded mode change
 MAX_TRIES = 3
 SETPOINT_PERIOD_S = 0.1
@@ -68,7 +71,7 @@ REQUIREMENTS = {
 }
 SKILL_NAMES = tuple(REQUIREMENTS)
 # Skills only the fleet starts itself; not part of the public catalogue (04 §4).
-INTERNAL_REQUIREMENTS = {"replay": "manual"}
+INTERNAL_REQUIREMENTS = {"replay": "manual", "sequence": "manual"}
 
 
 def clamp01(x: float) -> float:
@@ -139,7 +142,12 @@ class Skill:
         return self.state == "running" or (self.state == "done" and self.holding)
 
     def view(self) -> dict[str, Any]:
-        return {"id": self.id, "name": self.name, "state": self.state, "detail": self.detail}
+        out = {"id": self.id, "name": self.name, "state": self.state, "detail": self.detail}
+        if self.name == "sequence":
+            out["progress_s"] = round(float(self.params.get("_progress") or 0.0), 2)
+            out["duration_s"] = self.params["_seq"]["duration_s"]
+            out["phase"] = self.phase
+        return out
 
     # lifecycle ---------------------------------------------------------------
 
@@ -227,6 +235,11 @@ class Skill:
     def _ensure_armed(self, host: Host, now: float) -> bool:
         if host.armed:
             return True
+        if self.out is None:
+            # a stick mode arms only with pilot input present and the throttle down (10 §1)
+            self.out = StickInput(0.0, 0.0, 0.0, 0.0, source="agent")
+        if now - self.phase_t < ARM_PRIME_S:
+            return False  # let the autopilot see the sticks before the arm command
         ack = host.ack_after(M.MAV_CMD_COMPONENT_ARM_DISARM, self.phase_t)
         if ack is not None and ack["result"] not in (M.MAV_RESULT_ACCEPTED, M.MAV_RESULT_IN_PROGRESS):
             self.fail(f"arming rejected ({ack['result_name']})", f"解锁被拒绝（{ack['result_name']}）")
@@ -843,6 +856,84 @@ class Skill:
             return
         self.out = stick_row(sticks_at(samples, elapsed))
 
+    def _tick_sequence(self, host: Host, now: float) -> None:
+        """An ``.ars`` timeline (10 §2): mode, arm, play the tracks with the live trim, then end."""
+        seq = self.params["_seq"]
+        trim = self.params["_trim"]  # shared with the fleet: PATCH /sequence/trim changes it in flight
+        speed = float(self.params.get("speed") or 1.0)
+        start_at = float(self.params.get("start_at") or 0.0)
+        duration = float(seq["duration_s"])
+        if self.state == "done":
+            # stopped early: hold what the timeline was sending at that moment, not its end
+            rest_at = min(duration, float(self.params.get("_rest_at", duration)))
+            self.out = self._sequence_rest(seq, trim, rest_at)
+            return
+        if self.phase == "start":
+            self.expect_mode = self.params["mode"]
+            self._phase("mode", now)
+        # joining in the air: the first frame of the timeline, never the zero-throttle arming idle
+        airborne = host.armed and host.landed != "ground"
+        first = StickInput(*sequence_mod.sample(seq, start_at, trim), source="agent") if airborne else None
+        if self.phase == "mode":
+            self.out = first or self._idle()
+            if self._ensure_mode(host, self.expect_mode, now):
+                self._phase("arm", now)
+            return
+        if self.phase == "arm":
+            self.out = first or self._idle()
+            if host.armed or self._ensure_armed(host, now):
+                self._phase("play", now)
+            return
+        if self.phase == "end":
+            self.out = StickInput(0.0, 0.0, 0.0, 0.0, source="agent")
+            if not host.armed:
+                self.finish(f"played {duration:.1f} s; disarmed on the ground")
+            elif host.landed != "ground":
+                self.finish(f"played {duration:.1f} s; still airborne, holding")
+                self.phase = "hold"
+            elif self._retry(now):
+                host.driver.arm(False)
+            elif self._exhausted(now):
+                self.finish(f"played {duration:.1f} s; the autopilot kept the motors armed")
+            return
+        if not host.armed:
+            elapsed = start_at + (now - self.phase_t) * speed
+            if host.landed in ("ground", "unknown") and sample_throttle(seq, elapsed) <= LANDED_THROTTLE:
+                self.finish(f"disarmed by the autopilot at {elapsed:.1f} s")  # auto-disarm after the landing
+                self.holding = False
+            else:
+                self.fail("disarmed", "已上锁")
+            return
+        if not self._check_running_mode(host):
+            return
+        elapsed = start_at + (now - self.phase_t) * speed
+        self.params["_progress"] = min(elapsed, duration)
+        if elapsed >= duration:
+            # only a confirmed landing ends with zero throttle: "unknown" may be in the air
+            if seq["end"] == "disarm" and host.landed == "ground":
+                self._phase("end", now)
+                self.out = StickInput(0.0, 0.0, 0.0, 0.0, source="agent")
+                return
+            self.finish(f"played {duration:.1f} s")
+            self.out = self._sequence_rest(seq, trim, duration)
+            return
+        roll, pitch, yaw, throttle = sequence_mod.sample(seq, elapsed, trim)
+        self.out = StickInput(roll, pitch, yaw, throttle, source="agent")
+
+    def _sequence_rest(self, seq: dict[str, Any], trim: dict[str, float], at: float) -> StickInput:
+        """After the timeline: attitude trim only; mid throttle where the mode holds altitude, else the
+        throttle at ``at`` (the end, or where it was stopped)."""
+        hold = self.expect_mode in modes.HOLD_STICK_MODES
+        last = sequence_mod.sample(seq, at, trim)
+        throttle = clamp01(0.5 + trim.get("throttle", 0.0)) if hold else last[3]
+        return StickInput(
+            trim.get("roll", 0.0), trim.get("pitch", 0.0), trim.get("yaw", 0.0), throttle, source="agent"
+        )
+
+
+def sample_throttle(seq: dict[str, Any], t: float) -> float:
+    return sequence_mod.sample(seq, t)[3]
+
 
 def stick_row(row: tuple[float, ...]) -> StickInput:
     return StickInput(row[1], row[2], row[3], row[4], source="agent")
@@ -935,4 +1026,7 @@ def make(
         skill.timeout = float(params["seconds"]) + 15.0
     elif name == "replay":
         skill.timeout = 40.0 + params["_samples"][-1][0] / float(params.get("speed") or 1.0)
+    elif name == "sequence":
+        rest = params["_seq"]["duration_s"] - float(params.get("start_at") or 0.0)
+        skill.timeout = 40.0 + max(0.0, rest) / float(params.get("speed") or 1.0)
     return skill

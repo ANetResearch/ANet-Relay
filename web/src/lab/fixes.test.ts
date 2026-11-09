@@ -111,8 +111,9 @@ describe('airframe editor', () => {
       id: 'sim-1',
       preset,
       seed: 4,
-      params: { mass_kg: 0.12, payload_kg: 0, cg_offset_cm: [0, 0], level_trim_deg: [0, 0], motor_gain: [0, 0, 0, 0], prop_damage: 0, damaged_prop: 1, imu_noise: 0 },
+      params: { mass_kg: 0.12, payload_kg: 0, cg_offset_cm: [0, 0], level_trim_deg: [0, 0], motor_gain: [0, 0, 0, 0], prop_damage: 0, damaged_prop: 1, imu_noise: 0, arm_bias_deg: 0, with_assist: false },
       active: true,
+      level_now_deg: [0, 0],
       hover_throttle: 0.5,
       limits: { mass_kg: [0.08, 0.3], payload_kg: [0, 0.2], cg_offset_cm: [-3, 3], level_trim_deg: [-5, 5], motor_gain: [-0.08, 0.08], prop_damage: [0, 1], damaged_prop: [1, 4], imu_noise: [0, 5] },
     }) as SimAirframe

@@ -294,8 +294,8 @@ class Quad:
         self.effects = effects
         self.turbulence = min(1.0, max(0.0, turbulence))
         self.seed = seed
-        # WP-2a airframe defects (06 §4): an AirframeModel for a non-nominal airframe, consulted only while
-        # ``effects`` is on, so the assisted model and a nominal airframe stay the nominal one.
+        # WP-2a airframe defects (06 §4): an AirframeModel for a non-nominal airframe, consulted while
+        # ``effects`` is on or the airframe asks for it with hover assist on (``active_airframe``).
         self.airframe: Any = None
         self.airframe_spec: Any = None
         self.thrusts = [0.0, 0.0, 0.0, 0.0]  # N per rotor in the last step
@@ -313,12 +313,21 @@ class Quad:
         """Fly with ``spec`` (a ``sim.airframe.Airframe``, None for nominal). WP-2a."""
         from .airframe import AirframeModel  # airframe imports this module
 
+        old = self.airframe
         self.airframe_spec = spec
         self.airframe = None if spec is None or spec.nominal else AirframeModel(spec)
+        if old is not None and old.arms and self.airframe is not None:
+            # same flight: redraw its level error (seeded by the arm count), so a change in flight keeps it
+            self.airframe.arms = old.arms - 1
+            self.airframe.rearm()
 
     def active_airframe(self) -> Any:
-        """The airframe model in effect: only with the physical effects on (hover assist off)."""
-        return self.airframe if self.effects else None
+        """The airframe model in effect: with the physical effects on (hover assist off), or with hover
+        assist on when the airframe asks for it (``with_assist``, 10 §3)."""
+        af = self.airframe
+        if af is None:
+            return None
+        return af if self.effects or af.spec.with_assist else None
 
     def _reset_noise(self) -> None:
         self.rng = random.Random(self.seed)
@@ -484,7 +493,7 @@ class Quad:
         self.battery.step(s.motor, armed, dt)
         if effects:
             self._noise(dt)
-        af = self.airframe if effects else None
+        af = self.active_airframe()
         mass = MASS
         cx = cy = 0.0
         if af is not None:  # WP-2a: weight, CG and the damaged propeller's vibration

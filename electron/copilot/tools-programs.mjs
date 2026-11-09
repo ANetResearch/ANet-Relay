@@ -25,7 +25,7 @@ const AIRFRAME = Type.Object(
     params: opt(ANY_OBJECT),
     seed: opt(Type.Integer({ minimum: 0, maximum: 2 ** 31 - 1 })),
   },
-  { description: "Simulator defects: {preset} (fresh seed), {preset, seed}, {seed} or {params: {mass_kg, payload_kg, cg_offset_cm, level_trim_deg, motor_gain, prop_damage, damaged_prop, imu_noise}}" },
+  { description: "Simulator defects: {preset} (fresh seed), {preset, seed}, {seed} or {params: {mass_kg, payload_kg, cg_offset_cm, level_trim_deg, motor_gain, prop_damage, damaged_prop, imu_noise, arm_bias_deg, with_assist}}; with_assist: true makes the defects act with hover assist on (altitude hold) as well; arm_bias_deg draws a new random level error at every arming" },
 );
 
 /** Calls that deploy, resume or retune a program: approved by the operator on a real aircraft (danger "program").

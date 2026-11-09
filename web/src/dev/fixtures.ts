@@ -130,7 +130,7 @@ function busyVehicles(now: number): V[] {
       attitude: { roll: 0.09, pitch: -0.12, yaw: 2.4 }, altitude_m: 1.0, climb_ms: 0.0, groundspeed_ms: 1.0, heading_deg: 137, throttle_pct: 52,
       battery: { voltage: 11.9, current: 7.4, remaining_pct: 74, cells: 3, level: 'ok' }, flight_time_s: 58, armed_time_s: 60,
       claim: claimA(now - 240), controller: 'agent',
-      sticks: null, skill: { id: 3, name: 'goto', state: 'running', detail: 'ring 3' },
+      sticks: null, skill: { id: 3, name: 'goto', state: 'running', detail: 'ring 3', progress_s: null, duration_s: null, phase: null },
       course: { course_id: 'cage-loop', name_en: 'Cage loop', name_zh: '笼内环线', rings: [], state: 'running', next: 2, total: 4, started_at: now - 12.48, elapsed_s: 12.48, splits: [4.21, 3.42], best_s: 18.2, reason: null, origin: [0, 0, 0, 0] },
       record_session: 46,
     }),

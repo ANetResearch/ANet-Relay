@@ -45,6 +45,10 @@ When the person lets go, control is relayed back to the agent that held it. Real
 <td><img src="docs/media/readme/dogfight.webp" alt="Quadcopters in a voxel arena exchanging red tracers; one bursts into voxels" width="100%" /></td>
 </tr>
 <tr>
+<td><h3>Timeline sequences</h3>Throttle, pitch, roll and yaw as rows of blocks on one time line, with both sticks drawn at every change. Drag a block or a stick, nudge with the arrow keys, trim out a drift while it flies, record a flight by hand. Saved as <code>.ars</code> files that fly simulators and real aircraft alike.</td>
+<td><img src="docs/media/readme/timeline.webp" alt="The timeline dock under the stage: stick pairs, throttle and direction blocks, a red playhead and two stick pads" width="100%" /></td>
+</tr>
+<tr>
 <td><img src="docs/media/readme/physics.webp" alt="A quadcopter inside its collision sphere, with rotor thrust arrows and a reaction-torque arc" width="100%" /></td>
 <td><h3>Rotor physics after Gazebo</h3>A 6-DOF rigid body with four rotors modelled on Gazebo's <code>MulticopterMotorModel</code>, a cascaded flight controller, collision volumes and solid rings at 250 Hz. Deterministic, and 13x faster than real time when judging.</td>
 </tr>
@@ -81,7 +85,7 @@ with RelayClient() as relay:                          # http://127.0.0.1:8765
 claude mcp add anet-relay-app -- python3 /path/to/ANet-Relay/mcp/anet_relay_app_mcp.py --name claude-code-app   # or any MCP client
 ```
 
-Three MCP servers cover flight (21 tools), device level down to single motors (36) and the whole application (65). See [MCP Servers](https://github.com/ANetResearch/ANet-Relay/wiki/MCP-Servers).
+Three MCP servers cover flight (26 tools), device level down to single motors (36) and the whole application (65). See [MCP Servers](https://github.com/ANetResearch/ANet-Relay/wiki/MCP-Servers).
 
 ## What is inside
 

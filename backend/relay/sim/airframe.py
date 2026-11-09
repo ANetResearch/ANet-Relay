@@ -3,9 +3,10 @@
 An ``Airframe`` is the assembly a simulator flies with: take-off weight, centre-of-gravity offset, level
 calibration error, per-motor efficiency, one damaged propeller and IMU noise. ``generate(preset, seed)``
 builds the ``ideal`` / ``typical`` / ``rough`` presets deterministically from a seed; ``custom`` is any
-explicit set of values. ``AirframeModel`` is the runtime part ``physics.Quad`` consults, and only while the
-quad's physical effects are on (hover assist off, 05 §5.1): with hover assist on, or with nominal values,
-the flight model is the nominal one.
+explicit set of values. ``AirframeModel`` is the runtime part ``physics.Quad`` consults while the quad's
+physical effects are on (hover assist off, 05 §5.1), and also with hover assist on when ``with_assist`` is
+set (10 §3: altitude hold keeps the height, the defects still tilt and push the airframe). Otherwise, or with
+nominal values, the flight model is the nominal one.
 
 Every defect acts through the six-degree-of-freedom model (body frame x forward, y right; quad-x motor
 order 1 front-right CCW, 2 rear-left CCW, 3 front-left CW, 4 rear-right CW):
@@ -22,6 +23,8 @@ order 1 front-right CCW, 2 rear-left CCW, 3 front-left CW, 4 rear-right CW):
   vibration (VIBRATION, accelerometer noise).
 * Level calibration error: the flight controller's attitude estimate is off by ``level_trim_deg``, so the
   airframe flies that much tilted with centred sticks, while ATTITUDE (the estimate) reads level.
+  ``arm_bias_deg`` adds a fresh random error of up to that many degrees on roll and pitch at every arming
+  (a gyro / accelerometer bias that differs from flight to flight; drawn from the seed and the arm count).
 * ``imu_noise`` scales white noise on the reported attitude, rates and accelerations.
 
 ``weights`` / ``thrust_fraction`` / ``hover_throttle`` are the static trim: the per-rotor thrust shares that
@@ -54,7 +57,9 @@ LIMITS: dict[str, tuple[float, float]] = {
     "prop_damage": (0.0, 1.0),
     "damaged_prop": (1, 4),
     "imu_noise": (0.0, 5.0),
+    "arm_bias_deg": (0.0, 3.0),
 }
+FLAGS = ("with_assist",)  # boolean fields
 VECTORS = {"cg_offset_cm": 2, "level_trim_deg": 2, "motor_gain": 4}
 
 # Geometry (the physics rotor layout, in arm units for the static trim).
@@ -93,6 +98,8 @@ class Airframe:
     prop_damage: float = 0.0
     damaged_prop: int = 1  # 1..4, ArduPilot motor number
     imu_noise: float = 0.0
+    arm_bias_deg: float = 0.0  # random level error drawn at every arming, per axis
+    with_assist: bool = False  # act with hover assist on as well (10 §3)
 
     @property
     def nominal(self) -> bool:
@@ -105,6 +112,7 @@ class Airframe:
             and not any(self.motor_gain)
             and self.prop_damage == 0.0
             and self.imu_noise == 0.0
+            and self.arm_bias_deg == 0.0
         )
 
     @property
@@ -121,6 +129,8 @@ class Airframe:
             "prop_damage": self.prop_damage,
             "damaged_prop": self.damaged_prop,
             "imu_noise": self.imu_noise,
+            "arm_bias_deg": self.arm_bias_deg,
+            "with_assist": self.with_assist,
         }
 
     def ref(self) -> dict[str, Any]:
@@ -158,6 +168,8 @@ class Airframe:
             prop_damage=values["prop_damage"],
             damaged_prop=int(values["damaged_prop"]),
             imu_noise=values["imu_noise"],
+            arm_bias_deg=values["arm_bias_deg"],
+            with_assist=bool(values["with_assist"]),
         )
 
 
@@ -178,6 +190,11 @@ def validate_params(patch: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for name, value in patch.items():
         if value is None:
+            continue
+        if name in FLAGS:
+            if not isinstance(value, bool):
+                raise ValueError(name)
+            out[name] = value
             continue
         if name not in LIMITS:
             raise ValueError(name)
@@ -309,7 +326,7 @@ class AirframeModel:
         self.mass = af.total_mass
         self.cg_m = (af.cg_offset_cm[0] / 100.0, af.cg_offset_cm[1] / 100.0)  # forward, right
         self.cg = (self.cg_m[0] / ARM_M, self.cg_m[1] / ARM_M)  # arm units
-        self.trim = (math.radians(af.level_trim_deg[0]), math.radians(af.level_trim_deg[1]))
+        self.base_trim = (math.radians(af.level_trim_deg[0]), math.radians(af.level_trim_deg[1]))
         dx, dy = self.cg
         matrix = [
             [k[i] * (MOTOR_X[i] - dx) for i in range(4)],
@@ -330,6 +347,22 @@ class AirframeModel:
         self.sensor_rng = random.Random(seed ^ _SENSOR_SALT)
         self.jitter = [1.0, 1.0, 1.0, 1.0]  # per-rotor thrust multiplier from the damaged propeller
         self._wobble = 0.0
+        self.arms = 0
+        self.bias = (0.0, 0.0)
+        self.trim = self.base_trim
+
+    def rearm(self) -> tuple[float, float]:
+        """A new arming: draw this flight's level error (``arm_bias_deg``); returns it in degrees."""
+        self.arms += 1
+        spread = self.spec.arm_bias_deg
+        if spread > 0.0:
+            rng = random.Random(f"bias:{self.spec.seed}:{self.arms}")
+            self.bias = (
+                math.radians(rng.uniform(-spread, spread)),
+                math.radians(rng.uniform(-spread, spread)),
+            )
+        self.trim = (self.base_trim[0] + self.bias[0], self.base_trim[1] + self.bias[1])
+        return math.degrees(self.trim[0]), math.degrees(self.trim[1])
 
     # ---------------------------------------------------------------- static trim
 

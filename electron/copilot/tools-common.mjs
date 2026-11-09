@@ -75,6 +75,7 @@ export function flightHelpers(relay) {
   const halt = async (id, what) => {
     try {
       if (what === "plan") await relay.call("POST", `/vehicles/${enc(id)}/plan/cancel`);
+      else if (what === "timeline") await relay.call("POST", `/vehicles/${enc(id)}/sequence/stop`);
       else await relay.call("POST", `/vehicles/${enc(id)}/skills/hold`, {});
     } catch {
       try {
@@ -128,7 +129,34 @@ export function flightHelpers(relay) {
     throw new Error("the sequence did not finish in time");
   };
 
-  return { vehicle, claimFor, waitSkill, skill, waitPlan };
+  /**
+   * A timeline sequence (10 §2) until it ends; progress every second. "done" while still armed means holding. The
+   * deadline follows the timeline (up to 600 s at a quarter speed), not the plan timeout.
+   */
+  const waitTimeline = async (id, skillId, signal, onUpdate, speed = 1) => {
+    let end = Date.now() + PLAN_TIMEOUT_MS;
+    let shown = -1;
+    while (Date.now() < end) {
+      const v = await vehicle(id);
+      const s = v.skill;
+      if (!s || s.id !== skillId) throw new Error("the timeline was replaced by another command");
+      if (s.state === "running" && s.duration_s != null) {
+        const left = (s.duration_s - (s.progress_s ?? 0)) / speed;
+        end = Math.max(end, Date.now() + (left + 60) * 1000);
+      }
+      const second = Math.floor(s.progress_s ?? 0);
+      if (s.state === "running" && second !== shown) {
+        shown = second;
+        onUpdate?.(text(`${s.phase}: ${(s.progress_s ?? 0).toFixed(1)} of ${s.duration_s} s, altitude ${v.altitude_m ?? "?"} m`));
+      }
+      if (s.state === "done") return { state: "done", detail: s.detail, holding: v.armed, vehicle: compactVehicle(v) };
+      if (s.state !== "running") throw new Error(`timeline ${s.state} at ${(s.progress_s ?? 0).toFixed(1)} s: ${s.detail}`);
+      await sleep(250, signal).catch(halting(id, "timeline", signal));
+    }
+    throw new Error("the timeline did not finish in time");
+  };
+
+  return { vehicle, claimFor, waitSkill, skill, waitPlan, waitTimeline };
 }
 
 /** A tool definition from a compact description; `run(params, ctx)` returns a JSON-able value. */

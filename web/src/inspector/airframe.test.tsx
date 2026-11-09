@@ -13,15 +13,16 @@ const LIMITS: SimAirframe['limits'] = {
   motor_gain: [-0.08, 0.08],
   prop_damage: [0, 1],
   damaged_prop: [1, 4],
-  imu_noise: [0, 5],
+  imu_noise: [0, 5], arm_bias_deg: [0, 3],
 }
 
 const frame = (over: Partial<SimAirframe> = {}): SimAirframe => ({
   id: 'sim-1',
   preset: 'rough',
   seed: 9,
-  params: { mass_kg: 0.12, payload_kg: 0.015, cg_offset_cm: [0.8, -0.4], level_trim_deg: [1.2, -0.5], motor_gain: [0.03, -0.02, 0.05, 0], prop_damage: 0.3, damaged_prop: 2, imu_noise: 2 },
+  params: { mass_kg: 0.12, payload_kg: 0.015, cg_offset_cm: [0.8, -0.4], level_trim_deg: [1.2, -0.5], motor_gain: [0.03, -0.02, 0.05, 0], prop_damage: 0.3, damaged_prop: 2, imu_noise: 2, arm_bias_deg: 0, with_assist: false },
   active: true,
+  level_now_deg: [1.2, -0.5],
   hover_throttle: 0.545,
   limits: LIMITS,
   ...over,

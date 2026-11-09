@@ -5,6 +5,76 @@ All notable changes to ANet Relay are documented in this file. The format follow
 [Semantic Versioning](https://semver.org/). Each release section is published as the
 GitHub Release notes for its tag.
 
+## [0.5.3] - 2026-11-09
+
+Stick timelines with their own file format, simulators that drift like a real
+airframe in altitude hold, and a fix for real aircraft that would not arm from
+the Lab.
+
+### Added
+
+- **Timeline sequences** (`.ars`, ANet Relay Sequence): four stick tracks
+  (throttle, pitch, roll, yaw) of blocks on one time line, opened from Control →
+  Timeline sequence, the command palette or Records → Open as sequence. The dock
+  under the stage shows the playhead while it flies.
+  - Drag a block up or down to change its stick, drag its right edge to change
+    how long it lasts. The arrow keys nudge the stick by 0.01 and the length by
+    0.1 s. Blocks can be split, inserted and removed, edits can be undone, and
+    blocks hold or ramp to the next one.
+  - Both sticks at a glance: a strip above the time line draws the two sticks
+    at every moment a stick changes, and two stick pads show them at the
+    cursor. Drag a pad to set both sticks from that moment on (Mode 1 or 2,
+    as in Settings → Controllers).
+  - A trim on all four axes is added to every frame and changes in flight:
+    cancel a forward drift with a little negative pitch.
+  - Edits to blocks not yet flown reach the aircraft at once.
+  - Record: the sticks an armed aircraft receives (gamepad, keyboard, plan,
+    program) become blocks.
+  - Takeoff template, import and export of `.ars` files. The same file flies
+    simulators and real aircraft (ARM confirmation on real ones).
+  - API: `POST`/`PATCH /vehicles/{id}/sequence`,
+    `POST /vehicles/{id}/sequence/stop`, `POST /vehicles/{id}/sequence/record`,
+    `GET /history/sessions/{sid}/sequence`; events `sequence_started`,
+    `sequence_edited`, `sequence_recording`.
+- Simulator airframe:
+  - **Also with altitude hold** (`with_assist`): the CG offset, level error and
+    the other defects act with hover assist on, so a timeline can be tuned on a
+    simulator that tilts and drifts like the real aircraft.
+  - **Random level error per arming** (`arm_bias_deg`): a new error of up to 3°
+    at every arming, like a gyro bias that changes from flight to flight.
+  - The inspector shows this flight's level error (`level_now_deg`).
+- Copilot, flight MCP and SDK:
+  - New tools `relay_timeline_run`, `relay_timeline_edit`,
+    `relay_timeline_stop`, `relay_timeline_record` and
+    `relay_timeline_from_record`. The flight MCP server now has 26 tools, 18 at
+    the sticks level, where timelines fly in stabilize.
+  - `airframe_set` takes `with_assist` and `arm_bias_deg`.
+  - The SDK adds `timeline_*`, `load_ars` and `save_ars`.
+
+### Fixed
+
+- Real aircraft did not arm from the Lab. PX4 and ArduPilot arm STABILIZE or
+  ALT_HOLD only while they see pilot input ("No manual control input",
+  "Throttle below failsafe"), and a program released the sticks while the
+  aircraft was disarmed. Now:
+  - Programs hold centred zero-throttle sticks while disarmed.
+  - An arming deployment sends them before it switches mode and arms.
+  - `POST /vehicles/{id}/arm` sends them first when nothing else feeds the
+    aircraft.
+  - Skills that arm (take-off, plans, re-fly, timelines) send 0.3 s of
+    centred zero-throttle sticks before the arm command.
+  - Simulators refuse to arm without pilot input, as the autopilots do.
+  - An aircraft that is already armed gets no zero-throttle sticks, and an
+    emergency stop or a change of control during the short wait cancels the
+    arm instead of arming after it.
+- Timelines in the air never drop the throttle: one started in flight begins
+  on its own first frame, a stabilize timeline cannot start in the air on a
+  ground throttle, and a stop holds the throttle of that moment rather than the
+  one the timeline ends on.
+- Esc in the timeline dock first clears the block selection and otherwise
+  still stops the aircraft. Undo and redo reach an aircraft that is flying the
+  timeline.
+
 ## [0.5.2] - 2026-11-09
 
 Programs can be tried out in the Lab with one click, sequences get adjustable
