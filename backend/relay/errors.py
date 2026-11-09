@@ -304,6 +304,22 @@ CATALOGUE: dict[str, tuple[int, str, str]] = {
         "Read the aircraft's whole parameter table first ({received} of {total} received).",
         "须先读完飞机的全部参数（已收到 {received}/{total}）。",
     ),
+    # serial links and hardware in the loop (11 §7, §10); serial_unavailable is 409 when the port is busy
+    "serial_unavailable": (
+        400,
+        "The serial port {device} cannot be used: {reason}.",
+        "无法使用串口 {device}：{reason_zh}。",
+    ),
+    "hitl_unavailable": (
+        409,
+        "Hardware in the loop is not available: {reason}.",
+        "硬件在环不可用：{reason_zh}。",
+    ),
+    "hitl_restore_mismatch": (
+        409,
+        "{count} parameters differ from the hardware-in-the-loop backup; the backup file is kept.",
+        "{count} 项参数与硬件在环前的备份不一致，备份文件已保留。",
+    ),
 }
 
 

@@ -22,6 +22,7 @@ from pydantic.json_schema import models_json_schema  # noqa: E402
 from relay.api import (  # noqa: E402
     schemas,
     schemas_app,
+    schemas_hitl,  # 11 §7
     schemas_judge,
     schemas_match,  # WP-B
     schemas_procedures,
@@ -65,6 +66,7 @@ def build() -> dict[str, Any]:
         **schemas_judge.EXPORTED,  # WP-2b
         **schemas_match.EXPORTED,  # WP-B (07 §3-§4)
         **schemas_twin.EXPORTED,  # 11 §10: firmware twins
+        **schemas_hitl.EXPORTED,  # 11 §7: serial ports, hardware in the loop
     }
     models = [(model, "serialization") for model in exported.values()]
     keys, defs = models_json_schema(models, by_alias=True, ref_template="#/$defs/{model}")
