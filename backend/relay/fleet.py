@@ -457,6 +457,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
 
     def shutdown(self) -> None:
         self._scan_stop.set()
+        self._twin_kill_first()  # 11 §6.3: before the joins below, which may outlast Electron's grace
         if self._thread is not None:
             try:
                 self.call(self._shutdown_vehicles, timeout=2.0)

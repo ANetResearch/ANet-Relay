@@ -34,9 +34,9 @@ const UI = [
     "open_settings",
     "Open settings",
     "Open the settings dialog, optionally on a section.",
-    Type.Object({ section: opt(lit("general", "safety", "controllers", "copilot", "network", "data", "about")) }),
+    Type.Object({ section: opt(lit("general", "safety", "controllers", "copilot", "network", "autopilots", "data", "about")) }),
   ],
-  ["app_open_connect", "open_connect", "Open connect dialog", "Open the connection dialog on its scan, address or bridge tab.", Type.Object({ tab: opt(lit("scan", "address", "bridge")) })],
+  ["app_open_connect", "open_connect", "Open connect dialog", "Open the connection dialog on its scan, address, serial or bridge tab.", Type.Object({ tab: opt(lit("scan", "address", "serial", "bridge")) })],
   ["app_close_dialogs", "close_dialogs", "Close dialogs", "Close every open dialog, popover and sheet.", empty],
   [
     "app_set_pref",

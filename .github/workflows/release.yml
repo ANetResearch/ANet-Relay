@@ -130,16 +130,26 @@ jobs:
 
       # 11 §3.2: this platform's autopilot runtime packs from the release autopilots-v1, verified against its
       # index-<platform>.json and unpacked into build/autopilots/ (electron-builder.yml extraResources ->
-      # resources/autopilots). Before the first autopilots.yml run the release does not exist: the package is
-      # then built without packs and the step leaves a warning.
+      # resources/autopilots). A tag build fails without them: a missing release or index, or an index with
+      # no pack at all. A dry run (workflow_dispatch) may build without packs and leaves a warning.
       - name: Fetch autopilot packs
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          node scripts/fetch-autopilots.mjs --dir build/autopilots --platform ${{ matrix.label }} --repo "${GITHUB_REPOSITORY}" --optional
+          optional="--optional"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then optional=""; fi
+          node scripts/fetch-autopilots.mjs --dir build/autopilots --platform ${{ matrix.label }} --repo "${GITHUB_REPOSITORY}" ${optional}
           if [ -d build/autopilots ]; then
             du -sh build/autopilots/* 2>/dev/null || true
             echo "Autopilot packs total: $(du -sh build/autopilots | cut -f1)"
+          fi
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            count=$(node -e 'const fs = require("fs"); const f = "build/autopilots/index.json"; console.log(fs.existsSync(f) ? (JSON.parse(fs.readFileSync(f, "utf8")).packs || []).length : 0)')
+            if [ "${count}" -lt 1 ]; then
+              echo "::error::No autopilot packs for ${{ matrix.label }}: a release must ship its firmware twins"
+              exit 1
+            fi
+            echo "Autopilot packs: ${count}"
           fi
 
       - name: Package (electron-builder)

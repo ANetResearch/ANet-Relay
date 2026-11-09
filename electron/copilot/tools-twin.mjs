@@ -75,7 +75,7 @@ export function twinTools(relay) {
       "relay_twin_profile_capture",
       "Capture twin profile",
       "Capture a twin profile from a connected real aircraft: its firmware identity and whole parameter table (hardware-specific parameters are left out). Fails with params_incomplete until every parameter is read and real_only for a simulator. profile recaptures into an existing profile (its name, frame and home stay); frame omitted: guessed from the battery.",
-      Type.Object({ vehicle: VID, name: opt(Type.String({ maxLength: 80 })), frame: opt(FRAME), profile: opt(PROFILE) }),
+      Type.Object({ vehicle: VID, name: opt(Type.String({ maxLength: 64 })), frame: opt(FRAME), profile: opt(PROFILE) }),
       (p) => call("POST", "/twins/profiles", defined({ from_vehicle: p.vehicle, name: p.name, frame: p.frame, profile: p.profile })),
     ),
     defineTool(

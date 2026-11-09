@@ -179,13 +179,27 @@ def _cause(exc: BaseException) -> str:
     return "io"
 
 
+# Local serial devices only: pyserial's URL handlers (socket://, rfc2217://, spy://...) would open network
+# connections or write files.
+_PORT_NAME = re.compile(
+    r"^(/dev/(tty|cu)[\w.\-]*|/dev/pts/\d+|/dev/serial/by-(id|path)/[\w.:+\-]+|COM\d+|\\\\\.\\COM\d+)$"
+)
+
+
+def is_port_name(device: str) -> bool:
+    """True for a local serial device: a port the system lists, or a serial device path of this platform."""
+    if "://" in device:
+        return False
+    return bool(_PORT_NAME.match(device)) or find_port(device) is not None
+
+
 def open_port(device: str, baud: int) -> Any:
-    """Open ``device`` non-blocking with pyserial. Raises SerialUnavailable."""
+    """Open the local serial device ``device`` non-blocking with pyserial. Raises SerialUnavailable."""
+    if "://" in device:
+        raise SerialUnavailable("invalid", f"{device}: not a local serial port")
     serial = _pyserial()
     try:
-        return serial.serial_for_url(
-            device, baudrate=baud, timeout=0, write_timeout=WRITE_TIMEOUT_S, exclusive=True
-        )
+        return serial.Serial(device, baudrate=baud, timeout=0, write_timeout=WRITE_TIMEOUT_S, exclusive=True)
     except ValueError as exc:
         raise SerialUnavailable("invalid", f"{device}: {exc}") from None
     except OSError as exc:  # serial.SerialException is an OSError

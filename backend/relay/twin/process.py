@@ -2,7 +2,10 @@
 
 ``FirmwareProcess`` starts one SITL executable as a child of Relay in its own process group, keeps the last
 lines of its output, and kills the whole group on ``stop``. Every live process is registered; ``stop_all``
-runs at interpreter exit and from the fleet's shutdown, so no firmware outlives Relay.
+runs at interpreter exit and from the fleet's shutdown, so no firmware outlives Relay. A Relay killed outright
+(SIGKILL, a crash) runs neither: on Linux the kernel kills the firmware with its parent (``PR_SET_PDEATHSIG``,
+set from one long-lived spawning thread, since the signal follows the forking thread), on Windows a job
+object closed with Relay does; working directories left by a dead Relay are removed by the next one.
 
 ``Instances`` hands out instance numbers ``n`` (0, 1, ...): a twin's ports derive from ``n`` (11 §2), and an
 instance is used only when Relay can open its own loopback sockets for it and the ports the firmware binds
@@ -15,8 +18,10 @@ from __future__ import annotations
 import atexit
 import collections
 import contextlib
+import ctypes
 import logging
 import os
+import queue
 import shutil
 import signal
 import socket
@@ -47,13 +52,170 @@ class TwinStartError(RuntimeError):
         self.lines = list(lines or [])
 
 
-def workdir() -> Path:
-    """A fresh working directory under the system temp directory, with no spaces in its path (PX4's ``rcS``
-    expands it unquoted)."""
+OWNER_FILE = "relay.owner"  # the pid of the Relay that made a working directory
+_swept = False
+
+
+def _temp_base() -> Path:
     base = Path(tempfile.gettempdir())
     if " " in str(base) and os.name != "nt":
         base = Path("/tmp")
-    return Path(tempfile.mkdtemp(prefix="relay-twin-", dir=base))
+    return base
+
+
+def workdir() -> Path:
+    """A fresh working directory under the system temp directory, with no spaces in its path (PX4's ``rcS``
+    expands it unquoted). The first call removes the directories of Relays that are no longer running."""
+    global _swept
+    base = _temp_base()
+    if not _swept:
+        _swept = True
+        sweep_stale(base)
+    path = Path(tempfile.mkdtemp(prefix="relay-twin-", dir=base))
+    (path / OWNER_FILE).write_text(str(os.getpid()), "utf-8")
+    return path
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # exists, owned by someone else
+    return True
+
+
+def sweep_stale(base: Path) -> list[Path]:
+    """Remove ``relay-twin-*`` directories whose owning Relay has exited (POSIX only: ``os.kill`` is not a
+    liveness probe on Windows)."""
+    removed: list[Path] = []
+    if os.name == "nt":
+        return removed
+    try:
+        candidates = list(base.glob("relay-twin-*"))
+    except OSError:
+        return removed
+    for path in candidates:
+        try:
+            pid = int((path / OWNER_FILE).read_text("utf-8").strip())
+        except (OSError, ValueError):
+            continue  # not ours to judge: an older Relay's directory or one being created
+        if pid != os.getpid() and not _pid_alive(pid):
+            remove_tree(path)
+            removed.append(path)
+    return removed
+
+
+# ---------------------------------------------------------------------------------------------- parent death
+
+_PR_SET_PDEATHSIG = 1
+_spawn_queue: queue.SimpleQueue[tuple[Callable[[], Any], dict[str, Any], threading.Event]] | None = None
+_spawn_lock = threading.Lock()
+
+
+def _pdeathsig_hook() -> Callable[[], None] | None:
+    """Linux: a ``preexec_fn`` that has the kernel SIGKILL the child when Relay dies (resolved before
+    fork)."""
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        prctl = ctypes.CDLL(None, use_errno=True).prctl
+    except (OSError, AttributeError):
+        return None
+    parent = os.getpid()
+    kill = int(signal.SIGKILL)
+
+    def hook() -> None:
+        prctl(_PR_SET_PDEATHSIG, kill, 0, 0, 0)
+        if os.getppid() != parent:  # Relay died between fork and prctl
+            os._exit(1)
+
+    return hook
+
+
+def _spawner() -> None:
+    assert _spawn_queue is not None
+    while True:
+        fn, box, done = _spawn_queue.get()
+        try:
+            box["value"] = fn()
+        except BaseException as exc:  # handed back to the caller
+            box["error"] = exc
+        finally:
+            done.set()
+
+
+def _on_spawn_thread(fn: Callable[[], Any]) -> Any:
+    """Run ``fn`` on the one spawning thread, which lives as long as Relay: ``PR_SET_PDEATHSIG`` fires when
+    the thread that forked the child exits, and twins start on short-lived API and restart threads."""
+    global _spawn_queue
+    with _spawn_lock:
+        if _spawn_queue is None:
+            _spawn_queue = queue.SimpleQueue()
+            threading.Thread(target=_spawner, name="twin-spawner", daemon=True).start()
+    box: dict[str, Any] = {}
+    done = threading.Event()
+    _spawn_queue.put((fn, box, done))
+    done.wait()
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
+
+
+_job: int | None = None
+
+
+def _windows_job(proc: subprocess.Popen[bytes]) -> None:
+    """Windows: put the firmware in a job object that kills its processes when Relay's handle closes."""
+    global _job
+    from ctypes import wintypes
+
+    class Basic(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_int64),
+            ("PerJobUserTimeLimit", ctypes.c_int64),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class Extended(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", Basic),
+            ("IoInfo", ctypes.c_uint64 * 6),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    kernel32.SetInformationJobObject.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    with _spawn_lock:
+        if _job is None:
+            job = kernel32.CreateJobObjectW(None, None)
+            if not job:
+                raise ctypes.WinError(ctypes.get_last_error())  # type: ignore[attr-defined]
+            info = Extended()
+            info.BasicLimitInformation.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            if not kernel32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):
+                raise ctypes.WinError(ctypes.get_last_error())  # type: ignore[attr-defined]
+            _job = job  # never closed: the handle goes with Relay's process, and the firmware with it
+    if not kernel32.AssignProcessToJobObject(_job, int(proc._handle)):  # type: ignore[attr-defined]
+        raise ctypes.WinError(ctypes.get_last_error())  # type: ignore[attr-defined]
 
 
 class FirmwareProcess:
@@ -75,15 +237,27 @@ class FirmwareProcess:
             kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
         else:
             kwargs["start_new_session"] = True
-        self.proc = subprocess.Popen(
-            self.argv,
-            cwd=str(self.cwd),
-            env=self.env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            **kwargs,
-        )
+        hook = _pdeathsig_hook()
+        if hook is not None:
+            kwargs["preexec_fn"] = hook
+
+        def spawn() -> subprocess.Popen[bytes]:
+            return subprocess.Popen(
+                self.argv,
+                cwd=str(self.cwd),
+                env=self.env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                **kwargs,
+            )
+
+        self.proc = _on_spawn_thread(spawn) if hook is not None else spawn()
+        if os.name == "nt":
+            try:
+                _windows_job(self.proc)
+            except Exception:  # best effort: the graceful shutdown still stops it
+                log.exception("binding %s to Relay's lifetime failed", self.label)
         with _live_lock:
             _live.add(self)
         self._reader = threading.Thread(target=self._read, name=f"twin-out-{self.label}", daemon=True)

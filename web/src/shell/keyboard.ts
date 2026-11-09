@@ -52,7 +52,7 @@ export function comboOf(e: Pick<KeyboardEvent, 'code' | 'key' | 'metaKey' | 'ctr
   return parts.join('+')
 }
 
-const SETTINGS_SECTIONS: readonly SettingsSection[] = ['general', 'safety', 'controllers', 'copilot', 'network', 'data', 'about']
+const SETTINGS_SECTIONS: readonly SettingsSection[] = ['general', 'safety', 'controllers', 'copilot', 'network', 'autopilots', 'data', 'about']
 
 export const OVERLAY_SELECTOR = [
   'dialog-content', 'alert-dialog-content', 'sheet-content', 'popover-content', 'dropdown-menu-content',

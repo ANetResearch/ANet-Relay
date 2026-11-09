@@ -244,3 +244,45 @@ def test_sticks_replay_does_not_fight_a_mode_change(svc, stepper):
     assert "mode" in (vb.skill.detail or "")
     assert stepper.until(lambda: vb.refly is None, 5, [session])
     assert any(e["kind"] == "refly_failed" for e in svc.events.after(0, 5000))
+
+
+class _AirborneHost:
+    """An ArduPilot aircraft flying in LOITER that refuses (or has not yet confirmed) a mode change."""
+
+    autopilot = "ardupilot"
+    armed = True
+    mode = "LOITER"
+    landed = "air"
+
+    def __init__(self):
+        self.driver = self
+        self.asked: list[str] = []
+
+    def set_mode(self, name):
+        self.asked.append(name)
+
+    def altitude(self):
+        return 12.0
+
+
+def test_sticks_replay_joining_in_the_air_holds_the_throttle():
+    """Review fix (v0.5.4): the mode and arm phases of a replay never send the zero-throttle arming idle
+    to an aircraft that is already flying."""
+    from relay.skills import Skill
+
+    samples = [(0.0, 0.0, 0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0, 0.6), (2.0, 0.0, 0.0, 0.0, 0.0)]
+    skill = Skill("replay", {"mode": "ALT_HOLD", "_samples": samples, "duration_s": 2.0}, started=0.0)
+    host = _AirborneHost()
+    out = skill.tick(host, 0.0)
+    assert skill.phase == "mode" and host.asked == ["ALT_HOLD"]
+    assert out is not None and out.throttle == pytest.approx(0.5)
+    out = skill.tick(host, 0.5)
+    assert skill.phase == "mode" and out.throttle == pytest.approx(0.5)
+    host.mode = "ALT_HOLD"
+    out = skill.tick(host, 0.6)
+    assert skill.phase == "arm" and out.throttle == pytest.approx(0.5)
+    # on the ground the arming idle stays zero throttle (ArduPilot refuses to arm otherwise)
+    ground = _AirborneHost()
+    ground.armed, ground.landed = False, "ground"
+    skill = Skill("replay", {"mode": "ALT_HOLD", "_samples": samples, "duration_s": 2.0}, started=0.0)
+    assert skill.tick(ground, 0.0).throttle == 0.0

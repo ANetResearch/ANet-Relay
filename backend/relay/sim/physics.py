@@ -391,6 +391,8 @@ class Quad:
         """Fly ``frame`` from the next step (on the ground, disarmed); the battery is a full pack of it."""
         self._apply_frame(frame)
         self.battery = self._new_battery()
+        if self.airframe is not None:
+            self.set_airframe(self.airframe_spec)  # the mixer trim is in arm units of the new frame
 
     def _new_battery(self) -> Battery:
         f = self.frame
@@ -447,7 +449,7 @@ class Quad:
 
         old = self.airframe
         self.airframe_spec = spec
-        self.airframe = None if spec is None or spec.nominal else AirframeModel(spec)
+        self.airframe = None if spec is None or spec.nominal else AirframeModel(spec, self.arm)
         if old is not None and old.arms and self.airframe is not None:
             # same flight: redraw its level error (seeded by the arm count), so a change in flight keeps it
             self.airframe.arms = old.arms - 1

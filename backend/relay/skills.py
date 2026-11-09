@@ -822,13 +822,16 @@ class Skill:
         if self.phase == "start":
             self.expect_mode = self.params["mode"]
             self._phase("mode", now)
+        # joining in the air: hold the height, not the zero-throttle arming idle (records start on the ground)
+        airborne = host.armed and host.landed != "ground"
+        hold = StickInput(0.0, 0.0, 0.0, self._hold_altitude(host), source="agent") if airborne else None
         if self.phase == "mode":
-            self.out = self._idle(host)
+            self.out = hold or self._idle(host)
             if self._ensure_mode(host, self.expect_mode, now):
                 self._phase("arm", now)
             return
         if self.phase == "arm":
-            self.out = self._idle(host)
+            self.out = hold or self._idle(host)
             if host.armed or self._ensure_armed(host, now):
                 self._phase("play", now)
                 self.mode_at = now

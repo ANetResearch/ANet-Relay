@@ -8,8 +8,10 @@ import hashlib
 import io
 import json
 import math
+import os
 import tarfile
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,6 +27,7 @@ from relay.twin import params as tparams
 from relay.twin import profile as tprofile
 from relay.twin.autopilot import DEFAULT_HOME, prepare, shifted_home
 from relay.twin.packs import PackError, PackStore, current_platform, parse_manifest
+from relay.twin.process import TwinStartError
 
 PLATFORM = current_platform() or "linux-x64"
 OP = {"X-Relay-Operator": "op-token"}
@@ -371,6 +374,89 @@ def test_prepare_filters_profile_and_forces_lockstep(tmp_path):
     assert lat == pytest.approx(47.001, abs=2e-5) and lon == 8.0 and alt == 400.0
 
 
+class _FakePorts:
+    def __init__(self, n):
+        self.n = n
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+class _FakeBridge:
+    made: ClassVar[list] = []
+
+    def __init__(self, pack, n, ports, workdir):
+        self.ports, self.launched, self.closed = ports, False, False
+        _FakeBridge.made.append(self)
+
+    def launch(self, *args):
+        self.launched = True
+
+    def boot(self, twin, deadline):
+        raise TwinStartError("the firmware did not connect its MAVLink link")
+
+    def close(self):
+        self.closed = True
+        self.ports.close()
+
+
+def test_twin_reset_and_removal_during_a_restart(tmp_path, monkeypatch):
+    """Review fixes (v0.5.4): a second reset during a restart does not start a second boot, and a twin
+    removed before its restart thread got going leaves no process, files or instance number behind."""
+    import threading
+    import time
+
+    from relay.twin import autopilot as tap
+
+    store = _store(tmp_path, ["ardupilot-copter-4.7.2"])
+    twin = tap.TwinAutopilot(prepare(store.get("ardupilot-copter-4.7.2"), None, None, None), name="T")
+    monkeypatch.setattr(twin, "_open", _FakePorts)
+    monkeypatch.setattr(tap.ardupilot, "ArduPilotBridge", _FakeBridge)
+    gate, calls = threading.Event(), []
+
+    def slow_restart():
+        calls.append(1)
+        gate.wait(5)
+
+    monkeypatch.setattr(twin, "_restart", slow_restart)
+    twin.state = "running"
+    twin.reset()
+    twin.reset()
+    assert twin.state == "restarting" and twin.restarts == 1
+    gate.set()
+    for _ in range(50):
+        if calls:
+            break
+        time.sleep(0.01)
+    assert calls == [1]
+    monkeypatch.undo()
+
+    # removed before the restart thread acquired anything: it boots nothing and frees what it took
+    monkeypatch.setattr(twin, "_open", _FakePorts)
+    monkeypatch.setattr(tap.ardupilot, "ArduPilotBridge", _FakeBridge)
+    _FakeBridge.made = []
+    twin.close()
+    assert twin.state == "stopped" and twin.instance is None
+    twin._restart()
+    (bridge,) = _FakeBridge.made
+    assert not bridge.launched and bridge.closed and bridge.ports.closed
+    assert twin.instance is None and twin.workdir is None and twin.bridge is None and not twin._pending
+    # a boot that fails after removal is torn down as well
+    _FakeBridge.made = []
+    twin.state = "restarting"
+    real_publish = twin._publish
+
+    def publish_then_remove(b):
+        real_publish(b)
+        twin.state = "stopped"
+
+    monkeypatch.setattr(twin, "_publish", publish_then_remove)
+    twin._restart()
+    (bridge,) = _FakeBridge.made
+    assert bridge.launched and bridge.closed and twin.instance is None and twin.workdir is None
+
+
 # ---------------------------------------------------------------------------- HIL (PX4) and WMM
 
 
@@ -509,6 +595,46 @@ def test_pack_import_refuses_hostile_archives(tmp_path, member, word):
     assert not (tmp_path / "evil.sh").exists()
 
 
+@pytest.mark.parametrize(
+    "chain",
+    [
+        # each link stays inside lexically, but resolves through the one before it
+        [("a", "."), ("b", "a/.."), ("c", "b/.."), ("d", "c/..")],
+        [("d/l", ".."), ("l2", "d/l/.."), ("l3", "l2/..")],
+    ],
+)
+def test_pack_import_refuses_chained_links_out_of_the_pack(tmp_path, chain):
+    """Review fix (v0.5.4): links are resolved on disk, so a chain of them cannot write outside the pack."""
+    store = _store(tmp_path, [])
+    extra = [_member("px4-1.15.4/d", tarfile.DIRTYPE)] if chain[0][0].startswith("d/") else []
+    extra += [_member(f"px4-1.15.4/{name}", tarfile.SYMTYPE, link) for name, link in chain]
+    extra.append(_member(f"px4-1.15.4/{chain[-1][0]}/pwned.txt", data=b"pwned"))
+    archive = _tarball(tmp_path, "px4-1.15.4", extra)
+    with pytest.raises(PackError) as exc:
+        store.import_tarball(archive, _digest(archive))
+    assert "outside the pack" in exc.value.reason and exc.value.reason_zh
+    assert not list(tmp_path.rglob("pwned.txt"))
+    # a dangling chain written in the other order (the link before the one it climbs through) is refused too
+    (tmp_path / "late").mkdir()
+    late = _tarball(
+        tmp_path / "late",
+        "px4-1.15.4",
+        [
+            _member("px4-1.15.4/x", tarfile.SYMTYPE, "y/.."),
+            _member("px4-1.15.4/y", tarfile.SYMTYPE, "."),
+        ],
+    )
+    with pytest.raises(PackError) as exc:
+        store.import_tarball(late, _digest(late))
+    assert "entry px4-1.15.4/x resolves outside" in exc.value.reason
+    # links inside the pack (PX4's px4-* command aliases) still import
+    (tmp_path / "good").mkdir()
+    alias = _member("px4-1.15.4/bin/px4-commander", tarfile.SYMTYPE, "px4")
+    good = _tarball(tmp_path / "good", "px4-1.15.4", [alias])
+    assert store.import_tarball(good, _digest(good)).problem() is None
+    assert os.readlink(store.imported_dir / "px4-1.15.4" / "bin" / "px4-commander") == "px4"
+
+
 def test_pack_import_refuses_another_platform(tmp_path):
     store = _store(tmp_path, [])
     src = tmp_path / "src"
@@ -632,8 +758,23 @@ def test_api_packs_import_and_delete(api, svc, tmp_path):
     assert api.delete(f"{API}/autopilots/ardupilot-copter-4.7.2", headers=OP).status_code == 400
     missing = api.delete(f"{API}/autopilots/px4-1.14.0", headers=OP)
     assert missing.status_code == 404 and _code(missing) == "pack_missing"
+    # review fix (v0.5.4): a pack a twin boots from is neither deleted nor replaced under it
+    svc._twin_reserved_packs["sim-9"] = "ardupilot-copter-4.5.7"
+    for busy in (
+        api.delete(f"{API}/autopilots/ardupilot-copter-4.5.7", headers=OP),
+        api.post(f"{API}/autopilots/import", headers=OP, json=body),
+    ):
+        assert busy.status_code == 400 and _code(busy) == "pack_unsupported"
+        assert busy.json()["error"]["detail"]["reason_zh"] == "运行包正被固件孪生使用"
+    assert svc.packs.get("ardupilot-copter-4.5.7").problem() is None
+    del svc._twin_reserved_packs["sim-9"]
+    again = api.post(f"{API}/autopilots/import", headers=OP, json=body)
+    assert again.status_code == 200 and not [
+        p for p in svc.packs.imported_dir.iterdir() if p.name.startswith(".")
+    ]
     gone = api.delete(f"{API}/autopilots/ardupilot-copter-4.5.7", headers=OP)
     assert gone.json() == {"id": "ardupilot-copter-4.5.7", "deleted": True}
+    assert sorted(p.name for p in svc.packs.imported_dir.iterdir()) == ["index.json"]
 
 
 def test_api_sims_refuse_bad_twin_requests(api, svc):
@@ -738,3 +879,128 @@ def test_api_profiles_capture_from_a_real_aircraft(api, svc, stepper):
     started = api.post(f"{API}/sims", headers=OP, json={"engine": "sitl", "profile": hexa["id"]})
     assert started.status_code == 409 and _code(started) == "frame_unsupported"
     assert "FRAME_CLASS" in started.json()["error"]["detail"]["reason_zh"]
+
+
+def test_api_profile_capture_and_edit_review_fixes(api, svc, stepper, tmp_path):
+    """Review fixes (v0.5.4): capture waits for the firmware version, a battery guess the physics cannot take
+    falls back to the preset, a PUT refuses an unusable pack, and edits made while a recapture reads the
+    aircraft are kept."""
+    (vid,) = api.post(f"{API}/sims", headers=OP, json={}).json()["added"]
+    stepper.run(1.0)
+    v = svc.vehicles[vid]
+    v.kind = "real"
+    v.state["autopilot_id"] = 3
+    v.state["mav_type"] = 2
+    v.state["params"] = {
+        "ATC_RAT_RLL_P": {"value": 0.135, "type": "REAL32"},
+        "BATT_CAPACITY": {"value": 20.0, "type": "INT32"},
+        "FRAME_CLASS": {"value": 1.0, "type": "INT8"},
+    }
+    v.state["param_count"] = 3
+    v.state["version"] = None  # HEARTBEAT only: the family is known, the version is not
+    early = api.post(f"{API}/twins/profiles", headers=OP, json={"from_vehicle": vid})
+    assert early.status_code == 400 and _code(early) == "pack_unsupported"
+    assert early.json()["error"]["detail"]["reason_zh"] == "尚未识别飞机的固件"
+    v.state["version"] = {"flight_sw_version": (4 << 24) | (7 << 16) | (2 << 8) | 255}
+    captured = api.post(f"{API}/twins/profiles", headers=OP, json={"from_vehicle": vid})
+    assert captured.status_code == 200, captured.text
+    profile = captured.json()
+    pid = profile["id"]
+    assert profile["frame"]["capacity_mah"] == PRESETS[profile["frame"]["preset"]].capacity_mah
+    assert profile["firmware"]["version"] == "4.7.2"
+    # an unusable pack of the same firmware is refused, not stored as the recommendation
+    broken = svc.packs.get("ardupilot-copter-4.7.2")
+    broken.executable.chmod(0o644)
+    refused = api.put(f"{API}/twins/profiles/{pid}", headers=OP, json={"pack": "ardupilot-copter-4.7.2"})
+    assert refused.status_code == 400 and _code(refused) == "pack_unsupported"
+    assert refused.json()["error"]["detail"]["reason"] == "bin/arducopter is not executable"
+    broken.executable.chmod(0o755)
+    # a rename while the recapture reads the aircraft is not overwritten by the recapture
+    identity = svc._identity
+
+    def read_and_rename(vehicle):
+        svc.update_twin_profile(pid, {"name": "Renamed meanwhile"})
+        return identity(vehicle)
+
+    svc._identity = read_and_rename
+    try:
+        again = api.post(f"{API}/twins/profiles", headers=OP, json={"from_vehicle": vid, "profile": pid})
+    finally:
+        svc._identity = identity
+    assert again.status_code == 200, again.text
+    assert again.json()["name"] == "Renamed meanwhile"
+    # an edit of a profile deleted meanwhile does not write it back
+    assert svc.twin_profiles.delete(pid)
+    assert svc.twin_profiles.update(pid, lambda p: {**p, "name": "ghost"}) is None
+    assert svc.twin_profiles.get(pid) is None and not list((tmp_path / "twins").glob("tp-*.json"))
+    gone = api.put(f"{API}/twins/profiles/{pid}", headers=OP, json={"name": "ghost"})
+    assert gone.status_code == 404 and _code(gone) == "profile_not_found"
+
+
+@pytest.mark.skipif(not __import__("sys").platform.startswith("linux"), reason="PR_SET_PDEATHSIG is Linux")
+def test_firmware_dies_with_a_killed_relay_and_stale_workdirs_are_swept(tmp_path):
+    """Review fix (v0.5.4): firmware started on a short-lived thread survives that thread, dies with a
+    SIGKILLed Relay, and the working directories of a dead Relay are removed by the next one."""
+    import os
+    import signal
+    import subprocess
+    import sys
+    import time
+
+    from relay.twin import process as tproc
+
+    script = (
+        "import threading, time\n"
+        "from pathlib import Path\n"
+        "from relay.twin.process import FirmwareProcess\n"
+        "box = {}\n"
+        "def start():\n"
+        "    p = FirmwareProcess(['sleep', '60'], Path('.'))\n"
+        "    p.start()\n"
+        "    box['pid'] = p.pid\n"
+        "t = threading.Thread(target=start)\n"
+        "t.start()\n"
+        "t.join()\n"
+        "time.sleep(0.3)\n"
+        "print(box['pid'], flush=True)\n"
+        "time.sleep(60)\n"
+    )
+    relay = subprocess.Popen(
+        [sys.executable, "-c", script],
+        cwd=str(Path(__file__).resolve().parents[1]),
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        child = int(relay.stdout.readline())
+        os.kill(child, 0)  # alive after the starting thread ended
+        relay.send_signal(signal.SIGKILL)
+        relay.wait(5)
+        for _ in range(100):
+            try:
+                os.kill(child, 0)
+            except ProcessLookupError:
+                break
+            if Path(f"/proc/{child}/stat").read_text().split()[2] == "Z":
+                break  # killed, waiting for its reaper
+            time.sleep(0.05)
+        else:
+            os.kill(child, signal.SIGKILL)
+            pytest.fail("the firmware outlived a killed Relay")
+    finally:
+        if relay.poll() is None:
+            relay.kill()
+        relay.stdout.close()
+
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    stale = tmp_path / "relay-twin-stale"
+    stale.mkdir()
+    (stale / tproc.OWNER_FILE).write_text(str(dead.pid))
+    mine = tmp_path / "relay-twin-mine"
+    mine.mkdir()
+    (mine / tproc.OWNER_FILE).write_text(str(os.getpid()))
+    unknown = tmp_path / "relay-twin-unknown"
+    unknown.mkdir()
+    assert tproc.sweep_stale(tmp_path) == [stale]
+    assert mine.is_dir() and unknown.is_dir()

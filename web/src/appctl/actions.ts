@@ -36,8 +36,8 @@ const fail = (code: string, message: string): never => {
 
 const WORKSPACES: readonly Workspace[] = ['fly', 'agents', 'records', 'lab'] // WP-3: lab
 const VIEWS = ['overview', 'chase', 'top'] as const
-const SETTINGS_SECTIONS: readonly SettingsSection[] = ['general', 'safety', 'controllers', 'copilot', 'network', 'data', 'about']
-const CONNECT_TABS: readonly ConnectTab[] = ['scan', 'address', 'bridge']
+const SETTINGS_SECTIONS: readonly SettingsSection[] = ['general', 'safety', 'controllers', 'copilot', 'network', 'autopilots', 'data', 'about']
+const CONNECT_TABS: readonly ConnectTab[] = ['scan', 'address', 'serial', 'bridge']
 const WINDOW_ACTIONS = ['focus', 'minimize', 'maximize', 'restore', 'fullscreen'] as const
 const INPUTS = ['keyboard', 'screen', 'gamepad'] as const
 const SCREENSHOT_DEFAULT = 1280

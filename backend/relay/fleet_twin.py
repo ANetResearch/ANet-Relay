@@ -79,6 +79,7 @@ class TwinOps:
         self.packs = PackStore(imported=data / "autopilots" if data is not None else None)
         self.twin_profiles = tprofile.ProfileStore(data / "twins" if data is not None else None)
         self._twin_reserved: set[str] = set()
+        self._twin_reserved_packs: dict[str, str] = {}  # reserved (booting) id -> its pack id
 
     # ------------------------------------------------------------------ helpers
 
@@ -98,10 +99,21 @@ class TwinOps:
             raise err("not_found")
         return v, sim
 
+    def _pack_users(self, pack_id: str) -> list[str]:
+        """Simulators that run, restart or boot a twin from ``pack_id`` (fleet thread)."""
+        running = [vid for vid, t in self._twins().items() if t.pack.id == pack_id and t.state != "stopped"]
+        booting = [vid for vid, p in self._twin_reserved_packs.items() if p == pack_id]
+        return sorted(running + booting)
+
     def _twin_shutdown(self) -> None:
         """Kill every firmware process (fleet shutdown); also registered at interpreter exit."""
         for twin in self._twins().values():
             twin.close()
+        stop_all()
+
+    def _twin_kill_first(self) -> None:
+        """Kill the firmware processes at the start of shutdown: the joins that follow can outlast the grace
+        Electron gives the backend before SIGKILL. The fleet thread then sees them exit."""
         stop_all()
 
     def _close_twin(self, v: Any) -> None:
@@ -124,8 +136,11 @@ class TwinOps:
         }
 
     def import_autopilot(self, path: str, sha256: str | None = None) -> dict[str, Any]:
+        def in_use(pack_id: str) -> bool:
+            return bool(self.call(lambda: self._pack_users(pack_id)))  # type: ignore[attr-defined]
+
         try:
-            pack = self.packs.import_tarball(Path(path), sha256)
+            pack = self.packs.import_tarball(Path(path), sha256, in_use=in_use)
         except PackError as exc:
             raise _pack_error(exc) from None
         self.events.emit(  # type: ignore[attr-defined]
@@ -135,9 +150,7 @@ class TwinOps:
         return pack.view()
 
     def delete_autopilot(self, pack_id: str) -> dict[str, Any]:
-        running = self.call(  # type: ignore[attr-defined]
-            lambda: [vid for vid, t in self._twins().items() if t.pack.id == pack_id and t.state != "stopped"]
-        )
+        running = self.call(lambda: self._pack_users(pack_id))  # type: ignore[attr-defined]
         if running:
             raise _reason("pack_unsupported", "the pack runs a firmware twin", vehicles=running)
         try:
@@ -223,7 +236,7 @@ class TwinOps:
                 raise err(
                     "params_incomplete", received=info["params"]["received"], total=info["params"]["total"]
                 )
-            if info["identity"]["family"] is None:
+            if not info["identity"]["identified"] or info["identity"]["family"] is None:
                 raise _reason("pack_unsupported", "the aircraft's firmware is not identified yet")
             st = v.state
             params = {n: float(e["value"]) for n, e in st["params"].items()}
@@ -248,8 +261,13 @@ class TwinOps:
 
         got = self.call(run)  # type: ignore[attr-defined]
         identity = got["info"]["identity"]
-        if existing is not None and (existing.get("firmware") or {}).get("family") != identity["family"]:
-            raise _reason("pack_unsupported", "the pack and the profile are for different firmware")
+
+        def same_family(profile: dict[str, Any]) -> None:
+            if (profile.get("firmware") or {}).get("family") != identity["family"]:
+                raise _reason("pack_unsupported", "the pack and the profile are for different firmware")
+
+        if existing is not None:
+            same_family(existing)
         matched = ident.match(identity, self.packs.list())
         try:
             fresh = tprofile.capture(
@@ -268,28 +286,43 @@ class TwinOps:
             )
         except tprofile.ProfileError as exc:
             raise err("invalid_request", reason=exc.reason) from None
-        profile = tprofile.recapture(existing, fresh) if existing is not None else fresh
-        self.twin_profiles.save(profile)
+        if profile_id is None:
+            self.twin_profiles.save(fresh)
+            return tprofile.detail(fresh)
+
+        def recapture(current: dict[str, Any]) -> dict[str, Any]:
+            # the profile as it is now, not as it was before the vehicle was read (a rename meanwhile stays)
+            same_family(current)
+            return tprofile.recapture(current, fresh)
+
+        profile = self.twin_profiles.update(profile_id, recapture)
+        if profile is None:
+            raise err("profile_not_found", profile=profile_id)
         return tprofile.detail(profile)
 
     def update_twin_profile(self, pid: str, patch: dict[str, Any]) -> dict[str, Any]:
-        profile = self.twin_profiles.get(pid)
-        if profile is None:
+        def change(profile: dict[str, Any]) -> dict[str, Any]:
+            pack = None
+            if patch.get("pack") is not None:
+                pack = self.packs.get(str(patch["pack"]))
+                if pack is None:
+                    raise err("pack_missing", pack=str(patch["pack"]))
+                if pack.family != (profile.get("firmware") or {}).get("family"):
+                    raise _reason("pack_unsupported", "the pack and the profile are for different firmware")
+                problem = pack.problem()
+                if problem is not None:
+                    raise err("pack_unsupported", reason=problem[0], reason_zh=problem[1])
+            try:
+                updated = tprofile.edit(profile, patch, self.wall())  # type: ignore[attr-defined]
+            except tprofile.ProfileError as exc:
+                raise err("invalid_request", reason=exc.reason) from None
+            if pack is not None:
+                updated["match"] = ident.level_for(profile.get("firmware") or {}, pack)
+            return updated
+
+        updated = self.twin_profiles.update(pid, change)
+        if updated is None:
             raise err("profile_not_found", profile=pid)
-        if patch.get("pack") is not None:
-            pack = self.packs.get(str(patch["pack"]))
-            if pack is None:
-                raise err("pack_missing", pack=str(patch["pack"]))
-            if pack.family != (profile.get("firmware") or {}).get("family"):
-                raise _reason("pack_unsupported", "the pack and the profile are for different firmware")
-        try:
-            updated = tprofile.edit(profile, patch, self.wall())  # type: ignore[attr-defined]
-        except tprofile.ProfileError as exc:
-            raise err("invalid_request", reason=exc.reason) from None
-        if "pack" in patch and patch["pack"] is not None:
-            pack = self.packs.get(str(patch["pack"]))
-            updated["match"] = ident.level_for(profile.get("firmware") or {}, pack) if pack else "none"
-        self.twin_profiles.save(updated)
         return tprofile.detail(updated)
 
     def delete_twin_profile(self, pid: str) -> dict[str, Any]:
@@ -382,6 +415,7 @@ class TwinOps:
                 taken.add(f"sim-{n}")
                 ids.append(f"sim-{n}")
             self._twin_reserved.update(ids)
+            self._twin_reserved_packs.update(dict.fromkeys(ids, pack.id))
             fit = self._resolve_airframe(airframe) if airframe else None  # type: ignore[attr-defined]
             frames = [fit or self._resolve_airframe(None) for _ in ids]  # type: ignore[attr-defined]
             return ids, frames
@@ -435,6 +469,7 @@ class TwinOps:
                     twin.notify = lambda kind, data, v=v: self._twin_notice(v, kind, data)
                     self.vehicles[vid] = v  # type: ignore[attr-defined]
                     self._twin_reserved.discard(vid)
+                    self._twin_reserved_packs.pop(vid, None)
                     self.events.emit(  # type: ignore[attr-defined]
                         "sim_added",
                         vid,
@@ -459,11 +494,13 @@ class TwinOps:
 
             def release() -> None:
                 self._twin_reserved.difference_update(ids)
+                for vid in ids:
+                    self._twin_reserved_packs.pop(vid, None)
 
             try:
                 self.call(release)  # type: ignore[attr-defined]
             except RelayError:
-                self._twin_reserved.difference_update(ids)
+                release()
         return added
 
     def _twin_notice(self, v: Any, kind: str, data: dict[str, Any]) -> None:

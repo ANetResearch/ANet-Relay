@@ -451,6 +451,7 @@ test("relay_hitl: start and stop always ask, also with Allow all and on any airc
   assert.equal(alwaysApproved("relay_hitl", { vehicle: "real-1", action: "start", confirm: "HITL" }), "hitl");
   assert.equal(alwaysApproved("relay_hitl", { vehicle: "real-1", action: "stop" }), "hitl");
   assert.equal(alwaysApproved("relay_hitl", { vehicle: "real-1", action: "status" }), null);
+  assert.equal(alwaysApproved("relay_hitl", { vehicle: "real-1", action: "start" }), null); // refused before any approval
   assert.equal(alwaysApproved("device_reboot", { vehicle: "real-1" }), null);
   const status = { id: "real-1", available: true, state: "running", steps: [] };
   const routes = {

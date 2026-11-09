@@ -260,7 +260,7 @@ function useProfileSource(pid: string | null): string | null {
 export function SimBlock({ vehicleId }: { vehicleId: string }) {
   const v = useVehicle(vehicleId)
   if (!v || v.kind !== 'sim') return null
-  return <SimBody v={v} />
+  return <SimBody key={v.id} v={v} /> // keyed: the frame editor and twin state belong to one simulator
 }
 
 function SimBody({ v }: { v: Vehicle }) {

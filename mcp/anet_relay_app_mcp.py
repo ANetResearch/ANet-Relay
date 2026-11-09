@@ -218,8 +218,8 @@ def build_tools() -> list[Tool]:
             "app_open_connect",
             "open_connect",
             "Open the connect dialog on a tab: scan (discover on the network), address (connect by "
-            "address) or bridge (provision a bridge).",
-            {"tab": {"type": "string", "enum": ["scan", "address", "bridge"]}},
+            "address), serial (a flight controller on a local serial port) or bridge (provision a bridge).",
+            {"tab": {"type": "string", "enum": ["scan", "address", "serial", "bridge"]}},
         ),
         ui_tool("app_close_dialogs", "close_dialogs", "Close every dialog and floating panel."),
         ui_tool(

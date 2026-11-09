@@ -70,8 +70,11 @@ export const STICKS_TOOLS = new Set([
  * the loop rewrites and reboots a real flight controller. Returns the danger level, or null.
  */
 export function alwaysApproved(name, args) {
-  if (name === "relay_hitl" && (args?.action ?? "status") !== "status") return "hitl";
-  return null;
+  if (name !== "relay_hitl") return null;
+  const action = args?.action ?? "status";
+  // a start without confirm HITL never runs (the handler refuses it): no approval card for it
+  if (action === "status" || (action === "start" && args?.confirm !== "HITL")) return null;
+  return "hitl";
 }
 /** Device tools Relay refuses at "sticks" for every session (attitude and velocity targets fly for the agent). */
 const STICKS_HIDDEN_DEVICE = new Set(["device_attitude", "device_velocity"]);

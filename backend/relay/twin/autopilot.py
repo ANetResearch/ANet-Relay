@@ -449,8 +449,9 @@ class TwinAutopilot:
                 "utf-8",
             )
             bridge: Any = ardupilot.ArduPilotBridge(self.pack, n, ports, self.workdir)
-            self.bridge = bridge
-            bridge.launch([*self.pack.default_files(), parm], self.config.home)
+            with self._lock:
+                self._publish(bridge)
+                bridge.launch([*self.pack.default_files(), parm], self.config.home)
         else:
             script = self.workdir / "relay-params.sh"
             script.write_text(
@@ -463,10 +464,20 @@ class TwinAutopilot:
                 "utf-8",
             )
             bridge = px4.Px4Bridge(self.pack, n, ports, self.workdir)
-            self.bridge = bridge
-            bridge.launch(script)
+            with self._lock:
+                self._publish(bridge)
+                bridge.launch(script)
         self.fw_target = 0.0
         bridge.boot(self, deadline)
+
+    def _publish(self, bridge: Any) -> None:
+        """Make ``bridge`` the one ``close`` kills (under the lock, before its process starts).
+
+        A twin removed while a restart was still preparing its files gets no process at all."""
+        if self.state == "stopped":
+            bridge.close()
+            raise TwinStartError("the simulator was removed while the firmware restarted")
+        self.bridge = bridge
 
     def _teardown(self, release: bool) -> None:
         bridge, self.bridge = self.bridge, None
@@ -490,8 +501,8 @@ class TwinAutopilot:
     def reset(self) -> None:
         """Back to the spawn point on a restarted firmware with the same configuration (11 §6.3)."""
         with self._lock:
-            if self.state == "stopped":
-                return
+            if self.state in ("stopped", "restarting"):
+                return  # a restart already in flight brings the twin back to the spawn point
             self.state = "restarting"
             self._teardown(release=False)
         self.quad.reset()
@@ -510,6 +521,8 @@ class TwinAutopilot:
         except Exception as exc:
             with self._lock:
                 if self.state == "stopped":
+                    # removed mid-restart: what this thread acquired after close() is still ours to free
+                    self._teardown(release=True)
                     return
                 lines = exc.lines if isinstance(exc, TwinStartError) else []
                 reason = exc.reason if isinstance(exc, TwinStartError) else str(exc)

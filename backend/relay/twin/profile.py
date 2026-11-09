@@ -19,11 +19,12 @@ import os
 import re
 import secrets
 import threading
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from ..sim.frame import PRESETS, FrameModel, derive_from_hover, inertia_from
+from ..sim.frame import LIMITS, PRESETS, FrameModel, derive_from_hover, inertia_from
 from . import params as tparams
 
 ID_RE = re.compile(r"^tp-[0-9a-f]{8}$")
@@ -166,6 +167,13 @@ def capture(
             capacity = float(params[key])
             break
     if frame is None:
+        # the battery figures are a guess at the frame: one the physics cannot take leaves the preset's value
+        lo, hi = LIMITS["cells"]
+        if cells and not lo <= cells <= hi:
+            cells = None
+        lo, hi = LIMITS["capacity_mah"]
+        if capacity and not lo <= capacity <= hi:
+            capacity = None
         preset = guess_preset(cells, capacity)
         frame = {"preset": preset}
         if cells:
@@ -315,14 +323,35 @@ class ProfileStore:
 
     def save(self, profile: dict[str, Any]) -> None:
         with self._lock:
+            self._write(profile)
+
+    def update(self, pid: str, change: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, Any] | None:
+        """Read, change and save one profile as a single step (concurrent edits do not lose each other, and a
+        deleted profile is not written back). Returns the saved profile, or None when there is none;
+        exceptions from ``change`` leave it as it was."""
+        if not ID_RE.match(str(pid)):
+            return None
+        with self._lock:
             if self.root is None:
-                self._memory[profile["id"]] = json.loads(json.dumps(profile))
-                return
-            self.root.mkdir(parents=True, exist_ok=True)
-            path = self.root / f"{profile['id']}.json"
-            tmp = path.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(profile, indent=2, ensure_ascii=False) + "\n", "utf-8")
-            os.replace(tmp, path)
+                found = self._memory.get(pid)
+                current = json.loads(json.dumps(found)) if found is not None else None
+            else:
+                current = _load(self.root / f"{pid}.json")
+            if current is None:
+                return None
+            changed = change(current)
+            self._write(changed)
+            return changed
+
+    def _write(self, profile: dict[str, Any]) -> None:
+        if self.root is None:
+            self._memory[profile["id"]] = json.loads(json.dumps(profile))
+            return
+        self.root.mkdir(parents=True, exist_ok=True)
+        path = self.root / f"{profile['id']}.json"
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(profile, indent=2, ensure_ascii=False) + "\n", "utf-8")
+        os.replace(tmp, path)
 
     def delete(self, pid: str) -> bool:
         if not ID_RE.match(str(pid)):

@@ -106,7 +106,9 @@ INSTRUCTIONS = (
     "relay_refly repeats an earlier recorded flight. "
     "Firmware twins run the official PX4 or ArduPilot firmware (the real aircraft's version and parameters) "
     "against Relay's physics: relay_firmware_identify a real aircraft, relay_twin_profile_capture its "
-    "parameters, relay_twin_start a twin and fly it like any simulator."
+    "parameters, relay_twin_start a twin and fly it like any simulator. Capturing a profile and starting a "
+    "twin are app operations: they need the agents_app_control setting and fail with app_control_disabled "
+    "(403) while it is off."
 )
 # 06 §5 (WP-1): at agent_flight_level "sticks" (the default) agent sessions fly with sticks only.
 # Relay refuses everything else with 403 sticks_only; this server also lists only the tools that still
@@ -154,7 +156,9 @@ STICKS_INSTRUCTIONS = (
     "tools (program_guide, program_create, program_test, program_deploy). "
     "A person can take over (possess) any aircraft at any time; control calls then fail with "
     "possessed_by_human. Real aircraft need confirm='ARM' to arm and must pass preflight checks. "
-    "Firmware twins (relay_twin_start) fly the official firmware against Relay's physics like any simulator."
+    "Firmware twins (relay_twin_start) fly the official firmware against Relay's physics like any simulator; "
+    "relay_twin_start and relay_twin_profile_capture need the agents_app_control setting "
+    "(app_control_disabled, 403, while it is off)."
 )
 
 
@@ -468,10 +472,10 @@ TOOLS = [
         "Capture a twin profile from a connected real aircraft (firmware identity and the whole parameter "
         "table; hardware-specific parameters are left out). Fails with params_incomplete until every "
         "parameter is read, real_only for a simulator. `profile` recaptures into an existing profile (its "
-        "name, frame and home stay).",
+        "name, frame and home stay). App operation: needs agents_app_control, else app_control_disabled (403).",
         {
             "vehicle": VID,
-            "name": {"type": "string", "maxLength": 80},
+            "name": {"type": "string", "maxLength": 64},
             "frame": FRAME,
             "profile": PROFILE_ID,
         },
@@ -483,7 +487,8 @@ TOOLS = [
         "appears as simulators (sim-N) that fly with every flight tool. From a twin profile (the real "
         "aircraft's version and parameters) or a pack with its default parameters; neither means the newest "
         "ArduPilot pack. Returns once each firmware sends its first heartbeat (up to 15 s); errors "
-        "twin_start_failed, twin_limit, pack_missing, frame_unsupported.",
+        "twin_start_failed, twin_limit, pack_missing, frame_unsupported. App operation: needs "
+        "agents_app_control, else app_control_disabled (403).",
         {
             "profile": PROFILE_ID,
             "pack": PACK_ID,

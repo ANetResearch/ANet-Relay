@@ -361,3 +361,29 @@ def test_airframe_survives_reset_and_can_change_in_flight():
     assert p.sim.quad.airframe is None and p.sim.airframe.preset == "ideal"
     hover(p, 1.0)
     assert not p.sim.crashed
+
+
+def test_airframe_trim_and_hover_follow_the_frame():
+    """Review fix (v0.5.4): the CG trim is in arm units of the flown frame, and the hover budget uses the
+    frame's mass and thrust-to-weight ratio (the airframe's weight is relative to micro-120)."""
+    from relay.sim.frame import PRESETS
+
+    large = PRESETS["large-450"]
+    af = custom(cg_offset_cm=[3.0, 0.0])
+    quad = physics.Quad()
+    quad.set_airframe(af)
+    assert quad.airframe.cg[0] == pytest.approx(0.03 / afm.ARM_M)
+    quad.set_frame(large)
+    assert quad.airframe.cg[0] == pytest.approx(0.03 / large.arm_m)
+    k, w = quad.airframe.k, quad.airframe.weights
+    total = sum(k[i] * w[i] for i in range(4))
+    assert sum(k[i] * w[i] * afm.MOTOR_X[i] for i in range(4)) / total * large.arm_m == pytest.approx(0.03)
+    assert physics.Quad(frame=large).arm == large.arm_m
+    built = physics.Quad(frame=large)
+    built.set_airframe(af)
+    assert built.airframe.cg == quad.airframe.cg
+    # a payload a micro-120 cannot lift is light for a large-450
+    heavy = custom(payload_kg=0.2)
+    assert heavy.hover_throttle() is None
+    on_large = heavy.hover_throttle(large)
+    assert on_large is not None and on_large > Airframe().hover_throttle(large)

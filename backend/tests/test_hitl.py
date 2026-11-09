@@ -195,6 +195,34 @@ def test_baud_auto_finds_the_uart_rate_and_errors(svc, stepper, clock):
     assert bad.value.code == "invalid_request"
 
 
+def test_serial_device_must_be_a_local_port(svc, monkeypatch):
+    """Review fix (v0.5.4): pyserial URLs (network connections, file writes) and plain files are refused
+    before anything is opened; local device paths and listed ports pass."""
+    opened = []
+    svc.serial_opener = lambda device, baud: opened.append(device)
+    monkeypatch.setattr(sl, "_comports", lambda: [SimpleNamespace(device="/dev/weird0")])
+    view = {"vid": None, "autopilot": False}
+    monkeypatch.setattr(sl, "port_view", lambda info: {"device": info.device, **view})
+    for device in (
+        "socket://10.0.0.5:22",
+        "rfc2217://10.0.0.5:2217",
+        "spy:///dev/null?file=/tmp/out.txt",
+        "loop://",
+        "/home/user/.bashrc",
+        "/dev/ttyUSB0/../../etc/passwd",
+    ):
+        with pytest.raises(RelayError) as exc:
+            svc.connect_serial(device, 115200)
+        assert exc.value.code == "invalid_request", device
+    assert opened == []
+    for device in ("/dev/ttyACM0", "/dev/cu.usbmodem14101", "/dev/pts/7", "COM12", "\\\\.\\COM3"):
+        assert sl.is_port_name(device), device
+    assert sl.is_port_name("/dev/weird0")  # listed by the system
+    with pytest.raises(sl.SerialUnavailable) as raw:
+        sl.open_port("socket://127.0.0.1:9", 115200)
+    assert raw.value.cause == "invalid"
+
+
 def test_unplug_goes_stale_and_replug_reconnects(svc, stepper, board):
     vid = connect(svc, stepper, board)
     v = svc._vehicle(vid)

@@ -126,7 +126,7 @@ class HitlOps:
     def connect_serial(self, device: str, baud: int | str = "auto") -> dict[str, Any]:
         """``POST /vehicles {serial}``: open, wait for an autopilot heartbeat, add the aircraft."""
         device = str(device or "").strip()
-        if not device or len(device) > 256 or "\x00" in device:
+        if not device or len(device) > 256 or "\x00" in device or not sl.is_port_name(device):
             raise err("invalid_request", reason="serial.device must name a serial port")
         bad_rate = isinstance(baud, bool) or not isinstance(baud, int) or baud not in sl.BAUD_RATES
         if baud != "auto" and bad_rate:

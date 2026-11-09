@@ -69,7 +69,7 @@ class AirframeOps:
             "params": af.params(),
             "active": not sim.hover_assist or af.with_assist,
             "level_now_deg": _level_now(sim),
-            "hover_throttle": af.hover_throttle(),
+            "hover_throttle": af.hover_throttle(sim.quad.frame),
             "limits": {name: list(bounds) for name, bounds in LIMITS.items()},
         }
 

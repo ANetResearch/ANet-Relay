@@ -28,6 +28,7 @@ import tarfile
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -304,8 +305,14 @@ class PackStore:
 
     # ------------------------------------------------------------------ import and delete
 
-    def import_tarball(self, archive: Path, sha256: str | None = None) -> Pack:
-        """Verify ``archive`` and install it into the imported directory; returns the new pack."""
+    def import_tarball(
+        self,
+        archive: Path,
+        sha256: str | None = None,
+        in_use: Callable[[str], bool] | None = None,
+    ) -> Pack:
+        """Verify ``archive`` and install it into the imported directory; returns the new pack. ``in_use``
+        says whether a twin runs or boots from a pack id: such a pack is not replaced under it."""
         if self.imported_dir is None:
             raise PackError(
                 "this Relay has no data directory to import packs into", "此 Relay 没有可导入运行包的数据目录"
@@ -351,9 +358,9 @@ class PackStore:
                 if problem is not None:
                     raise PackError(*problem)
                 target = root / pack_id
-                if target.exists():
-                    shutil.rmtree(target)
-                (staging / pack_id).rename(target)
+                if target.exists() and in_use is not None and in_use(pack_id):
+                    raise PackError(IN_USE[0], IN_USE[1])
+                _replace(staging / pack_id, target, staging / ".replaced")
                 self._write_index(root, pack_id, digest)
             finally:
                 shutil.rmtree(staging, ignore_errors=True)
@@ -372,8 +379,13 @@ class PackStore:
                     )
                 raise KeyError(pack_id)
             assert self.imported_dir is not None
-            shutil.rmtree(imported[pack_id].path)
-            self._write_index(self.imported_dir, pack_id, None)
+            path = imported[pack_id].path
+            trash = Path(tempfile.mkdtemp(prefix=".delete-", dir=self.imported_dir))
+            try:
+                _move(path, trash / pack_id)
+                self._write_index(self.imported_dir, pack_id, None)
+            finally:
+                shutil.rmtree(trash, ignore_errors=True)
 
     @staticmethod
     def _write_index(root: Path, pack_id: str, digest: str | None) -> None:
@@ -387,6 +399,30 @@ class PackStore:
         tmp = root / "index.json.tmp"
         tmp.write_text(json.dumps(body, indent=2) + "\n", "utf-8")
         os.replace(tmp, root / "index.json")
+
+
+IN_USE = ("the pack runs a firmware twin", "运行包正被固件孪生使用")
+
+
+def _move(source: Path, target: Path) -> None:
+    """Rename a pack directory; a pack whose files are open (Windows: a running firmware) stays whole."""
+    try:
+        source.rename(target)
+    except OSError as exc:
+        raise PackError(f"the pack directory cannot be moved ({exc})", "无法移动运行包目录") from None
+
+
+def _replace(new: Path, target: Path, aside: Path) -> None:
+    """Install ``new`` at ``target``; an existing pack is moved ``aside`` first and put back on failure."""
+    if target.exists():
+        _move(target, aside)
+        try:
+            _move(new, target)
+        except PackError:
+            aside.rename(target)
+            raise
+    else:
+        _move(new, target)
 
 
 def _sha256(path: Path) -> str:
@@ -460,22 +496,40 @@ def _extract(archive: Path, dest: Path) -> str:
             total += max(0, m.size)
             if total > MAX_UNPACKED_BYTES:
                 raise PackError("the archive unpacks to more than 512 MB", "压缩包解压后超过 512 MB")
-        for m in members:
-            target = dest / m.name
-            if m.isdir():
-                target.mkdir(parents=True, exist_ok=True)
-            elif m.issym():
-                target.parent.mkdir(parents=True, exist_ok=True)
-                os.symlink(m.linkname, target)
-            else:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                source = tar.extractfile(m)
-                if source is None:
-                    raise PackError(f"entry {m.name} cannot be read", f"无法读取条目 {m.name}")
-                with source, target.open("wb") as out:
-                    shutil.copyfileobj(source, out)
-                mode = stat.S_IMODE(m.mode) & 0o755
-                os.chmod(target, mode | stat.S_IRUSR | stat.S_IWUSR)
+        # The checks above are lexical; links made earlier in the archive can still chain out of the pack
+        # (a -> ., b -> a/.., ...). So every path is resolved on disk before anything is written through
+        # it, and every link once all of them exist.
+        root = os.path.join(os.path.realpath(dest), top)
+
+        def inside(path: Path, name: str) -> None:
+            real = os.path.realpath(path)
+            if real != root and not real.startswith(root + os.sep):
+                raise PackError(f"entry {name} resolves outside the pack", f"条目 {name} 解析到运行包之外")
+
+        try:
+            for m in members:
+                target = dest / m.name
+                inside(target, m.name)
+                if m.isdir():
+                    target.mkdir(parents=True, exist_ok=True)
+                elif m.issym():
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    os.symlink(m.linkname, target)
+                else:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    inside(target, m.name)
+                    source = tar.extractfile(m)
+                    if source is None:
+                        raise PackError(f"entry {m.name} cannot be read", f"无法读取条目 {m.name}")
+                    with source, target.open("wb") as out:
+                        shutil.copyfileobj(source, out)
+                    mode = stat.S_IMODE(m.mode) & 0o755
+                    os.chmod(target, mode | stat.S_IRUSR | stat.S_IWUSR)
+            for m in members:
+                if m.issym():
+                    inside(dest / m.name, m.name)
+        except OSError as exc:
+            raise PackError(f"the archive cannot be unpacked ({exc})", "压缩包无法解压") from None
     return top
 
 

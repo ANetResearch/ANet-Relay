@@ -89,7 +89,9 @@ ACTIONS: list[dict[str, Any]] = [
         "open_connect",
         "Open the connect dialog.",
         "打开接入对话框。",
-        _arg("tab", "string", "Tab to show.", "要显示的页签。", False, ["scan", "address", "bridge"]),
+        _arg(
+            "tab", "string", "Tab to show.", "要显示的页签。", False, ["scan", "address", "serial", "bridge"]
+        ),
     ),
     _action("close_dialogs", "Close every dialog and panel.", "关闭所有对话框与面板。"),
     _action(

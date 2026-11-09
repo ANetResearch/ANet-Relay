@@ -93,7 +93,7 @@
 | `set_view` | `{view}` | 舞台视角 |
 | `open_inspector` / `close_inspector` | `{tab?}` | 检查器与页签 |
 | `open_settings` | `{section?}` | 打开设置 |
-| `open_connect` | `{tab?: "scan"\|"address"\|"bridge"}` | 打开接入对话框 |
+| `open_connect` | `{tab?: "scan"\|"address"\|"serial"\|"bridge"}` | 打开接入对话框 |
 | `close_dialogs` | – | 关闭所有对话框与面板 |
 | `set_pref` | `{key, value}` | 修改界面偏好（单位、起始视角、手柄死区、Expo、穿环时自动追尾） |
 | `notify` | `{text, level?: "info"\|"warn"}` | 在界面显示提示 |

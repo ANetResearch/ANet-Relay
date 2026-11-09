@@ -41,7 +41,8 @@ import random
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from .physics import ARM, MASS, ROTOR_DIR, THRUST_TO_WEIGHT, G, throttle_for_fraction
+from .frame import DEFAULT_FRAME, FrameModel
+from .physics import ARM, MASS, ROTOR_DIR, G, throttle_for_fraction
 
 PRESETS = ("ideal", "typical", "rough", "custom")
 GENERATED = ("ideal", "typical", "rough")
@@ -137,10 +138,12 @@ class Airframe:
         """What the snapshot shows (06 §4): the preset name and seed only."""
         return {"preset": self.preset, "seed": self.seed}
 
-    def hover_throttle(self) -> float | None:
-        """Level hover throttle out of ground effect at full battery; None when the airframe cannot lift."""
-        model = AirframeModel(self)
-        need = self.total_mass / (MASS * THRUST_TO_WEIGHT)
+    def hover_throttle(self, frame: FrameModel | None = None) -> float | None:
+        """Level hover throttle out of ground effect at full battery on ``frame`` (micro-120 when None); None
+        when the airframe cannot lift. The airframe's take-off weight is relative to micro-120."""
+        f = frame or DEFAULT_FRAME
+        model = AirframeModel(self, f.arm_m)
+        need = (f.mass_kg + self.total_mass - MASS) / (f.mass_kg * f.thrust_to_weight)
         if model.thrust_fraction(1.0) < need:
             return None
         lo, hi = 0.0, 1.0
@@ -314,6 +317,7 @@ class AirframeModel:
     """Runtime state of an airframe inside ``physics.Quad`` (fleet thread only)."""
 
     spec: Airframe
+    arm_m: float = ARM_M  # the frame's rotor lever arm (physics.Quad.arm)
     k: list[float] = field(init=False)
     weights: list[float] = field(init=False)
 
@@ -325,7 +329,7 @@ class AirframeModel:
         self.k = k
         self.mass = af.total_mass
         self.cg_m = (af.cg_offset_cm[0] / 100.0, af.cg_offset_cm[1] / 100.0)  # forward, right
-        self.cg = (self.cg_m[0] / ARM_M, self.cg_m[1] / ARM_M)  # arm units
+        self.cg = (self.cg_m[0] / self.arm_m, self.cg_m[1] / self.arm_m)  # arm units of this frame
         self.base_trim = (math.radians(af.level_trim_deg[0]), math.radians(af.level_trim_deg[1]))
         dx, dy = self.cg
         matrix = [

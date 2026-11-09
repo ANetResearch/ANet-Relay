@@ -75,9 +75,23 @@ const fetched = new Set<string>()
 const levelErrors = new Map<string, { key: string; at: number; rad: [number, number] }>()
 const LEVEL_REFRESH_MS = 3000
 
-function levelError(v: Vehicle, now: number): [number, number] {
+/** Seq of each simulator's last sim_airframe_changed: an edit of the values alone keeps the preset and seed. */
+const airframeRevs = new Map<string, number>()
+let airframeSeen = 0
+useRelay.subscribe((s) => {
+  if (s.lastSeq < airframeSeen) airframeSeen = 0 // the store was reset (another backend)
+  if (s.lastSeq === airframeSeen) return
+  for (let i = s.events.length - 1; i >= 0 && s.events[i].seq > airframeSeen; i--) {
+    const e = s.events[i]
+    if (e.kind === 'sim_airframe_changed' && e.vehicle) airframeRevs.set(e.vehicle, Math.max(e.seq, airframeRevs.get(e.vehicle) ?? 0))
+  }
+  airframeSeen = s.lastSeq
+})
+
+export function levelError(v: Vehicle, now: number): [number, number] {
   if (v.kind !== 'sim' || !v.sim) return [0, 0]
-  const key = `${v.armed}:${v.sim.hover_assist}:${v.sim.airframe.preset}:${v.sim.airframe.seed}`
+  const rev = airframeRevs.get(v.id) ?? 0
+  const key = `${v.armed}:${v.sim.hover_assist}:${v.sim.airframe.preset}:${v.sim.airframe.seed}:${rev}`
   const got = levelErrors.get(v.id)
   if (!got || got.key !== key || (v.armed && now - got.at > LEVEL_REFRESH_MS)) {
     levelErrors.set(v.id, { key, at: now, rad: got?.rad ?? [0, 0] })

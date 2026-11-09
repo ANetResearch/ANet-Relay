@@ -41,7 +41,7 @@ function ActionButton({ icon, label, block, busy, onClick, data }: { icon: IconK
 export function FirmwareBlock({ vehicleId }: { vehicleId: string }) {
   const v = useVehicle(vehicleId)
   if (!v || v.kind !== 'real') return null
-  return <FirmwareBody v={v} />
+  return <FirmwareBody key={v.id} v={v} /> // keyed: failures and busy state belong to one aircraft
 }
 
 function FirmwareBody({ v }: { v: Vehicle }) {
