@@ -151,8 +151,10 @@ PX4_SIM_MODEL=none_iris RELAY_PX4_PARAMS=<file> \
 
 PX4 then connects to the HIL simulator on TCP `4560 + n` and blocks until Relay accepts. The pack path may
 contain spaces (`/Applications/ANet Relay.app/...`), the working directory must not: `rcS` expands it
-unquoted. PX4's MAVLink UDP sockets bind every interface (`0.0.0.0:18570 + n`); PX4 has no bind-address
-option.
+unquoted. Stock PX4 binds its MAVLink UDP sockets on every interface and has no bind-address option, so the
+packs Relay builds carry one source change (`autopilots.yml`, step "Bind MAVLink to loopback"):
+`Mavlink::init_udp` binds `INADDR_LOOPBACK`. Flight code is untouched. The baseline also sets
+`UXRCE_DDS_CFG 0`, so no micro-ROS client sends to `127.0.0.1:8888`.
 
 ## Building
 

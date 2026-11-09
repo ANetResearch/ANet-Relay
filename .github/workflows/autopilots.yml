@@ -255,6 +255,21 @@ jobs:
             git -C "${nuttx}" tag nuttx-0.0.0
           fi
           git describe --tags --always
+      - name: Bind MAVLink to loopback
+        working-directory: ${{ runner.temp }}/px4
+        run: |
+          # A twin never listens beyond this computer (11 §2): PX4's MAVLink UDP links bind 127.0.0.1, not every
+          # interface. Flight code is untouched.
+          python - <<'PY'
+          import pathlib, sys
+          p = pathlib.Path("src/modules/mavlink/mavlink_main.cpp")
+          s = p.read_text()
+          old = "_myaddr.sin_addr.s_addr = htonl(INADDR_ANY);"
+          if s.count(old) != 1:
+              sys.exit("loopback patch: expected exactly one INADDR_ANY bind in mavlink_main.cpp")
+          p.write_text(s.replace(old, "_myaddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);"))
+          print("MAVLink UDP links bind 127.0.0.1")
+          PY
       - name: Build SITL
         working-directory: ${{ runner.temp }}/px4
         run: |

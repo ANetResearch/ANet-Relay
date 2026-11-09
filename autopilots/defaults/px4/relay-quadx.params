@@ -31,3 +31,6 @@ param set-default CA_ROTOR2_PX 0.088
 param set-default CA_ROTOR2_PY -0.088
 param set-default CA_ROTOR3_PX -0.088
 param set-default CA_ROTOR3_PY 0.088
+#
+# No micro-ROS agent link: the XRCE-DDS client would otherwise send to 127.0.0.1:8888 (11 §2).
+param set-default UXRCE_DDS_CFG 0
