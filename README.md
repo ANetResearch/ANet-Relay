@@ -19,7 +19,7 @@ Fly a small drone fleet with people, LLM agents and 50 Hz onboard programs, and 
 
 <br/>
 
-<img src="docs/media/readme/fly-dogfight.gif" alt="The Fly stage during a six-aircraft dogfight: red voxel tracers, hits and a voxel explosion, with the leaderboard" width="100%" />
+<img src="docs/media/readme/fly-dogfight.webp" alt="The Fly stage during a six-aircraft dogfight: red voxel tracers, hits and a voxel explosion, with the leaderboard" width="100%" />
 
 <sub>The Fly stage during a six-aircraft dogfight: four gunners and two rammers, flown with sticks only. Recorded frame by frame from the app's renderer playing the built-in demo scene (<code>?fixture=dogfight</code>).</sub>
 
@@ -37,15 +37,15 @@ When the person lets go, control is relayed back to the agent that held it. Real
 
 <table>
 <tr>
-<td width="50%"><img src="docs/media/readme/relay.gif" alt="Streams of voxels from a gamepad to several drones; the red stream moves from one drone to another" width="100%" /></td>
+<td width="50%"><img src="docs/media/readme/relay.webp" alt="Streams of voxels from a gamepad to several drones; the red stream moves from one drone to another" width="100%" /></td>
 <td width="50%"><h3>Possess and hand back</h3>Press <code>P</code> to take any aircraft from its agent; release it and the agent gets <code>relay_handback</code>. A timeline shows who flew what. Up to four gamepads or RC transmitters fly four aircraft at once.</td>
 </tr>
 <tr>
 <td><h3>Dogfights in one sentence</h3>Tell Copilot <i>"six-aircraft free-for-all, four gunners and two rammers"</i>. Relay spawns the simulators, deploys the programs and starts the fight: red voxel tracers, voxel explosions, rams that crash both aircraft.</td>
-<td><img src="docs/media/readme/dogfight.gif" alt="Quadcopters in a voxel arena exchanging red tracers; one bursts into voxels" width="100%" /></td>
+<td><img src="docs/media/readme/dogfight.webp" alt="Quadcopters in a voxel arena exchanging red tracers; one bursts into voxels" width="100%" /></td>
 </tr>
 <tr>
-<td><img src="docs/media/readme/physics.gif" alt="A quadcopter inside its collision sphere, with rotor thrust arrows and a reaction-torque arc" width="100%" /></td>
+<td><img src="docs/media/readme/physics.webp" alt="A quadcopter inside its collision sphere, with rotor thrust arrows and a reaction-torque arc" width="100%" /></td>
 <td><h3>Rotor physics after Gazebo</h3>A 6-DOF rigid body with four rotors modelled on Gazebo's <code>MulticopterMotorModel</code>, a cascaded flight controller, collision volumes and solid rings at 250 Hz. Deterministic, and 13x faster than real time when judging.</td>
 </tr>
 <tr>

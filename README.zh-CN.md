@@ -19,7 +19,7 @@
 
 <br/>
 
-<img src="docs/media/readme/fly-dogfight.gif" alt="六机狗斗中的飞行舞台：红色体素曳光弹、命中与体素爆炸，以及排行榜" width="100%" />
+<img src="docs/media/readme/fly-dogfight.webp" alt="六机狗斗中的飞行舞台：红色体素曳光弹、命中与体素爆炸，以及排行榜" width="100%" />
 
 <sub>六机狗斗中的飞行舞台：四架开火手、两架撞击手，全部只用摇杆级控制。由应用渲染器播放内置演示场景（<code>?fixture=dogfight</code>）逐帧录制。</sub>
 
@@ -37,15 +37,15 @@
 
 <table>
 <tr>
-<td width="50%"><img src="docs/media/readme/relay.gif" alt="体素光流从手柄连向多架无人机，红色光流从一架移到另一架" width="100%" /></td>
+<td width="50%"><img src="docs/media/readme/relay.webp" alt="体素光流从手柄连向多架无人机，红色光流从一架移到另一架" width="100%" /></td>
 <td width="50%"><h3>接管与交还</h3>按 <code>P</code> 从 Agent 手中接管任意飞机；松手后 Agent 收到 <code>relay_handback</code>。时间线记录每架飞机由谁驾驶。最多四个手柄或遥控器同时驾驶四架飞机。</td>
 </tr>
 <tr>
 <td><h3>一句话开狗斗</h3>对 Copilot 说<i>“开一场 6 机混战，4 架开火、2 架撞击”</i>。Relay 生成仿真机、部署程序并开战：红色体素曳光弹、体素爆炸，高速撞击双方同时坠毁。</td>
-<td><img src="docs/media/readme/dogfight.gif" alt="体素竞技场中四旋翼互射红色曳光弹，其中一架炸成体素" width="100%" /></td>
+<td><img src="docs/media/readme/dogfight.webp" alt="体素竞技场中四旋翼互射红色曳光弹，其中一架炸成体素" width="100%" /></td>
 </tr>
 <tr>
-<td><img src="docs/media/readme/physics.gif" alt="碰撞球内的四旋翼，带旋翼推力箭头与反扭矩弧线" width="100%" /></td>
+<td><img src="docs/media/readme/physics.webp" alt="碰撞球内的四旋翼，带旋翼推力箭头与反扭矩弧线" width="100%" /></td>
 <td><h3>参照 Gazebo 的旋翼物理</h3>六自由度刚体，四个旋翼参照 Gazebo <code>MulticopterMotorModel</code> 建模，串级飞控，250 Hz 下的碰撞体积与实体圆环。结果可复现，评测时比实时快 13 倍。</td>
 </tr>
 <tr>
