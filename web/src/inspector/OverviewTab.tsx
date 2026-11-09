@@ -1,5 +1,6 @@
-// Inspector Overview (02 §11): preflight summary (opens Control), key values in two columns, flight health (03 §5.9),
-// video group (WP7), the last three status texts, capabilities.
+// Inspector Overview (02 §11): preflight summary (opens Control), key values in two columns, the firmware block of a
+// real aircraft or the simulator block (11 §11), flight health (03 §5.9), video group (WP7), the last three status
+// texts, capabilities.
 import * as React from 'react'
 import type { Vehicle } from '@/api'
 import { duration } from '@/lib/format'
@@ -13,6 +14,8 @@ import { useT8, type AnyKey } from '@/fleet/copy'
 import { useLength } from '@/settings/prefs'
 import { HealthBlock } from './HealthBlock'
 import { AirframeGroup } from './AirframeGroup' // WP-2a
+import { FirmwareBlock } from '@/twin/FirmwareBlock' // 11 §11
+import { SimBlock } from '@/twin/SimBlock' // 11 §11
 import { Block } from './parts'
 import { useInspectorTab } from './tabs'
 
@@ -133,6 +136,9 @@ export function OverviewTab({ vehicleId }: { vehicleId: string }) {
           </span>
         </Readout>
       </div>
+      {/* 11 §11: the firmware of a real aircraft; a simulator's engine, reset, frame and twin details */}
+      <FirmwareBlock vehicleId={vehicleId} />
+      <SimBlock vehicleId={vehicleId} />
       <HealthBlock health={v.health} />
       <AirframeGroup vehicleId={vehicleId} />
       <Block title={t('video.group')}>

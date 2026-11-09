@@ -2,7 +2,8 @@
 // {"error": {code, message_en, message_zh, detail}} become RelayApiError. The transport is swappable so the dev
 // fixture (src/dev/fixtures.ts) can serve the same calls without a backend.
 import { env } from './env'
-import type { Alert, ErrorBody, Fleet, Health, ProcedureCatalogue, ProcedureRun, SimAirframe, TestRuns, Vehicle } from './types'
+import type { Alert, AutopilotPack, AutopilotPacks, ErrorBody, Fleet, Health, ProcedureCatalogue, ProcedureRun, SimAirframe, SimFrame, SimTwin, TestRuns, TwinProfile, TwinProfiles, Vehicle, VehicleFirmware } from './types'
+import type { HitlAction, HitlStatus, SerialBaud, SerialPorts } from './hitl'
 import type { RelayEvent } from './events'
 
 export class RelayApiError extends Error {
@@ -181,7 +182,34 @@ export const api = {
     request<TestRuns>('GET', `/test-runs?${new URLSearchParams(vehicle ? { vehicle, limit: String(limit) } : { limit: String(limit) })}`),
   testRun: (runId: number) => request<ProcedureRun>('GET', `/test-runs/${enc(String(runId))}`),
   testRunExportUrl: (runId: number, fmt: 'md' | 'json') => `${env().apiBase}/test-runs/${enc(String(runId))}/export?fmt=${fmt}`,
+  // firmware twins (11 §3-§6, §10): packs, identity, profiles, twin details and frames
+  autopilots: () => request<AutopilotPacks>('GET', '/autopilots'),
+  importAutopilot: (path: string, sha256?: string) => op<AutopilotPack>('POST', '/autopilots/import', sha256 ? { path, sha256 } : { path }),
+  deleteAutopilot: (id: string) => op<{ id: string; deleted: boolean }>('DELETE', `/autopilots/${enc(id)}`),
+  vehicleFirmware: (id: string) => request<VehicleFirmware>('GET', `/vehicles/${enc(id)}/firmware`),
+  twinProfiles: () => request<TwinProfiles>('GET', '/twins/profiles'),
+  twinProfile: (pid: string) => request<TwinProfile>('GET', `/twins/profiles/${enc(pid)}`),
+  captureTwinProfile: (body: TwinCaptureBody) => op<TwinProfile>('POST', '/twins/profiles', body),
+  updateTwinProfile: (pid: string, patch: TwinProfilePatch) => op<TwinProfile>('PUT', `/twins/profiles/${enc(pid)}`, patch),
+  deleteTwinProfile: (pid: string) => op<{ id: string; deleted: boolean }>('DELETE', `/twins/profiles/${enc(pid)}`),
+  simTwin: (id: string) => request<SimTwin>('GET', `/sims/${enc(id)}/twin`),
+  setSimFrame: (id: string, frame: FrameBody) => op<SimFrame>('PUT', `/sims/${enc(id)}/frame`, frame),
+  // 11 §7: USB serial link and PX4 hardware in the loop
+  serialPorts: () => request<SerialPorts>('GET', '/serial/ports'),
+  connectSerial: (device: string, baud: SerialBaud = 'auto') => op<Ok>('POST', '/vehicles', { serial: { device, baud } }),
+  hitl: (id: string) => request<HitlStatus>('GET', `/vehicles/${enc(id)}/hitl`),
+  hitlAction: (id: string, action: HitlAction, confirm?: string) =>
+    op<HitlStatus>('POST', `/vehicles/${enc(id)}/hitl`, confirm === undefined ? { action } : { action, confirm }),
 } as const
+
+/** A simulator frame (11 §8.1): a preset and any of its values; omitted values keep the preset's. */
+export type FrameBody = { preset?: 'micro-120' | 'small-250' | 'large-450'; mass_kg?: number; wheelbase_m?: number; prop_in?: number; cells?: number; capacity_mah?: number }
+/** A twin's home: latitude, longitude and altitude above mean sea level. */
+export type HomeBody = { lat: number; lon: number; alt_m?: number }
+/** POST /twins/profiles (11 §5): capture from a connected aircraft, or recapture into `profile`. */
+export type TwinCaptureBody = { from_vehicle: string; name?: string; frame?: FrameBody; profile?: string }
+/** PUT /twins/profiles/{pid}: rename, change the frame or the pack (same firmware), set or clear the home. */
+export type TwinProfilePatch = { name?: string; frame?: FrameBody; pack?: string; home?: HomeBody | null }
 
 /** PUT /sims/{vid}/airframe (WP-2a, 06 §4): a generated preset from a seed, or values that make it custom. */
 export type AirframeBody = { preset?: SimAirframe['preset']; params?: Partial<SimAirframe['params']>; seed?: number }

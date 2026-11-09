@@ -7,6 +7,9 @@ import { useRelay } from '@/store/relay'
 import { useUi } from '@/store/ui'
 import type { IconKey } from '@/ui/icons'
 import { addSim, possess, release, scanNetwork, stopAll, stopVehicle } from './actions'
+import { resetSim } from '@/twin/actions'
+import { canResetSim } from '@/twin/model'
+import { tt } from '@/twin/strings'
 
 export type CommandGroup = 'navigation' | 'aircraft' | 'fleet' | 'view' | 'app'
 
@@ -44,6 +47,7 @@ function shellCommands(): Command[] {
     { id: 'fleet.scan', group: 'fleet', label: t('cmd.scan'), icon: 'scan', run: scanNetwork },
     { id: 'fleet.connect', group: 'fleet', label: t('cmd.connect'), icon: 'connect', run: () => ui.openConnect('address') },
     { id: 'fleet.bridge', group: 'fleet', label: t('cmd.bridge'), icon: 'wifi', run: () => ui.openConnect('bridge') },
+    { id: 'fleet.serial', group: 'fleet', label: tt('serial.tab'), icon: 'usb', keywords: ['serial', 'usb', 'hitl', '串口'], run: () => ui.openConnect('serial') }, // 11 §7.1
     { id: 'fleet.addSim', group: 'fleet', label: t('cmd.addSim'), icon: 'sim', run: addSim },
     { id: 'view.fleet', group: 'view', label: t('cmd.toggleFleet'), icon: 'panel.left', shortcut: `⌥${MOD}B`, run: () => ui.toggleFleet() },
     { id: 'view.inspector', group: 'view', label: t('cmd.toggleInspector'), icon: 'panel.right', shortcut: `⌥${MOD}I`, run: () => ui.toggleInspector() },
@@ -63,6 +67,8 @@ function shellCommands(): Command[] {
       out.push({ id: `ac.possess.${v.id}`, group: 'aircraft', label: t('cmd.possess', { aircraft: v.label }), icon: 'possess', keywords: kw, run: () => possess(v.id) })
     }
     out.push({ id: `ac.stop.${v.id}`, group: 'aircraft', label: t('cmd.stopOne', { aircraft: v.label }), icon: 'stop', keywords: kw, run: () => stopVehicle(v.id) })
+    // v0.5.4: a disarmed or crashed simulator resets from the palette too
+    if (canResetSim(v)) out.push({ id: `ac.reset.${v.id}`, group: 'aircraft', label: tt('reset.cmd', { aircraft: v.label }), icon: 'reset', keywords: [...kw, 'reset', 'crashed', '复位', '坠毁'], run: () => void resetSim(v.id) })
   }
   return out
 }

@@ -85,3 +85,100 @@ export const easeSmoothOut = cubicBezier(0.22, 1, 0.36, 1)
 
 export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 export const lerp = (a: number, b: number, t: number) => a + (b - a) * t
+
+// ---------------------------------------------------------------- attitude quaternions (11 §8.5)
+// The stage smooths attitude as a quaternion (slerp) rather than as Euler angles: inverted flight, a full roll and
+// a tumbling wreck pass through the Euler singularities (pitch ±90°, roll ±180°) where the angles jump although the
+// airframe barely moves. Quaternions are [x, y, z, w] in the scene frame, the order three.js uses.
+
+export type Quat = [number, number, number, number]
+
+const axisQuat = (ax: 0 | 1 | 2, angle: number): Quat => {
+  const s = Math.sin(angle / 2)
+  const q: Quat = [0, 0, 0, Math.cos(angle / 2)]
+  q[ax] = s
+  return q
+}
+
+/** Hamilton product a * b (apply b, then a). */
+export function quatMul(a: Quat, b: Quat): Quat {
+  const [ax, ay, az, aw] = a
+  const [bx, by, bz, bw] = b
+  return [aw * bx + ax * bw + ay * bz - az * by, aw * by - ax * bz + ay * bw + az * bx, aw * bz + ax * by - ay * bx + az * bw, aw * bw - ax * bx - ay * by - az * bz]
+}
+
+export function quatNormalize(q: Quat): Quat {
+  const n = Math.hypot(q[0], q[1], q[2], q[3]) || 1
+  return [q[0] / n, q[1] / n, q[2] / n, q[3] / n]
+}
+
+export const quatConj = (q: Quat): Quat => [-q[0], -q[1], -q[2], q[3]]
+
+/** The scene orientation of an attitude: the same rotation as attitudeEuler in order YXZ (yaw, then pitch, then roll). */
+export function attitudeQuat(roll: number, pitch: number, yaw: number): Quat {
+  return quatMul(quatMul(axisQuat(1, -yaw), axisQuat(0, pitch)), axisQuat(2, -roll))
+}
+
+/** Rotation about scene +Y that turns the nose to a compass yaw (the yaw group of an aircraft). */
+export const yawQuat = (yaw: number): Quat => axisQuat(1, -yaw)
+
+/** Spherical interpolation from a to b by t along the shorter arc (q and -q are the same orientation). */
+export function quatSlerp(a: Quat, b: Quat, t: number): Quat {
+  let [bx, by, bz, bw] = b
+  let cos = a[0] * bx + a[1] * by + a[2] * bz + a[3] * bw
+  if (cos < 0) {
+    cos = -cos
+    bx = -bx
+    by = -by
+    bz = -bz
+    bw = -bw
+  }
+  if (cos > 0.9995) return quatNormalize([a[0] + (bx - a[0]) * t, a[1] + (by - a[1]) * t, a[2] + (bz - a[2]) * t, a[3] + (bw - a[3]) * t])
+  const theta = Math.acos(Math.min(1, cos))
+  const sin = Math.sin(theta)
+  const wa = Math.sin((1 - t) * theta) / sin
+  const wb = Math.sin(t * theta) / sin
+  return [a[0] * wa + bx * wb, a[1] * wa + by * wb, a[2] * wa + bz * wb, a[3] * wa + bw * wb]
+}
+
+/** Angle in radians between two orientations (0..pi). */
+export function quatAngle(a: Quat, b: Quat): number {
+  const d = Math.abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3])
+  return 2 * Math.acos(Math.min(1, d))
+}
+
+/** v rotated by q. */
+export function quatRotate(q: Quat, v: Vec3): Vec3 {
+  const r = quatMul(quatMul(q, [v[0], v[1], v[2], 0]), quatConj(q))
+  return [r[0], r[1], r[2]]
+}
+
+/**
+ * Compass heading of an orientation: the nose (local -Z) projected on the ground; when the nose points almost
+ * straight up or down, the belly or back direction instead. Continuous through inverted flight and loops.
+ */
+export function quatHeading(q: Quat, fallback = 0): number {
+  let [x, , z] = quatRotate(q, [0, 0, -1])
+  if (Math.hypot(x, z) < 0.2) {
+    const up = quatRotate(q, [0, 1, 0])
+    const nose = quatRotate(q, [0, 0, -1])
+    // nose up: the belly faces the way the aircraft is heading; nose down: the back does
+    const s = nose[1] > 0 ? -1 : 1
+    x = s * up[0]
+    z = s * up[2]
+    if (Math.hypot(x, z) < 1e-6) return fallback
+  }
+  // scene north is -Z, east +X; compass yaw is clockwise from north
+  return Math.atan2(x, -z)
+}
+
+/**
+ * One frame of the stage's attitude smoothing: slerp towards the target with weight alpha. Returns the smoothed
+ * orientation, its heading (for the yaw group, the chase camera and the ground marker) and the attitude group's
+ * quaternion relative to that heading, so yaw group x attitude group = the smoothed orientation exactly.
+ */
+export function smoothAttitude(current: Quat, target: Quat, alpha: number, prevHeading: number): { q: Quat; heading: number; local: Quat } {
+  const q = quatNormalize(quatSlerp(current, target, alpha))
+  const heading = quatHeading(q, prevHeading)
+  return { q, heading, local: quatMul(quatConj(yawQuat(heading)), q) }
+}

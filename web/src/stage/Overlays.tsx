@@ -21,6 +21,9 @@ import { chaseTargetId } from './scene/CameraRig'
 import { useT6, type AnyKey6 } from './copy'
 import { live } from './live'
 import { useStage, type StageLayers, type ViewMode } from './store'
+import { EngineBadge } from '@/twin/parts'
+import { engineBadge } from '@/twin/model'
+import { CrashedReset } from '@/twin/CrashedReset'
 
 // ---------------------------------------------------------------- identity
 
@@ -42,9 +45,17 @@ export function IdentityBlock({ top }: { top: number }) {
         <span>{label}</span>
       </div>
       {sub ? <div className="stage-identity-sub">{sub}</div> : null}
+      {/* 11 §8.5: the engine of a twin or a HITL aircraft */}
+      {engineBadge(v) ? (
+        <div className="flex min-w-0">
+          <EngineBadge vehicle={v} />
+        </div>
+      ) : null}
       <div className="flex">
         <ControllerPill vehicle={v} showWaiting />
       </div>
+      {/* v0.5.4: a crashed simulator offers the reset next to it */}
+      {v.kind === 'sim' && v.crashed ? <CrashedReset id={v.id} /> : null}
     </div>
   )
 }

@@ -10,6 +10,7 @@
 // D-pad up / down for the feel preset, transmitters and learned controller profiles with switch bindings, and H5.
 import type { Vehicle } from '@/api'
 import { HoldTimer } from '@/ui/relay/HoldProgress'
+import { canResetSim } from '@/twin/model' // v0.5.4: disarmed or crashed
 import {
   allocateIndex,
   assistAction,
@@ -692,9 +693,10 @@ export class InputEngine {
       })
     }
 
-    // Circle held 1 s: reset a disarmed simulated aircraft to its spawn point
+    // Circle held 1 s: reset a disarmed or crashed simulated aircraft to its spawn point (v0.5.4: a crash need
+    // not be disarmed first; the backend resets an armed wreck)
     const resetTarget = (mine ?? vehicles.find((v) => v.id === selected) ?? null) as Vehicle | null
-    const canReset = Boolean(resetTarget && resetTarget.kind === 'sim' && !resetTarget.armed)
+    const canReset = canResetSim(resetTarget)
     this.hold(s, 'reset', r.pressed.circle && canReset, now, canReset ? resetTarget!.id : null, () => {
       if (resetTarget) void d.act.resetSim(resetTarget.id).catch(() => undefined)
     })

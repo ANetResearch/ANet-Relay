@@ -16,6 +16,8 @@ import { AgentsWorkspace } from '@/agents/AgentsWorkspace'
 import { RecordsWorkspace } from '@/records/RecordsWorkspace'
 import { ConnectDialog } from '@/connect/ConnectDialog'
 import { SettingsDialog } from '@/settings/SettingsDialog'
+import { SimDialog } from '@/twin/SimDialog' // 11 §11
+import { HitlDialog } from '@/twin/HitlDialog' // 11 §7
 import { GamepadHints } from '@/control/GamepadHint'
 import { InputLayer } from '@/control/InputLayer'
 import { AppNotices } from '@/appctl'
@@ -87,6 +89,8 @@ function Dialogs() {
     <>
       <ConnectDialog open={connect.open} tab={connect.tab} onOpenChange={(o) => !o && closeConnect()} />
       <SettingsDialog open={settings.open} section={settings.section} onOpenChange={(o) => !o && closeSettings()} />
+      <SimDialog />
+      <HitlDialog />
     </>
   )
 }

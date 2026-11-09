@@ -8,7 +8,11 @@ export const ARS_SUFFIX = '.ars'
 export const TRACKS = ['throttle', 'pitch', 'roll', 'yaw'] as const
 export type TrackName = (typeof TRACKS)[number]
 export type Ease = 'hold' | 'ramp'
-export type SeqMode = 'stabilize' | 'althold' | 'poshold'
+export type SeqMode = 'stabilize' | 'acro' | 'althold' | 'poshold' // 11 §9: acro
+export const SEQ_MODES: readonly SeqMode[] = ['stabilize', 'acro', 'althold', 'poshold']
+/** Modes whose throttle stick is the collective output (backend sequence.py MANUAL_MODES). */
+export const MANUAL_MODES: readonly SeqMode[] = ['stabilize', 'acro']
+export const isManualMode = (mode: SeqMode) => MANUAL_MODES.includes(mode)
 export type SeqEnd = 'disarm' | 'hold'
 export const MAX_DURATION_S = 600
 export const MIN_BLOCK_S = 0.1
@@ -54,8 +58,19 @@ export const clampTo = (track: TrackName, v: number) => {
 }
 export const zeroTrim = (): Record<TrackName, number> => ({ roll: 0, pitch: 0, yaw: 0, throttle: 0 })
 
+/** Default stick of a track without keys: throttle 0 in stabilize and acro, 0.5 in the hold modes (11 §9). */
 export function restValue(track: TrackName, mode: SeqMode): number {
-  return track === 'throttle' ? (mode === 'stabilize' ? 0 : 0.5) : 0
+  return track === 'throttle' ? (isManualMode(mode) ? 0 : 0.5) : 0
+}
+
+/**
+ * Throttle sent while the aircraft arms before a sequence (11 §9): ArduPilot always 0 (4.6 and later refuse to arm
+ * with throttle input in any mode, "Throttle (RC3) is not neutral"); PX4 0.5 in the hold modes, where mid stick
+ * holds the altitude, else 0. Mirrors backend skills.py _idle.
+ */
+export function armWaitThrottle(mode: SeqMode, autopilot: 'ardupilot' | 'px4' | 'ArduPilot' | 'PX4' | null | undefined): number {
+  const px4 = autopilot === 'px4' || autopilot === 'PX4'
+  return px4 && !isManualMode(mode) ? 0.5 : 0
 }
 
 /** Takeoff, hover, land in altitude hold: the starting point of the dock. Every block is named. */
@@ -318,7 +333,7 @@ export function parseArs(text: string): ArsDoc {
   if (o.format !== ARS_FORMAT) throw new ArsError('format', `must be "${ARS_FORMAT}"`)
   if (o.version !== ARS_VERSION) throw new ArsError('version', `unsupported (this Relay reads version ${ARS_VERSION})`)
   const mode = (o.mode ?? 'althold') as SeqMode
-  if (!['stabilize', 'althold', 'poshold'].includes(mode)) throw new ArsError('mode', 'must be stabilize, althold or poshold')
+  if (!SEQ_MODES.includes(mode)) throw new ArsError('mode', 'must be stabilize, acro, althold or poshold')
   const end = (o.end ?? 'disarm') as SeqEnd
   if (end !== 'disarm' && end !== 'hold') throw new ArsError('end', 'must be disarm or hold')
   const tracksRaw = o.tracks

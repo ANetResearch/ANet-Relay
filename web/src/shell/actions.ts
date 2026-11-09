@@ -6,6 +6,7 @@ import { useRelay } from '@/store/relay'
 import { getVehicle } from '@/store/selectors'
 import { useUi } from '@/store/ui'
 import { notify, notifyError } from './notify'
+import { openSimDialog } from '@/twin/actions'
 
 export function stopAll(): void {
   api.stopAll().then(() => notify(t('toast.stopAllSent')), notifyError)
@@ -42,8 +43,9 @@ export function scanNetwork(): void {
   api.discover().catch(notifyError)
 }
 
+/** Opens the add-simulator dialog (11 §11): the engine, a twin's profile or pack, the frame. */
 export function addSim(): void {
-  api.addSim().catch(notifyError)
+  openSimDialog()
 }
 
 /** Moves the selection through the fleet in display order (REAL then SIMULATED). */

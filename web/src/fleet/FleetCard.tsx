@@ -1,7 +1,7 @@
 // Fleet card (02 §4.3): 76 high, three rows, left 2 px status bar, possession frame, dashed frame for sims, hold line
 // on the bottom edge, context menu. Memoised by id; each card subscribes to its own vehicle only.
 import * as React from 'react'
-import { api } from '@/api'
+import { api, serialOf } from '@/api'
 import { pickText, useLang } from '@/i18n'
 import { courseTime, duration } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -23,6 +23,9 @@ import { ArmedWord, BatteryReadout, ControllerPill, HoldProgress, LinkStatus, Si
 import { openInspector } from '@/inspector/tabs'
 import { useT8 } from './copy'
 import { useHold } from './holds'
+import { resetSim } from '@/twin/actions'
+import { canResetSim, engineBadge, engineBadgeText, twinRestarting } from '@/twin/model'
+import { useTT } from '@/twin/strings'
 
 function useOpenAlerts(id: string) {
   return useRelay((s) => {
@@ -85,6 +88,7 @@ function RenameField({ initial, onDone }: { initial: string; onDone(label: strin
 
 export const FleetCard = React.memo(function FleetCard({ id }: { id: string }) {
   const t = useT8()
+  const tt = useTT()
   const v = useVehicle(id)
   const selected = useUi((s) => s.selectedId === id)
   const alertLevel = useOpenAlerts(id)
@@ -114,7 +118,10 @@ export const FleetCard = React.memo(function FleetCard({ id }: { id: string }) {
       .catch(notifyError)
   }
 
-  const address = sim ? v.id : (v.host ?? t('fleet.noHost'))
+  const address = sim ? v.id : (v.host ?? serialOf(v)?.device ?? t('fleet.noHost')) // 11 §7.1: a USB serial link shows its device
+  // 11 §8.5: twins and HITL aircraft name their engine and firmware ("固件孪生 ArduCopter 4.6.3 · 精确匹配")
+  const badge = engineBadge(v)
+  const engine = badge ? engineBadgeText(badge, tt) : null
   const modeReason = v.link.state === 'waiting' ? t('fleet.waitingHeartbeat') : t('fleet.reason.noMode')
 
   return (
@@ -159,9 +166,10 @@ export const FleetCard = React.memo(function FleetCard({ id }: { id: string }) {
         </div>
         {/* row 2: address · firmware · mode · flight time */}
         <div className="flex h-4 items-center gap-2">
-          <span className="addr min-w-0 flex-1 truncate">
-            {address}
-            {v.autopilot ? <span className="text-[var(--g500)]"> · {v.autopilot}</span> : null}
+          <span className="addr min-w-0 flex-1 truncate" title={engine ?? undefined} data-engine={badge?.kind}>
+            {/* a twin's id repeats its label: the engine takes the room */}
+            {engine && sim ? null : address}
+            {engine ? <span className="text-[var(--g300)]">{sim ? engine : ` · ${engine}`}</span> : v.autopilot ? <span className="text-[var(--g500)]"> · {v.autopilot}</span> : null}
           </span>
           <Value value={v.mode} reason={modeReason} className="max-w-[96px] shrink-0 truncate text-[11px] leading-4 text-[var(--g300)]" />
           <span className="num w-[44px] shrink-0 text-right text-[11px] leading-4 text-[var(--g400)]" title={t('fleet.flightTime')}>
@@ -208,6 +216,13 @@ export const FleetCard = React.memo(function FleetCard({ id }: { id: string }) {
           <Icon icon="ws.records" />
           {t('fleet.menu.openRecords')}
         </ContextMenuItem>
+        {sim ? (
+          // v0.5.4: a disarmed or crashed simulator back to its spawn point; a twin restarts its firmware
+          <ContextMenuItem onClick={() => void resetSim(id)} disabled={!canResetSim(v) || twinRestarting(v)} data-menu-reset="">
+            <Icon icon="reset" />
+            {twinRestarting(v) && v.sim?.engine === 'sitl' ? tt('reset.restarting') : tt('reset.action')}
+          </ContextMenuItem>
+        ) : null}
         <ContextMenuSeparator />
         <ContextMenuItem onClick={remove} disabled={v.armed}>
           <Icon icon="trash" />

@@ -19,6 +19,10 @@ import {
   sticksAt,
   keyTimes,
   templateHover,
+  armWaitThrottle,
+  isManualMode,
+  restValue,
+  SEQ_MODES,
 } from './model'
 import { SEQ_STRINGS } from './strings'
 
@@ -110,5 +114,26 @@ describe('.ars timeline model', () => {
 describe('timeline copy', () => {
   it('has the same keys in both languages', () => {
     expect(Object.keys(SEQ_STRINGS.zh).sort()).toEqual(Object.keys(SEQ_STRINGS.en).sort())
+  })
+
+  it('accepts acro (11 §9): rest throttle 0 like stabilize, arming throttle by firmware and mode', () => {
+    expect(SEQ_MODES).toEqual(['stabilize', 'acro', 'althold', 'poshold'])
+    const doc = parseArs(JSON.stringify({ format: 'ars', version: 1, mode: 'acro', tracks: { roll: [{ t: 0, v: 1 }, { t: 1.5, v: 0 }] }, duration_s: 3 }))
+    expect(doc.mode).toBe('acro')
+    expect(isManualMode('acro')).toBe(true)
+    expect(isManualMode('althold')).toBe(false)
+    expect(restValue('throttle', 'acro')).toBe(0)
+    expect(restValue('throttle', 'stabilize')).toBe(0)
+    expect(restValue('throttle', 'poshold')).toBe(0.5)
+    expect(sampleTrack(doc, 'throttle', 1)).toBe(0)
+    expect(sampleTrack(doc, 'roll', 1)).toBe(1)
+    expect(JSON.parse(serialiseArs(doc)).mode).toBe('acro')
+    expect(() => parseArs(JSON.stringify({ format: 'ars', version: 1, mode: 'sport', tracks: { roll: [{ t: 0, v: 0 }] } }))).toThrow(/acro/)
+    // ArduPilot 4.6 and later arm only at zero throttle in every mode; PX4 holds mid stick in the hold modes
+    for (const m of SEQ_MODES) expect(armWaitThrottle(m, 'ArduPilot')).toBe(0)
+    expect(armWaitThrottle('althold', 'PX4')).toBe(0.5)
+    expect(armWaitThrottle('poshold', 'px4')).toBe(0.5)
+    expect(armWaitThrottle('acro', 'PX4')).toBe(0)
+    expect(armWaitThrottle('stabilize', 'PX4')).toBe(0)
   })
 })
