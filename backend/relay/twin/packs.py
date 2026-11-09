@@ -92,6 +92,9 @@ class Pack:
     sha256: str | None
     origin: str  # "bundled" | "imported"
     path: Path
+    # Built from source patched so that the firmware binds 127.0.0.1 only (manifest "loopback": true);
+    # False for the official ArduPilot binary, which binds two UDP sockets on 0.0.0.0 (11 §2).
+    loopback: bool = False
 
     @property
     def git8(self) -> str:
@@ -198,6 +201,7 @@ def parse_manifest(data: Any) -> dict[str, Any]:
     for key, default in (("license", ""), ("source", ""), ("built", "")):
         value = data.get(key)
         out[key] = value if isinstance(value, str) else default
+    out["loopback"] = data.get("loopback") is True
     return out
 
 
@@ -225,6 +229,7 @@ def _pack(manifest: dict[str, Any], path: Path, sha256: str | None, origin: str)
         sha256=sha256,
         origin=origin,
         path=path,
+        loopback=manifest["loopback"],
     )
 
 

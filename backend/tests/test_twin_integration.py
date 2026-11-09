@@ -1,10 +1,11 @@
-"""Firmware twins end to end (11 §6, §13): official ArduCopter and PX4 SITL builds on Relay's physics.
+"""Firmware twins end to end (11 §6, §13): ArduCopter and PX4 SITL packs on Relay's physics.
 
 Each test creates a twin through the HTTP API on a fleet stepped by a fake clock (the lockstep runs as fast
 as the firmware computes), flies the takeoff-hover-land timeline in altitude hold, and checks the climb, the
-hold, the landing and the disarm on the physics truth; then it checks the firmware's sockets (loopback
-only), kills the process (``twin_exited``) and removes the simulator (process gone). The tests skip when the
-runtime packs are not installed (``node scripts/fetch-autopilots.mjs``).
+hold, the landing and the disarm on the physics truth; then it checks the firmware's sockets (loopback only;
+the official ArduPilot binary has two documented exceptions, a ``loopback`` pack none), kills the process
+(``twin_exited``) and removes the simulator (process gone). The tests skip when the runtime packs are not
+installed (``node scripts/fetch-autopilots.mjs``).
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from relay.twin.process import bound_sockets
 OP = {"X-Relay-Operator": "op-token"}
 API = "/api/v1"
 STORE = PackStore()
-ARDUPILOT_RC_PORT = 5501  # 0.0.0.0 in the official binary (11 §2, documented limitation)
+ARDUPILOT_RC_PORT = 5501  # 0.0.0.0 in the official binary (11 §2, §14); 127.0.0.1 in a loopback pack
 
 
 def _pack(pack_id: str) -> None:
@@ -100,25 +101,31 @@ def _fly_hover(client, vid: str, settle_s: float) -> dict:
     }
 
 
-def _check_sockets(pid: int, family: str) -> None:
+def _check_sockets(pid: int, pack_id: str, instance: int) -> None:
     if not sys.platform.startswith("linux"):
         return
+    pack = STORE.get(pack_id)
+    rc_port = ARDUPILOT_RC_PORT + 10 * instance
     socks = bound_sockets(pid)
     assert socks, "the firmware holds no socket"
+    if pack.family == "ardupilot" and pack.loopback:
+        # A pack built from patched source (manifest "loopback": true) binds its RC input on loopback.
+        assert ("udp", "127.0.0.1", rc_port, "07") in socks, socks
     for proto, address, port, state in socks:
         if address in ("127.0.0.1", "::1") or address.startswith("::ffff:127."):
             continue
         if state == "01" or (proto.startswith("udp") and address in ("0.0.0.0", "::") and port == 0):
             continue  # an established connection, or nothing bound
         # The official ArduPilot binary binds its RC input port and its physics client socket on 0.0.0.0
-        # with no option to change it (11 §2, documented); nothing else may listen beyond loopback.
-        assert family == "ardupilot" and proto == "udp" and address == "0.0.0.0", (
+        # with no option to change it (11 §2, §14); a loopback pack and PX4 bind nothing beyond loopback.
+        assert pack.family == "ardupilot" and not pack.loopback, (pack_id, proto, address, port, state)
+        assert proto == "udp" and address == "0.0.0.0", (
             proto,
             address,
             port,
             state,
         )
-        assert port == ARDUPILOT_RC_PORT or port >= 32768, (proto, address, port)
+        assert port == rc_port or port >= 32768, (proto, address, port)
     assert not [s for s in socks if s[0].startswith("tcp") and s[3] == "0A" and s[1] != "127.0.0.1"]
 
 
@@ -199,8 +206,9 @@ def test_twin_flies_takeoff_hover_land_over_the_api(twin_client, pack_id, settle
     assert info["family"] == family and info["version"] == pack_id.rsplit("-", 1)[1]
     assert info["git"] == STORE.get(pack_id).git8
 
-    pid = svc.vehicles[vid].driver.sim.pid
-    _check_sockets(pid, family)
+    sim = svc.vehicles[vid].driver.sim
+    pid = sim.pid
+    _check_sockets(pid, pack_id, sim.instance)
     _exit_and_remove(client, vid)
     _assert_gone(pid)
 

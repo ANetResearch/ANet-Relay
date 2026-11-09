@@ -27,6 +27,19 @@ def _load_build_pack():
 bp = _load_build_pack()
 
 
+def _load_loopback():
+    spec = importlib.util.spec_from_file_location(
+        "relay_ap_loopback", REPO / "autopilots" / "ardupilot" / "loopback.py"
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+lb = _load_loopback()
+
+
 # --- autopilots_dir ---------------------------------------------------------------------------------------
 
 
@@ -245,3 +258,115 @@ def test_bundled_versions_are_listed_with_their_tags():
     assert [v["version"] for v in data["px4"]] == ["1.17.0", "1.16.2", "1.15.4", "1.14.4"]
     assert all(v["tag"] == f"Copter-{v['version']}" for v in data["ardupilot"])
     assert all(v["tag"] == f"v{v['version']}" for v in data["px4"])
+
+
+# --- loopback packs (11 §2) -------------------------------------------------------------------------------
+
+
+def test_loopback_flag_marks_the_manifest(ardupilot_inputs, tmp_path):
+    out = tmp_path / "dist"
+    args = [
+        "ardupilot",
+        "--version",
+        "4.7.2",
+        "--platform",
+        "linux-x64",
+        "--binary",
+        str(ardupilot_inputs / "arducopter"),
+        "--git",
+        "fb773567896014da",
+        "--copter-parm",
+        str(ardupilot_inputs / "copter.parm"),
+        "--out",
+        str(out),
+        "--no-strip",
+    ]
+    assert bp.main([*args, "--built", "ci", "--loopback"]) == 0
+    manifest = json.loads((out / "ardupilot-copter-4.7.2" / "manifest.json").read_text())
+    assert manifest["built"] == "ci" and manifest["loopback"] is True
+    assert list(manifest) == [k for k in bp.MANIFEST_KEYS if k in manifest]
+    assert bp.build_index(out, "linux-x64")["packs"][0]["loopback"] is True
+    # an official binary is not patched, so it cannot claim to be
+    assert bp.main([*args, "--built", "official", "--loopback"]) == 1
+    # without the flag the key is absent (the official-binary manifests stay as they were)
+    _pack_ardupilot(ardupilot_inputs, tmp_path / "official")
+    assert "loopback" not in json.loads(
+        (tmp_path / "official" / "ardupilot-copter-4.7.2" / "manifest.json").read_text()
+    )
+
+
+def test_runtime_reads_the_loopback_field():
+    from relay.twin.packs import parse_manifest
+
+    base = {
+        "format": 1,
+        "id": "ardupilot-copter-4.7.2",
+        "family": "ardupilot",
+        "vehicle": "copter",
+        "version": "4.7.2",
+        "git": "fb773567",
+        "platform": "linux-x64",
+        "entry": "bin/arducopter",
+    }
+    assert parse_manifest(base)["loopback"] is False
+    assert parse_manifest({**base, "loopback": True})["loopback"] is True
+    assert parse_manifest({**base, "loopback": "yes"})["loopback"] is False
+
+
+# Excerpts of the two source layouts: the RC input moved from SITL_State.cpp to AP_RCProtocol_UDP.cpp in 4.6.
+_JSON_CPP = (
+    "void JSON::set_interface_ports(const char* address, const int port_in, const int port_out)\n{\n"
+    "    sock.set_blocking(false);\n    sock.reuseaddress();\n\n"
+    '    if (strcmp("127.0.0.1",address) != 0) {\n        target_ip = address;\n    }\n'
+    "    control_port = port_out;\n\n"
+    '    printf("JSON control interface set to %s:%u\\n", target_ip, control_port);\n}\n'
+)
+_RC_NEW = '    if (!rc_in.bind("0.0.0.0", sitl->rcin_port)) {\n        return false;\n    }\n'
+_RC_OLD = '    if (!_sitl_rc_in.bind("0.0.0.0", _rcin_port)) {\n        exit(1);\n    }\n'
+
+
+def _ardupilot_tree(root: Path, layout: str) -> Path:
+    files = {"libraries/SITL/SIM_JSON.cpp": _JSON_CPP, "libraries/AP_HAL_SITL/SITL_State.cpp": "// state\n"}
+    if layout == "4.6":
+        files["libraries/AP_RCProtocol/AP_RCProtocol_UDP.cpp"] = _RC_NEW
+    else:
+        files["libraries/AP_HAL_SITL/SITL_State.cpp"] = _RC_OLD
+    for rel, text in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text)
+    return root
+
+
+@pytest.mark.parametrize("layout", ["4.6", "4.3"])
+def test_loopback_patch_binds_both_sockets_once(tmp_path, layout):
+    root = _ardupilot_tree(tmp_path, layout)
+    assert lb.main([str(root)]) == 0
+    rc = root / (
+        "libraries/AP_RCProtocol/AP_RCProtocol_UDP.cpp"
+        if layout == "4.6"
+        else "libraries/AP_HAL_SITL/SITL_State.cpp"
+    )
+    assert '"0.0.0.0"' not in rc.read_text() and rc.read_text().count('bind("127.0.0.1", ') == 1
+    json_cpp = (root / "libraries/SITL/SIM_JSON.cpp").read_text()
+    assert json_cpp.count('sock.bind("127.0.0.1", 0)') == 1
+    assert json_cpp.index("sock.bind") > json_cpp.index("control_port = port_out;")
+    # a second run recognises its own change and writes nothing
+    before = {p: p.read_bytes() for p in root.rglob("*.cpp")}
+    assert lb.main([str(root)]) == 0
+    assert before == {p: p.read_bytes() for p in root.rglob("*.cpp")}
+
+
+def test_loopback_patch_refuses_an_unknown_layout(tmp_path):
+    root = _ardupilot_tree(tmp_path, "4.6")
+    rc = root / "libraries/AP_RCProtocol/AP_RCProtocol_UDP.cpp"
+    rc.write_text(_RC_NEW * 2)  # two bind sites: not the source this patch was written for
+    json_before = (root / "libraries/SITL/SIM_JSON.cpp").read_text()
+    with pytest.raises(lb.PatchError, match="exactly one"):
+        lb.apply(root)
+    assert lb.main([str(root)]) == 1
+    assert (root / "libraries/SITL/SIM_JSON.cpp").read_text() == json_before  # nothing written
+    (root / "libraries/SITL/SIM_JSON.cpp").write_text("// moved\n")
+    rc.write_text(_RC_NEW)
+    with pytest.raises(lb.PatchError, match="JSON physics"):
+        lb.apply(root)
+    assert lb.main([str(tmp_path / "missing")]) == 1
