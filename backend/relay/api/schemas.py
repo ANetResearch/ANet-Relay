@@ -12,6 +12,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .schemas_hitl import SerialConnect, SerialLinkView, VehicleHitl  # 11 §7
+
 
 class _Model(BaseModel):
     model_config = ConfigDict(extra="allow", json_schema_serialization_defaults_required=True)
@@ -440,6 +442,12 @@ class Vehicle(_Model):
     programs_allowed: bool = Field(
         default=True, description="real aircraft: the operator allowed programs (reset when the link drops)"
     )
+    # 11 §7, §10: how the aircraft is connected, its serial port and its hardware-in-the-loop session
+    transport: Literal["udp", "serial", "sim"] = Field(
+        default="udp", description="udp: Wi-Fi bridge; serial: USB / UART port; sim: simulator"
+    )
+    serial: SerialLinkView | None = None
+    hitl: VehicleHitl | None = None
 
 
 class Alert(_Model):
@@ -561,6 +569,10 @@ EventKind = Literal[
     "twin_exited",
     "twin_start_failed",
     "autopilot_pack_imported",
+    # v0.5.4 hardware in the loop (11 §7, §10)
+    "hitl_started",
+    "hitl_restored",
+    "hitl_failed",
 ]
 
 
@@ -725,8 +737,11 @@ class _Body(BaseModel):
 
 
 class ConnectBody(_Body):
-    host: str
+    """A UDP aircraft (``host``, ``port``) or a serial one (``serial``: 11 §7.1); exactly one of the two."""
+
+    host: str | None = None
     port: int | None = None
+    serial: SerialConnect | None = None
 
 
 class DiscoverBody(_Body):

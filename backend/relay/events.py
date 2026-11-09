@@ -81,6 +81,19 @@ TEMPLATES: dict[str, tuple[str, str]] = {
         "{vehicle} 固件孪生未能重新启动：{reason}。",
     ),
     "autopilot_pack_imported": ("Autopilot pack {pack} imported.", "已导入飞控运行包 {pack}。"),
+    # hardware in the loop (11 §7); {detail} from detail_en / detail_zh, {reason} from reason_en / reason_zh
+    "hitl_started": (
+        "{vehicle} hardware in the loop running: {firmware}.",
+        "{vehicle} 硬件在环已运行：{firmware}。",
+    ),
+    "hitl_restored": (
+        "{vehicle} parameters restored after hardware in the loop{detail}.",
+        "{vehicle} 硬件在环结束，参数已恢复{detail}。",
+    ),
+    "hitl_failed": (
+        "{vehicle} hardware in the loop, step {step}: {reason}.",
+        "{vehicle} 硬件在环“{step_zh}”步骤失败：{reason}。",
+    ),
     "bridge_configured": (
         "Bridge {host} settings written. The bridge is restarting.",
         "数传 {host} 设置已写入，正在重启。",

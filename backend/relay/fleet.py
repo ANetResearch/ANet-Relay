@@ -72,6 +72,7 @@ from .errors import RelayError, err
 from .events import EventBus
 from .fleet_airframe import AirframeOps  # WP-2a airframe defects (06 §4)
 from .fleet_device import DeviceOps
+from .fleet_hitl import HitlOps  # serial links and PX4 hardware in the loop (11 §7)
 from .fleet_sequence import SequenceOps  # stick timelines, .ars (10 §2)
 from .fleet_sim import SimOps
 from .fleet_twin import TwinOps  # firmware twins (11 §2-§6)
@@ -220,6 +221,11 @@ class Vehicle:
         # WP-1 onboard programs (06 §2.6): the current or last program run, and the real-aircraft gate
         self.program: Any = None
         self.programs_allowed = False
+        # 11 §7: where labels and calibration are stored (the host, or usb:<serial number> for a serial
+        # board), the hardware-in-the-loop session and the port opening last checked for an owed restore
+        self.store_key: str | None = host
+        self.hitl: Any = None
+        self.hitl_checked: int | None = None
 
     # Host protocol for skills ---------------------------------------------------
 
@@ -360,7 +366,7 @@ class Vehicle:
         return auth.controller(self.auth, claim is not None and sessions.alive(claim.session_id))
 
 
-class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, WorldOps, TwinOps):
+class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, WorldOps, TwinOps, HitlOps):
     def __init__(
         self,
         settings: Settings | None = None,
@@ -418,6 +424,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
         self._scan_broadcast_at = 0.0
         self.custom_courses: dict[str, dict[str, Any]] = self._load_courses()
         self._twin_setup()  # 11 §3, §5: runtime packs and twin profiles
+        self._hitl_setup()  # 11 §7: serial ports and hardware-in-the-loop backups
         self._best: dict[str, float | None] = {}
         self._skill_seq = 0
         self._plan_seq = 0
@@ -462,6 +469,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
             self._shutdown_vehicles()
         if self.link is not None:
             self.link.close()
+        self._serial_shutdown()  # 11 §7: release the serial ports
         self.arena.close()
         self.dogfights.close()  # WP-B
         self.judge.close()  # WP-2b: cancel evaluation jobs and wait for their workers
@@ -555,6 +563,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
                 continue
             for msg in msgs:
                 self._on_message(v, msg, now)
+        self._hitl_step(now)  # 11 §7: hardware-in-the-loop sessions and their sensor frames
         # LAN arena (WP-D): fire, bullets and hits right after the simulators stepped; it keeps to its own
         # wall-time budget, and a failure in it never skips the stick, watchdog and stop path below
         try:
@@ -667,6 +676,8 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
                 self._on_heartbeat(v, now, wall)
         if v.param_fetch is not None and msg.get_type() == "PARAM_VALUE":
             v.param_fetch.progress(len(v.state["params"]), v.state["param_count"], now)
+        if v.hitl is not None:
+            self._hitl_message(v, msg, now)  # 11 §7
 
     def _track_seq(self, v: Vehicle, msg: Any, now: float) -> None:
         key = (msg.get_srcSystem(), msg.get_srcComponent())
@@ -855,6 +866,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
             conditions.append(Condition("port_in_use", "critical", None, {"port": self.link.port}))
         for v in list(self.vehicles.values()):
             self._house_vehicle(v, now, wall, conditions)
+        self._hitl_housekeeping(now)  # 11 §7.2: a restore owed from an earlier session
         for alert in self.alerts.sync(conditions):
             log.info("alert %s %s", alert["level"], alert["id"])
 
@@ -1439,6 +1451,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
         self._stop_control(v, "removed", now)
         if v.kind == "real":
             v.driver.pace(now + 1.0)  # flush pending release frames
+            self._serial_removed(v)  # 11 §7: close the port; an owed restore waits for the next connection
         self._abort_course(v, "removed", now)
         self._close_segment(v, wall)
         if v.record_session is not None:
@@ -1474,9 +1487,9 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
         def run() -> dict[str, Any]:
             v = self._vehicle(vid)
             v.label = label
-            if v.kind == "real" and v.host:
-                self._labels[v.host] = label
-                self.history.set_label(v.host, label)
+            if v.kind == "real" and v.store_key:
+                self._labels[v.store_key] = label
+                self.history.set_label(v.store_key, label)
             if v.record_session is not None:
                 self.history.update_session(v.record_session, label=label)
             return {"id": vid, "label": label}
@@ -1502,8 +1515,8 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
                 cal.signs = new_signs
             if hover is not None:
                 cal.hover = float(hover)
-            if v.kind == "real" and v.host:
-                self.history.set_calibration(v.host, cal.signs.as_dict(), cal.hover)
+            if v.kind == "real" and v.store_key:
+                self.history.set_calibration(v.store_key, cal.signs.as_dict(), cal.hover)
             return {"id": vid, "calibration": cal.view(), "confirmed": v.confirmed.view()}
 
         return self.call(run)
@@ -2901,7 +2914,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
         }
         human = v.sticks is not None and v.sticks.source == "human" and now - v.sticks.t < STICK_TIMEOUT_S
         gps = st["gps"]
-        return {
+        view = {
             "id": v.id,
             "kind": v.kind,
             "label": v.label,
@@ -2969,7 +2982,13 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
             # WP-1 onboard programs (06 §2.6)
             "program": self.programs.view(v),
             "programs_allowed": v.kind == "sim" or v.programs_allowed,
+            # 11 §7, §10: the transport, the serial port and hardware in the loop
+            "transport": self._transport(v),  # udp | serial | sim
+            "serial": self._serial_view(v),
+            "hitl": self._hitl_snapshot(v),
         }
+        self._hitl_overlay(v, view, now)
+        return view
 
     def _build_snapshot(self, now: float) -> None:
         wall = self.wall()

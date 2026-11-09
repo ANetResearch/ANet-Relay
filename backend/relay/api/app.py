@@ -23,6 +23,7 @@ from . import (
     routes_control,
     routes_device,
     routes_fleet,
+    routes_hitl,  # 11 §7: serial ports and hardware in the loop
     routes_judge,
     routes_match,  # WP-B
     routes_procedures,
@@ -130,5 +131,6 @@ def create_app(
     app.include_router(routes_judge.router, prefix=API_PREFIX)  # WP-2b: challenges, duels, jobs, traces
     app.include_router(routes_match.router, prefix=API_PREFIX)  # WP-B: dogfight, match, leaderboard
     app.include_router(routes_twin.router, prefix=API_PREFIX)  # 11 §10: firmware twins
+    app.include_router(routes_hitl.router, prefix=API_PREFIX)  # 11 §7: serial ports, hardware in the loop
     app.include_router(stream.router, prefix=API_PREFIX)
     return app

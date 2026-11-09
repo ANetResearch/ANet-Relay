@@ -90,6 +90,9 @@ function base(over: Partial<V> & Pick<V, 'id' | 'label' | 'kind'>): V {
     sim: sim ? { hover_assist: true, turbulence: 0.3, airframe: { preset: 'typical', seed: 4242 }, engine: 'relay', firmware: null, frame: 'micro-120' } : null, // WP-2a airframe
     program: null, // WP-1 onboard program
     programs_allowed: sim,
+    transport: sim ? 'sim' : 'udp', // 11 §7.1
+    serial: null,
+    hitl: null,
     ...over,
   }
 }

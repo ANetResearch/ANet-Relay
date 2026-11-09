@@ -29,6 +29,20 @@ hiddenimports = [
     "pymavlink.dialects.v10.ardupilotmega",
     "pymavlink.dialects.v10.common",
     "pymavlink.dialects.v20.all",  # mavutil's default when MAVLINK_DIALECT is unset
+    # pyserial (11 §7.1): relay.mav.serial_link imports it lazily, and pyserial picks its port backend and
+    # its port lister by platform at run time; serial_for_url() imports URL handlers by name.
+    "serial",
+    "serial.serialutil",
+    "serial.tools",
+    "serial.tools.list_ports",
+    "serial.tools.list_ports_common",
+    *(
+        ["serial.serialwin32", "serial.win32", "serial.tools.list_ports_windows"]
+        if sys.platform == "win32"
+        else ["serial.serialposix", "serial.tools.list_ports_posix"]
+        + (["serial.tools.list_ports_osx"] if sys.platform == "darwin" else ["serial.tools.list_ports_linux"])
+    ),
+    "serial.urlhandler.protocol_loop",
 ]
 
 a = Analysis(

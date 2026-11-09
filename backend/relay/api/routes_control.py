@@ -30,6 +30,13 @@ def discover(request: Request, body: schemas.DiscoverBody | None = None) -> dict
 
 @router.post("/vehicles", tags=["fleet"], dependencies=APP, responses=ERRORS)
 def connect(request: Request, body: schemas.ConnectBody) -> dict[str, Any]:
+    """Connect an aircraft: UDP through its Wi-Fi bridge (``host``) or a USB / UART port (``serial``)."""
+    if body.serial is not None:
+        if body.host is not None:
+            raise err("invalid_request", reason="give host or serial, not both")
+        return service(request).connect_serial(body.serial.device, body.serial.baud)
+    if body.host is None:
+        raise err("invalid_request", reason="host or serial is required")
     return service(request).connect(body.host, body.port)
 
 
