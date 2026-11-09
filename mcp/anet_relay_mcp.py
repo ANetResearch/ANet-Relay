@@ -70,7 +70,7 @@ ARS = {
         "format": {"type": "string", "enum": ["ars"]},
         "version": {"type": "integer", "enum": [1]},
         "name": {"type": "string", "maxLength": 80},
-        "mode": {"type": "string", "enum": ["stabilize", "althold", "poshold"]},
+        "mode": {"type": "string", "enum": ["stabilize", "althold", "poshold", "acro"]},
         "duration_s": {"type": "number", "maximum": 600},
         "trim": ARS_TRIM,
         "tracks": {
