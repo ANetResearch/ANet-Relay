@@ -58,6 +58,11 @@ export function backendLaunch() {
   };
 }
 
+/** Autopilot runtime packs (11 §3.2): resources/autopilots when packaged; undefined in development. */
+export function autopilotsDir() {
+  return app.isPackaged ? path.join(process.resourcesPath, "autopilots") : undefined;
+}
+
 export function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
   return dir;

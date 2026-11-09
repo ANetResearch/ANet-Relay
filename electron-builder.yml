@@ -25,6 +25,11 @@ extraResources:
   # PyInstaller onedir output of backend/relay-backend.spec (npm run build:backend).
   - from: pyi-dist/anet-relay-backend
     to: backend
+  # Autopilot runtime packs of this platform (11 §3.2, docs/autopilot-packs.md), downloaded by
+  # scripts/fetch-autopilots.mjs in release.yml; absent in local builds, which then ship none.
+  # scripts/after-pack.cjs signs their Mach-O executables on macOS.
+  - from: build/autopilots
+    to: autopilots
 # No auto-update feed: releases are downloaded from GitHub by hand.
 publish: null
 # macOS signing is done by this hook, not by electron-builder (identity stays null): Developer ID with the

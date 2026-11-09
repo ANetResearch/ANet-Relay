@@ -25,8 +25,9 @@ export class Backend extends EventEmitter {
    * @param {string} opts.logPath   stdout/stderr destination
    * @param {string} opts.portFile  where the chosen port is written
    * @param {string|undefined} opts.explicitPort  RELAY_HTTP_PORT from the environment
+   * @param {string|undefined} opts.autopilotsDir RELAY_AUTOPILOTS_DIR (packaged runtime packs, 11 §3.2)
    */
-  constructor({ launch, token, dataDir, logPath, portFile, explicitPort }) {
+  constructor({ launch, token, dataDir, logPath, portFile, explicitPort, autopilotsDir }) {
     super();
     this.launch = launch;
     this.token = token;
@@ -34,6 +35,7 @@ export class Backend extends EventEmitter {
     this.logPath = logPath;
     this.portFile = portFile;
     this.explicitPort = explicitPort;
+    this.autopilotsDir = autopilotsDir;
     this.port = null;
     this.child = null;
     this.stopping = false;
@@ -78,14 +80,12 @@ export class Backend extends EventEmitter {
     const startedAt = Date.now();
     const child = spawn(command, args, {
       cwd,
-      env: {
-        ...process.env,
-        RELAY_HTTP_PORT: String(this.port),
-        RELAY_OPERATOR_TOKEN: this.token,
-        RELAY_DATA_DIR: this.dataDir,
-        PYTHONUNBUFFERED: "1",
-        RELAY_LIFELINE: "stdin",
-      },
+      env: backendEnv(process.env, {
+        port: this.port,
+        token: this.token,
+        dataDir: this.dataDir,
+        autopilotsDir: this.autopilotsDir,
+      }),
       // stdin stays open as a lifeline: it reaches EOF when this process dies.
       stdio: ["pipe", "pipe", "pipe"],
       // Own process group, so a terminal Ctrl-C reaches main first and main
@@ -174,6 +174,22 @@ export class Backend extends EventEmitter {
       // best effort
     }
   }
+}
+
+/**
+ * Environment of the backend process. RELAY_AUTOPILOTS_DIR is set only when the shell knows where the runtime
+ * packs are (a packaged build); otherwise an inherited value or the backend's own fallback applies.
+ */
+export function backendEnv(base, { port, token, dataDir, autopilotsDir }) {
+  return {
+    ...base,
+    RELAY_HTTP_PORT: String(port),
+    RELAY_OPERATOR_TOKEN: token,
+    RELAY_DATA_DIR: dataDir,
+    ...(autopilotsDir ? { RELAY_AUTOPILOTS_DIR: autopilotsDir } : {}),
+    PYTHONUNBUFFERED: "1",
+    RELAY_LIFELINE: "stdin",
+  };
 }
 
 function healthOk(body) {

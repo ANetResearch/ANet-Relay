@@ -128,6 +128,20 @@ jobs:
             echo "Developer ID signing enabled; no APPLE_API_KEY_P8 secret, so the app is not notarized."
           fi
 
+      # 11 §3.2: this platform's autopilot runtime packs from the release autopilots-v1, verified against its
+      # index-<platform>.json and unpacked into build/autopilots/ (electron-builder.yml extraResources ->
+      # resources/autopilots). Before the first autopilots.yml run the release does not exist: the package is
+      # then built without packs and the step leaves a warning.
+      - name: Fetch autopilot packs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/fetch-autopilots.mjs --dir build/autopilots --platform ${{ matrix.label }} --repo "${GITHUB_REPOSITORY}" --optional
+          if [ -d build/autopilots ]; then
+            du -sh build/autopilots/* 2>/dev/null || true
+            echo "Autopilot packs total: $(du -sh build/autopilots | cut -f1)"
+          fi
+
       - name: Package (electron-builder)
         run: node scripts/dist.mjs ${{ matrix.platform }} --prebuilt --arch ${{ matrix.arch }}
 

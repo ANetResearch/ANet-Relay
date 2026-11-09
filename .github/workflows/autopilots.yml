@@ -1,0 +1,335 @@
+# Autopilot runtime packs (11 §3.2, docs/autopilot-packs.md): builds every version in autopilots/versions.json
+# for every platform and publishes the GitHub Release autopilots-v1 with <id>-<platform>.tar.gz and
+# index-<platform>.json. Run by hand; re-running replaces the assets of the same name and moves the tag to
+# the commit of the run. A version that fails to build on a platform is left out of that platform's index
+# and does not stop the other builds.
+name: Autopilots
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the release autopilots-v1 (otherwise the packs stay workflow artifacts)
+        type: boolean
+        default: true
+      cygwin_gcc:
+        description: Cygwin gcc-g++ package version for the Windows builds (empty for the current one)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: autopilots
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # Old ArduPilot and PX4 tags need empy 3 and the imp module, which Python 3.12 removed.
+  PYTHON_VERSION: "3.11"
+  RELEASE_TAG: autopilots-v1
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-22.04
+    outputs:
+      ardupilot: ${{ steps.versions.outputs.ardupilot }}
+      px4: ${{ steps.versions.outputs.px4 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Versions
+        id: versions
+        run: |
+          python3 - <<'EOF' >> "${GITHUB_OUTPUT}"
+          import json
+          data = json.load(open("autopilots/versions.json"))
+          for family in ("ardupilot", "px4"):
+              print(f"{family}={json.dumps(data[family], separators=(',', ':'))}")
+          EOF
+          cat "${GITHUB_OUTPUT}"
+
+  # Official static SITL binaries: no build needed.
+  ardupilot-linux:
+    name: ArduCopter ${{ matrix.version }} linux-x64
+    needs: plan
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.ardupilot) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download official SITL
+        run: |
+          base="https://firmware.ardupilot.org/Copter/stable-${{ matrix.version }}/SITL_x86_64_linux_gnu"
+          mkdir -p "${RUNNER_TEMP}/ap"
+          curl -fsSL --retry 3 -o "${RUNNER_TEMP}/ap/arducopter" "${base}/arducopter"
+          curl -fsSL --retry 3 -o "${RUNNER_TEMP}/ap/git-version.txt" "${base}/git-version.txt"
+          curl -fsSL --retry 3 -o "${RUNNER_TEMP}/ap/copter.parm" \
+            "https://raw.githubusercontent.com/ArduPilot/ardupilot/${{ matrix.tag }}/Tools/autotest/default_params/copter.parm"
+          head -n 1 "${RUNNER_TEMP}/ap/git-version.txt"
+      - name: Assemble pack
+        run: |
+          python3 scripts/build-pack.py ardupilot --version ${{ matrix.version }} --platform linux-x64 --built official \
+            --binary "${RUNNER_TEMP}/ap/arducopter" --git-version-file "${RUNNER_TEMP}/ap/git-version.txt" \
+            --copter-parm "${RUNNER_TEMP}/ap/copter.parm" --out dist
+      - name: Smoke test
+        run: dist/ardupilot-copter-${{ matrix.version }}/bin/arducopter --help > help.txt && head -n 3 help.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pack-ardupilot-copter-${{ matrix.version }}-linux-x64
+          path: dist/*.tar.gz*
+          if-no-files-found: error
+          retention-days: 14
+
+  ardupilot-mac:
+    name: ArduCopter ${{ matrix.version.version }} ${{ matrix.platform }}
+    needs: plan
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(needs.plan.outputs.ardupilot) }}
+        platform: [mac-arm64, mac-x64]
+        include:
+          - { platform: mac-arm64, runner: macos-15 }
+          - { platform: mac-x64, runner: macos-15-intel }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Clone ${{ matrix.version.tag }}
+        run: |
+          git clone --depth 1 --branch "${{ matrix.version.tag }}" https://github.com/ArduPilot/ardupilot.git "${RUNNER_TEMP}/ardupilot"
+          cd "${RUNNER_TEMP}/ardupilot"
+          git submodule update --init --recursive --depth 1 || git submodule update --init --recursive
+          git rev-parse HEAD
+      - name: Build SITL
+        working-directory: ${{ runner.temp }}/ardupilot
+        run: |
+          python -m pip install --disable-pip-version-check empy==3.3.4 pexpect future lxml dronecan
+          python ./waf configure --board sitl
+          python ./waf copter
+          ls -l build/sitl/bin
+      - name: Assemble pack
+        run: |
+          src="${RUNNER_TEMP}/ardupilot"
+          python scripts/build-pack.py ardupilot --version ${{ matrix.version.version }} --platform ${{ matrix.platform }} --built ci \
+            --binary "${src}/build/sitl/bin/arducopter" --git "$(git -C "${src}" rev-parse HEAD)" \
+            --copter-parm "${src}/Tools/autotest/default_params/copter.parm" --out dist
+      - name: Smoke test
+        run: dist/ardupilot-copter-${{ matrix.version.version }}/bin/arducopter --help > help.txt && head -n 3 help.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pack-ardupilot-copter-${{ matrix.version.version }}-${{ matrix.platform }}
+          path: dist/*.tar.gz*
+          if-no-files-found: error
+          retention-days: 14
+
+  # ArduPilot's own method for Windows SITL (.github/workflows/cygwin_build.yml, Tools/scripts/cygwin_build.sh):
+  # a Cygwin toolchain build of arducopter.exe, shipped with the Cygwin DLLs it links against.
+  ardupilot-windows:
+    name: ArduCopter ${{ matrix.version }} win-x64
+    needs: plan
+    runs-on: windows-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.ardupilot) }}
+    env:
+      CYGWIN_ROOT: C:\cygwin
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Cygwin
+        shell: pwsh
+        run: |
+          $gcc = if ("${{ inputs.cygwin_gcc }}") { "gcc-g++=${{ inputs.cygwin_gcc }}" } else { "gcc-g++" }
+          $packages = @($gcc, "binutils", "make", "git", "procps", "gettext", "python39", "python39-devel",
+            "python39-pip", "python39-future", "python39-lxml", "python39-setuptools", "python39-wheel") -join ","
+          Invoke-WebRequest -Uri https://cygwin.com/setup-x86_64.exe -OutFile "$env:RUNNER_TEMP\setup-x86_64.exe"
+          $setup = Start-Process -FilePath "$env:RUNNER_TEMP\setup-x86_64.exe" -Wait -PassThru -NoNewWindow -ArgumentList @(
+            "--quiet-mode", "--no-shortcuts", "--no-admin", "--root", "$env:CYGWIN_ROOT",
+            "--site", "https://mirrors.kernel.org/sourceware/cygwin/", "--local-package-dir", "$env:RUNNER_TEMP\cygwin-packages",
+            "--packages", $packages)
+          if ($setup.ExitCode -ne 0) { throw "Cygwin setup exited with $($setup.ExitCode)" }
+      - name: Build SITL (Cygwin)
+        shell: C:\cygwin\bin\bash.exe --noprofile --norc -eo pipefail '{0}'
+        env:
+          # ignore the carriage returns of the step script the runner writes
+          SHELLOPTS: igncr
+        run: |
+          export PATH=/usr/local/bin:/usr/bin:/bin:$PATH
+          mkdir -p /usr/local/bin
+          ln -sf /usr/bin/python3.9 /usr/local/bin/python
+          ln -sf /usr/bin/python3.9 /usr/local/bin/python3
+          python -m pip install --disable-pip-version-check empy==3.3.4 pexpect dronecan
+          work="$(cygpath "${RUNNER_TEMP}")/ardupilot"
+          git config --global --add safe.directory '*'
+          git clone --depth 1 --branch "${{ matrix.tag }}" https://github.com/ArduPilot/ardupilot.git "${work}"
+          cd "${work}"
+          git submodule update --init --recursive --depth 1 || git submodule update --init --recursive
+          python ./waf configure --toolchain x86_64-pc-cygwin --board sitl
+          python ./waf copter
+          ls -l build/sitl/bin
+      - name: Assemble pack (Cygwin)
+        shell: C:\cygwin\bin\bash.exe --noprofile --norc -eo pipefail '{0}'
+        env:
+          # ignore the carriage returns of the step script the runner writes
+          SHELLOPTS: igncr
+        run: |
+          export PATH=/usr/local/bin:/usr/bin:/bin:$PATH
+          src="$(cygpath "${RUNNER_TEMP}")/ardupilot"
+          exe="${src}/build/sitl/bin/arducopter.exe"
+          [ -f "${exe}" ] || exe="${src}/build/sitl/bin/arducopter"
+          # The DLLs cygcheck reports for the executable (cygwin1.dll, libstdc++, libgcc and their dependencies).
+          libs=()
+          for dll in $(cygcheck "$(cygpath -w "${exe}")" | grep -oP 'cyg[^\s\\/]+\.dll' | sort -u); do
+            libs+=(--lib "/usr/bin/${dll}")
+          done
+          echo "DLLs: ${libs[*]}"
+          cd "$(cygpath "${GITHUB_WORKSPACE}")"
+          python scripts/build-pack.py ardupilot --version ${{ matrix.version }} --platform win-x64 --built ci \
+            --binary "${exe}" --git "$(git -C "${src}" rev-parse HEAD)" \
+            --copter-parm "${src}/Tools/autotest/default_params/copter.parm" "${libs[@]}" --out dist
+          ./dist/ardupilot-copter-${{ matrix.version }}/bin/arducopter.exe --help > help.txt && head -n 3 help.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pack-ardupilot-copter-${{ matrix.version }}-win-x64
+          path: dist/*.tar.gz*
+          if-no-files-found: error
+          retention-days: 14
+
+  px4:
+    name: PX4 ${{ matrix.version.version }} ${{ matrix.platform }}
+    needs: plan
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(needs.plan.outputs.px4) }}
+        # ubuntu-22.04 keeps the glibc requirement of the Linux binary low.
+        platform: [linux-x64, mac-arm64, mac-x64]
+        include:
+          - { platform: linux-x64, runner: ubuntu-22.04 }
+          - { platform: mac-arm64, runner: macos-15 }
+          - { platform: mac-x64, runner: macos-15-intel }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Toolchain (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q build-essential ninja-build libxml2-utils rsync zip
+      - name: Toolchain (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # The rest of the toolchain is Xcode's clang plus the pip packages below.
+          brew list ninja > /dev/null 2>&1 || brew install ninja
+      - name: Python dependencies
+        run: |
+          python -m pip install --disable-pip-version-check cmake ninja kconfiglib jinja2 empy==3.3.4 pyros-genmsg \
+            pyyaml jsonschema future numpy packaging toml
+      - name: Clone v${{ matrix.version.version }}
+        run: |
+          git clone --depth 1 --branch "${{ matrix.version.tag }}" https://github.com/PX4/PX4-Autopilot.git "${RUNNER_TEMP}/px4"
+          cd "${RUNNER_TEMP}/px4"
+          git submodule update --init --recursive --depth 1 || git submodule update --init --recursive
+          # px_update_git_header.py reads the NuttX version from a nuttx-* tag, which a shallow submodule lacks.
+          # SITL does not run NuttX, so a local placeholder tag is enough (fetching every NuttX tag is not).
+          nuttx=platforms/nuttx/NuttX/nuttx
+          if [ -d "${nuttx}" ] && ! git -C "${nuttx}" tag | grep -q '^nuttx-'; then
+            git -C "${nuttx}" tag nuttx-0.0.0
+          fi
+          git describe --tags --always
+      - name: Build SITL
+        working-directory: ${{ runner.temp }}/px4
+        run: |
+          make px4_sitl_default
+          ls -l build/px4_sitl_default/bin/px4
+      - name: Assemble pack
+        run: |
+          src="${RUNNER_TEMP}/px4"
+          python scripts/build-pack.py px4 --version ${{ matrix.version.version }} --platform ${{ matrix.platform }} --built ci \
+            --tree "${src}/build/px4_sitl_default" --git "$(git -C "${src}" rev-parse HEAD)" --out dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pack-px4-${{ matrix.version.version }}-${{ matrix.platform }}
+          path: dist/*.tar.gz*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish ${{ inputs.publish && 'release' || 'index' }}
+    needs: [ardupilot-linux, ardupilot-mac, ardupilot-windows, px4]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: pack-*
+          path: dist
+          merge-multiple: true
+
+      - name: Indexes
+        run: |
+          mkdir -p dist
+          {
+            echo "| Platform | Packs | Size |"
+            echo "|---|---|---|"
+          } > summary.md
+          for platform in linux-x64 mac-arm64 mac-x64 win-x64; do
+            python3 scripts/build-pack.py index dist --platform "${platform}" --out "dist/index-${platform}.json"
+            packs="$(python3 -c 'import json,sys; print(", ".join(p["id"] for p in json.load(open(sys.argv[1]))["packs"]) or "none")' "dist/index-${platform}.json")"
+            size="$(du -ch dist/*-"${platform}".tar.gz 2>/dev/null | tail -n 1 | cut -f1)"
+            echo "| ${platform} | ${packs} | ${size:-0} |" >> summary.md
+          done
+          cat summary.md >> "${GITHUB_STEP_SUMMARY}"
+          ls -l dist
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: autopilots-v1
+          path: |
+            dist/*.tar.gz
+            dist/index-*.json
+          retention-days: 14
+
+      # Not marked latest, so the application releases stay the repository's latest release.
+      - name: Release ${{ env.RELEASE_TAG }}
+        if: ${{ inputs.publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "Autopilot runtime packs bundled with ANet Relay (docs/autopilot-packs.md), built from ${GITHUB_SHA}."
+            echo
+            echo "ArduPilot packs are GPL-3.0 and PX4 packs BSD-3-Clause; each manifest.json names its source tag."
+            echo
+            cat summary.md
+          } > notes.md
+          if gh release view "${RELEASE_TAG}" > /dev/null 2>&1; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${RELEASE_TAG}" -f sha="${GITHUB_SHA}" -F force=true > /dev/null
+            gh release edit "${RELEASE_TAG}" --title "Autopilot runtime packs v1" --notes-file notes.md --latest=false
+          else
+            gh release create "${RELEASE_TAG}" --target "${GITHUB_SHA}" --title "Autopilot runtime packs v1" \
+              --notes-file notes.md --latest=false
+          fi
+          gh release upload "${RELEASE_TAG}" dist/*.tar.gz dist/index-*.json --clobber

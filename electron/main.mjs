@@ -10,6 +10,7 @@ import { configuredOpacity, createCopilotHost } from "./copilot/host.mjs";
 import { createCopilotWindow } from "./copilot/window.mjs";
 import { buildMenu, installEditContextMenu, MENU_ACTIONS } from "./menu.mjs";
 import {
+  autopilotsDir,
   backendLaunch,
   ensureDir,
   iconPath,
@@ -673,6 +674,7 @@ if (!app.requestSingleInstanceLock()) {
       logPath: stdioLogPath(),
       portFile: portFilePath(),
       explicitPort: DEV ? process.env.RELAY_HTTP_PORT : undefined,
+      autopilotsDir: autopilotsDir(),
     });
     backend.on("exit", onBackendExit);
 
