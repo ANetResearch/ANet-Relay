@@ -7,8 +7,6 @@ GitHub Release notes for its tag.
 
 ## [0.5.4] - 2026-11-09
 
-<!-- Integrated on main; the release step confirms the date and replaces the pack and installer sizes with the per-platform figures. -->
-
 Firmware twins fly the official PX4 and ArduPilot firmware against Relay's
 physics with a real aircraft's version and parameters, PX4 flight controllers
 on USB run hardware in the loop, and the simulator gains frames, acro mode and
@@ -38,7 +36,8 @@ crashes that tumble.
     parameters and a baseline tuned to hover out of the box.
 - **Autopilot runtime packs** ship with the installer: ArduCopter 4.7.2,
   4.6.3, 4.5.7, 4.4.4 and 4.3.8, PX4 1.17.0, 1.16.2, 1.15.4 and 1.14.4 (PX4
-  not on Windows). About 5 to 6 MB per pack, 25 to 30 MB per installer.
+  not on Windows). 1.7 to 2.6 MB compressed per pack (Windows ArduCopter packs
+  about 4.4 MB with their Cygwin DLLs), 16 to 22 MB per installer.
   Settings lists them and imports further packs. Format:
   [docs/autopilot-packs.md](docs/autopilot-packs.md).
   - ArduPilot packs built from source bind SITL's RC input and the JSON
