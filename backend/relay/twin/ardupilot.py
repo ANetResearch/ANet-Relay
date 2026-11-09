@@ -11,9 +11,10 @@ Links, all on 127.0.0.1 (11 §2):
   firmware opens no TCP server (stock SITL listens on 0.0.0.0 for them).
 * Physics: Relay binds UDP ``9002 + 10n``; the firmware sends ``magic 18458, frame_rate, frame_count,
   pwm[16]`` per frame and waits for one ``\\n{json}\\n`` reply with the state after that frame.
-* The official binary also binds two UDP sockets on 0.0.0.0 that no option moves: the RC input port
-  ``5501 + 10n`` and the physics client socket. Relay checks the RC port is free before it starts the
-  twin; the pack build is where a loopback-only binary would come from (11 §2, documented limitation).
+* The firmware also binds two UDP sockets of its own that no option moves: the RC input port ``5501 + 10n``
+  and the physics client socket. The packs Relay builds from patched source (manifest ``"loopback":
+  true``, ``autopilots/ardupilot/loopback.py``) bind both to 127.0.0.1; the official binary binds them on
+  0.0.0.0 (11 §2, §14). Relay checks the RC port is free on every interface before it starts the twin.
 
 Lockstep: ``advance`` runs firmware frames until the firmware's time reaches the next 250 Hz world step;
 at ``SIM_RATE_HZ 1000`` that is four frames. A frame count that goes backwards is a firmware reboot: the

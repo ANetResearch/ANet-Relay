@@ -3,6 +3,11 @@
 # index-<platform>.json. Run by hand; re-running replaces the assets of the same name and moves the tag to
 # the commit of the run. A version that fails to build on a platform is left out of that platform's index
 # and does not stop the other builds.
+#
+# Every source build carries one source change per firmware so that the twin never listens beyond this
+# computer (11 §2): PX4 binds its MAVLink UDP links to 127.0.0.1 (step "Bind MAVLink to loopback"), ArduPilot
+# its RC input and JSON physics sockets (autopilots/ardupilot/loopback.py). Those packs are assembled with
+# build-pack.py --loopback (manifest "loopback": true). Flight code is untouched.
 name: Autopilots
 
 on:
@@ -16,6 +21,13 @@ on:
         description: Cygwin gcc-g++ package version for the Windows builds (empty for the current one)
         type: string
         default: ""
+      ardupilot_linux:
+        description: >-
+          ArduPilot linux-x64 packs: source (static build patched to bind 127.0.0.1) or official (the upstream
+          static SITL binary, which binds its RC input and physics client sockets on 0.0.0.0)
+        type: choice
+        options: [source, official]
+        default: source
 
 permissions:
   contents: read
@@ -53,7 +65,9 @@ jobs:
           EOF
           cat "${GITHUB_OUTPUT}"
 
-  # Official static SITL binaries: no build needed.
+  # A static waf build of the tag with the loopback patch (default), or the official static SITL binary of the
+  # same tag (input ardupilot_linux: official) in case a source build breaks. ubuntu-22.04 keeps the glibc of
+  # the build low; the static link does not depend on it at run time.
   ardupilot-linux:
     name: ArduCopter ${{ matrix.version }} linux-x64
     needs: plan
@@ -63,9 +77,43 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.ardupilot) }}
+    env:
+      AP_LINUX: ${{ inputs.ardupilot_linux || 'source' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        if: env.AP_LINUX == 'source'
+        with:
+          # ArduPilot 4.3 and 4.4 open files with mode 'rU', which Python 3.11 removed.
+          python-version: ${{ (startsWith(matrix.version, '4.3.') || startsWith(matrix.version, '4.4.')) && '3.10' || env.PYTHON_VERSION }}
+      - name: Clone ${{ matrix.tag }}
+        if: env.AP_LINUX == 'source'
+        run: |
+          git clone --depth 1 --branch "${{ matrix.tag }}" https://github.com/ArduPilot/ardupilot.git "${RUNNER_TEMP}/ardupilot"
+          cd "${RUNNER_TEMP}/ardupilot"
+          git submodule update --init --recursive --depth 1 || git submodule update --init --recursive
+          git rev-parse HEAD
+      - name: Bind SITL sockets to loopback
+        if: env.AP_LINUX == 'source'
+        run: python autopilots/ardupilot/loopback.py "${RUNNER_TEMP}/ardupilot"
+      - name: Build SITL
+        if: env.AP_LINUX == 'source'
+        working-directory: ${{ runner.temp }}/ardupilot
+        run: |
+          python -m pip install --disable-pip-version-check empy==3.3.4 pexpect future lxml dronecan
+          python ./waf configure --board sitl --static
+          python ./waf copter
+          ls -l build/sitl/bin
+          file build/sitl/bin/arducopter
+      - name: Assemble pack
+        if: env.AP_LINUX == 'source'
+        run: |
+          src="${RUNNER_TEMP}/ardupilot"
+          python scripts/build-pack.py ardupilot --version ${{ matrix.version }} --platform linux-x64 --built ci --loopback \
+            --binary "${src}/build/sitl/bin/arducopter" --git "$(git -C "${src}" rev-parse HEAD)" \
+            --copter-parm "${src}/Tools/autotest/default_params/copter.parm" --out dist
       - name: Download official SITL
+        if: env.AP_LINUX == 'official'
         run: |
           base="https://firmware.ardupilot.org/Copter/stable-${{ matrix.version }}/SITL_x86_64_linux_gnu"
           mkdir -p "${RUNNER_TEMP}/ap"
@@ -74,7 +122,8 @@ jobs:
           curl -fsSL --retry 3 -o "${RUNNER_TEMP}/ap/copter.parm" \
             "https://raw.githubusercontent.com/ArduPilot/ardupilot/${{ matrix.tag }}/Tools/autotest/default_params/copter.parm"
           head -n 1 "${RUNNER_TEMP}/ap/git-version.txt"
-      - name: Assemble pack
+      - name: Assemble pack (official)
+        if: env.AP_LINUX == 'official'
         run: |
           python3 scripts/build-pack.py ardupilot --version ${{ matrix.version }} --platform linux-x64 --built official \
             --binary "${RUNNER_TEMP}/ap/arducopter" --git-version-file "${RUNNER_TEMP}/ap/git-version.txt" \
@@ -113,6 +162,8 @@ jobs:
           cd "${RUNNER_TEMP}/ardupilot"
           git submodule update --init --recursive --depth 1 || git submodule update --init --recursive
           git rev-parse HEAD
+      - name: Bind SITL sockets to loopback
+        run: python autopilots/ardupilot/loopback.py "${RUNNER_TEMP}/ardupilot"
       - name: Build SITL
         working-directory: ${{ runner.temp }}/ardupilot
         run: |
@@ -128,7 +179,7 @@ jobs:
       - name: Assemble pack
         run: |
           src="${RUNNER_TEMP}/ardupilot"
-          python scripts/build-pack.py ardupilot --version ${{ matrix.version.version }} --platform ${{ matrix.platform }} --built ci \
+          python scripts/build-pack.py ardupilot --version ${{ matrix.version.version }} --platform ${{ matrix.platform }} --built ci --loopback \
             --binary "${src}/build/sitl/bin/arducopter" --git "$(git -C "${src}" rev-parse HEAD)" \
             --copter-parm "${src}/Tools/autotest/default_params/copter.parm" --out dist
       - name: Smoke test
@@ -184,6 +235,7 @@ jobs:
           git clone --depth 1 --branch "${{ matrix.tag }}" https://github.com/ArduPilot/ardupilot.git "${work}"
           cd "${work}"
           git submodule update --init --recursive --depth 1 || git submodule update --init --recursive
+          python "$(cygpath "${GITHUB_WORKSPACE}")/autopilots/ardupilot/loopback.py" "${work}"
           python ./waf configure --toolchain x86_64-pc-cygwin --board sitl
           python ./waf copter
           ls -l build/sitl/bin
@@ -204,7 +256,7 @@ jobs:
           done
           echo "DLLs: ${libs[*]}"
           cd "$(cygpath "${GITHUB_WORKSPACE}")"
-          python scripts/build-pack.py ardupilot --version ${{ matrix.version }} --platform win-x64 --built ci \
+          python scripts/build-pack.py ardupilot --version ${{ matrix.version }} --platform win-x64 --built ci --loopback \
             --binary "${exe}" --git "$(git -C "${src}" rev-parse HEAD)" \
             --copter-parm "${src}/Tools/autotest/default_params/copter.parm" "${libs[@]}" --out dist
           ls -l "dist/ardupilot-copter-${{ matrix.version }}/bin"
@@ -307,7 +359,7 @@ jobs:
       - name: Assemble pack
         run: |
           src="${RUNNER_TEMP}/px4"
-          python scripts/build-pack.py px4 --version ${{ matrix.version.version }} --platform ${{ matrix.platform }} --built ci \
+          python scripts/build-pack.py px4 --version ${{ matrix.version.version }} --platform ${{ matrix.platform }} --built ci --loopback \
             --tree "${src}/build/px4_sitl_default" --git "$(git -C "${src}" rev-parse HEAD)" --out dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

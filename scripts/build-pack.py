@@ -3,8 +3,8 @@
 
 Standard library only: it runs on the CI runners (Linux, macOS, Windows) before any Relay dependency exists.
 
-  build-pack.py ardupilot --version 4.7.2 --platform linux-x64 --binary arducopter \\
-      --git-version-file git-version.txt --copter-parm copter.parm --built official --out dist
+  build-pack.py ardupilot --version 4.7.2 --platform linux-x64 --binary build/sitl/bin/arducopter \\
+      --git fb773567 --copter-parm copter.parm --built ci --loopback --out dist
   build-pack.py px4 --version 1.16.2 --platform linux-x64 --tree PX4-Autopilot/build/px4_sitl_default \\
       --git 54f0455f --built ci --out dist
   build-pack.py index --platform linux-x64 dist [--out dist/index-linux-x64.json]
@@ -70,6 +70,7 @@ MANIFEST_KEYS = (
     "license",
     "source",
     "built",
+    "loopback",
 )
 
 
@@ -198,15 +199,19 @@ def write_tarball(out: Path, root: Path, platform: str) -> tuple[Path, str]:
     return tar_path, digest
 
 
-def base_manifest(family: str, version: str, git: str, platform: str, built: str) -> dict:
+def base_manifest(
+    family: str, version: str, git: str, platform: str, built: str, loopback: bool = False
+) -> dict:
     if not VERSION_RE.match(version):
         raise PackError(f"version must be x.y.z: {version!r}")
     if platform not in PLATFORMS:
         raise PackError(f"platform must be one of {', '.join(PLATFORMS)}")
     if family == "px4" and platform == "win-x64":
         raise PackError("PX4 SITL has no native Windows build (11 §3.1)")
+    if loopback and built == "official":
+        raise PackError("--loopback describes a patched source build; an official binary is not one")
     info = FAMILIES[family]
-    return {
+    manifest = {
         "format": FORMAT,
         "id": pack_id(family, version),
         "family": family,
@@ -218,6 +223,10 @@ def base_manifest(family: str, version: str, git: str, platform: str, built: str
         "source": info["source"].format(version=version),
         "built": built,
     }
+    if loopback:
+        # The firmware was built from source patched to bind every socket to 127.0.0.1 (autopilots.yml).
+        manifest["loopback"] = True
+    return manifest
 
 
 def fresh_dir(out: Path, pid: str) -> Path:
@@ -232,7 +241,7 @@ def build_ardupilot(args: argparse.Namespace) -> dict:
     git = args.git or (git_from_version_file(Path(args.git_version_file)) if args.git_version_file else "")
     if not git:
         raise PackError("--git or --git-version-file is required")
-    manifest = base_manifest("ardupilot", args.version, git, args.platform, args.built)
+    manifest = base_manifest("ardupilot", args.version, git, args.platform, args.built, args.loopback)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     root = fresh_dir(out, manifest["id"])
@@ -256,7 +265,7 @@ def build_ardupilot(args: argparse.Namespace) -> dict:
 
 
 def build_px4(args: argparse.Namespace) -> dict:
-    manifest = base_manifest("px4", args.version, args.git, args.platform, args.built)
+    manifest = base_manifest("px4", args.version, args.git, args.platform, args.built, args.loopback)
     tree = Path(args.tree)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -304,7 +313,7 @@ def finish(out: Path, root: Path, manifest: dict) -> dict:
 def check_manifest(manifest: object, where: str) -> dict:
     if not isinstance(manifest, dict):
         raise PackError(f"{where}: manifest is not an object")
-    missing = [key for key in MANIFEST_KEYS if key not in manifest and key != "romfs"]
+    missing = [key for key in MANIFEST_KEYS if key not in manifest and key not in ("romfs", "loopback")]
     if missing:
         raise PackError(f"{where}: manifest lacks {', '.join(missing)}")
     if manifest["format"] != FORMAT:
@@ -377,6 +386,11 @@ def parser() -> argparse.ArgumentParser:
         p.add_argument("--out", required=True, help="output directory")
         p.add_argument("--strip", help="strip tool (default: strip on PATH)")
         p.add_argument("--no-strip", action="store_true")
+        p.add_argument(
+            "--loopback",
+            action="store_true",
+            help='built from source patched to bind 127.0.0.1 only (manifest "loopback": true)',
+        )
 
     ap = sub.add_parser("ardupilot", help="ArduCopter SITL pack from a built or official binary")
     common(ap)

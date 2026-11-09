@@ -11,8 +11,12 @@ pack format; the twin runtime (`backend/relay/twin/`) reads exactly what is desc
 
 | Firmware | Versions | linux-x64 | mac-arm64, mac-x64 | win-x64 |
 |---|---|---|---|---|
-| ArduCopter | 4.7.2, 4.6.3, 4.5.7, 4.4.4, 4.3.8 | official SITL binary (firmware.ardupilot.org) | built by CI with waf | built by CI with Cygwin |
+| ArduCopter | 4.7.2, 4.6.3, 4.5.7, 4.4.4, 4.3.8 | built by CI with waf, statically linked | built by CI with waf | built by CI with Cygwin |
 | PX4 | 1.17.0, 1.16.2, 1.15.4, 1.14.4 | built by CI | built by CI | not provided (PX4 SITL has no native Windows build) |
+
+Every pack is built from its source tag with one source change that binds the firmware's sockets to
+127.0.0.1 ([Loopback](#loopback)). The official ArduPilot SITL binary for linux-x64
+(firmware.ardupilot.org) remains available as a fallback build (`built: "official"`, without `loopback`).
 
 A version that fails to build on a platform is left out of that platform's index; `index.json` is the
 authoritative list of what a given installer contains.
@@ -57,7 +61,8 @@ authoritative list of what a given installer contains.
   "size_bytes": 5908019,
   "license": "GPL-3.0-only",
   "source": "https://github.com/ArduPilot/ardupilot/tree/Copter-4.7.2",
-  "built": "official"
+  "built": "ci",
+  "loopback": true
 }
 ```
 
@@ -77,6 +82,7 @@ authoritative list of what a given installer contains.
 | `license` | `GPL-3.0-only` (ArduPilot) or `BSD-3-Clause` (PX4) |
 | `source` | URL of the source tag |
 | `built` | `official` (an upstream binary) or `ci` (built by `.github/workflows/autopilots.yml`) |
+| `loopback` | optional; `true` when the firmware was built from source patched to bind every socket to 127.0.0.1 ([Loopback](#loopback)); absent or `false` otherwise. Only a `ci` build can carry it |
 
 Readers must ignore unknown fields and reject a manifest whose `format` is not 1.
 
@@ -126,9 +132,9 @@ example `--serial0 tcpclient:127.0.0.1:<port>` or `--serial0 udpclient:127.0.0.1
 The twin (`relay/twin/ardupilot.py`) uses `--serial0 tcpclient:127.0.0.1:<5760 + 10n>` and turns the other
 ports off with `--serial1 none --serial2 none --serial5 none` through `--serial8 none`. `--serial3` and
 `--serial4` stay at their defaults (SITL's internal GPS simulation; `none` there crashes the firmware), and so
-does `--serial9` (`none` crashes 4.7). The official binary still binds two UDP sockets on 0.0.0.0 that no
-option changes: the RC input `5501 + 10n` and the client socket of the JSON physics link. Only a pack built
-from patched source removes them (11 §2, §14).
+does `--serial9` (`none` crashes 4.7). SITL also binds two UDP sockets that no option moves, the RC input
+`5501 + 10n` and the client socket of the JSON physics link; a `loopback` pack binds them to 127.0.0.1, the
+official binary on 0.0.0.0 ([Loopback](#loopback)).
 
 ### PX4
 
@@ -158,10 +164,32 @@ PX4_SIM_MODEL=none_iris RELAY_PX4_PARAMS=<file> \
 
 PX4 then connects to the HIL simulator on TCP `4560 + n` and blocks until Relay accepts. The pack path may
 contain spaces (`/Applications/ANet Relay.app/...`), the working directory must not: `rcS` expands it
-unquoted. Stock PX4 binds its MAVLink UDP sockets on every interface and has no bind-address option, so the
-packs Relay builds carry one source change (`autopilots.yml`, step "Bind MAVLink to loopback"):
-`Mavlink::init_udp` binds `INADDR_LOOPBACK`. Flight code is untouched. The baseline also sets
+unquoted. Stock PX4 binds its MAVLink UDP sockets on every interface and has no bind-address option; the
+packs carry the source change described under [Loopback](#loopback). The baseline also sets
 `UXRCE_DDS_CFG 0`, so no micro-ROS client sends to `127.0.0.1:8888`.
+
+## Loopback
+
+A twin never listens beyond this computer (11 §2). Stock SITL builds of both firmwares bind some UDP sockets
+on every interface with no option to change it, which exposes them to the local network and, on macOS and
+Windows, raises the firewall prompt the first time a twin starts. Every source build therefore carries one
+source change per firmware, applied before the build; flight code is untouched.
+
+| Firmware | Socket | Stock bind | Change |
+|---|---|---|---|
+| ArduPilot | RC input `5501 + 10n` (`AP_RCProtocol_UDP.cpp` from 4.6, `AP_HAL_SITL/SITL_State.cpp` in 4.3 to 4.5) | `0.0.0.0` | binds `127.0.0.1` |
+| ArduPilot | JSON physics client socket (`SITL/SIM_JSON.cpp`; unbound, so the first `sendto` binds an ephemeral port on `0.0.0.0`) | `0.0.0.0:<ephemeral>` | binds `127.0.0.1:0` when the physics address is `127.0.0.1` |
+| PX4 | MAVLink UDP links (`Mavlink::init_udp`) | `INADDR_ANY` | binds `INADDR_LOOPBACK` |
+
+The ArduPilot change is `autopilots/ardupilot/loopback.py <source tree>` (standard library only); the PX4
+change is the step "Bind MAVLink to loopback" in `autopilots.yml`. Both are exact string replacements that
+must match exactly once, so a source layout they were not written for fails the build instead of producing
+an unpatched pack. The packs built this way are assembled with `build-pack.py --loopback` and carry
+`"loopback": true`.
+
+The firmware twin integration test (`backend/tests/test_twin_integration.py`) reads the firmware process's
+sockets from `/proc` on Linux: a `loopback` pack (and every PX4 pack) may bind nothing beyond 127.0.0.1; the
+official ArduPilot binary is allowed exactly its RC input port and its physics client socket on 0.0.0.0.
 
 ## Building
 
@@ -169,20 +197,29 @@ packs Relay builds carry one source change (`autopilots.yml`, step "Bind MAVLink
 `strip` tool is on `PATH`, and writes the tarball and its `.sha256`:
 
 ```
+python3 autopilots/ardupilot/loopback.py ardupilot     # Copter-4.7.2 checkout with submodules
+(cd ardupilot && ./waf configure --board sitl --static && ./waf copter)
+python3 scripts/build-pack.py ardupilot --version 4.7.2 --platform linux-x64 --built ci --loopback \
+  --binary ardupilot/build/sitl/bin/arducopter --git "$(git -C ardupilot rev-parse HEAD)" \
+  --copter-parm ardupilot/Tools/autotest/default_params/copter.parm --out dist
 python3 scripts/build-pack.py ardupilot --version 4.7.2 --platform linux-x64 --built official \
   --binary arducopter --git-version-file git-version.txt --copter-parm copter.parm --out dist
-python3 scripts/build-pack.py px4 --version 1.16.2 --platform linux-x64 --built ci \
+python3 scripts/build-pack.py px4 --version 1.16.2 --platform linux-x64 --built ci --loopback \
   --tree PX4-Autopilot/build/px4_sitl_default --git <commit> --out dist
 python3 scripts/build-pack.py index dist --platform linux-x64 --out dist/index-linux-x64.json
 ```
 
 `--lib <file>` (repeatable) adds runtime libraries next to the ArduPilot executable (the Cygwin DLLs);
-`--no-strip` keeps symbols. `index` reads every `*-<platform>.tar.gz` in the directory, and unpacked
-`<id>/manifest.json` directories that have a `<id>-<platform>.tar.gz.sha256` beside them.
+`--no-strip` keeps symbols; `--loopback` records a patched source build (refused with `--built official`).
+ArduPilot's waf needs `empy==3.3.4`, `pexpect` and `future` (4.3 and 4.4 also Python 3.10 or older).
+`index` reads every `*-<platform>.tar.gz` in the directory, and unpacked `<id>/manifest.json` directories
+that have a `<id>-<platform>.tar.gz.sha256` beside them.
 
 `.github/workflows/autopilots.yml` (manual) builds every version on every platform and publishes the
-release `autopilots-v1`; one failing version does not stop the others. `release.yml` downloads the
-platform's packs into `build/autopilots/` before electron-builder, which places them at
+release `autopilots-v1`; one failing version does not stop the others. Its input `ardupilot_linux` selects
+the linux-x64 ArduPilot packs: `source` (default; the static waf build on ubuntu-22.04 with the loopback
+change) or `official` (the upstream static binary, in case a source build breaks). `release.yml` downloads
+the platform's packs into `build/autopilots/` before electron-builder, which places them at
 `resources/autopilots`; on macOS `scripts/after-pack.cjs` signs their Mach-O files with the app.
 
 Development: `node scripts/fetch-autopilots.mjs [--dir var/autopilots] [--platform linux-x64]` downloads and
