@@ -798,9 +798,12 @@ class Skill:
         if dist <= GOTO_TOLERANCE_M:
             self.finish(f"reached within {dist:.2f} m")
 
-    def _idle(self) -> StickInput:
-        """Neutral sticks while arming: mid throttle where the mode holds altitude, else zero."""
-        hold = self.expect_mode in modes.HOLD_STICK_MODES
+    def _idle(self, host: Host) -> StickInput:
+        """Neutral sticks while arming: zero throttle, except mid throttle where PX4 holds altitude.
+
+        ArduPilot (4.6 and later) refuses to arm with any throttle input in every mode ("Throttle (RC3) is
+        not neutral") unless the throttle is centre-sprung (PILOT_THR_BHV bit 0)."""
+        hold = self.expect_mode in modes.HOLD_STICK_MODES and host.autopilot == modes.PX4
         return StickInput(0.0, 0.0, 0.0, 0.5 if hold else 0.0, source="agent")
 
     def _rest(self, last: tuple[float, ...]) -> StickInput:
@@ -820,12 +823,12 @@ class Skill:
             self.expect_mode = self.params["mode"]
             self._phase("mode", now)
         if self.phase == "mode":
-            self.out = self._idle()
+            self.out = self._idle(host)
             if self._ensure_mode(host, self.expect_mode, now):
                 self._phase("arm", now)
             return
         if self.phase == "arm":
-            self.out = self._idle()
+            self.out = self._idle(host)
             if host.armed or self._ensure_armed(host, now):
                 self._phase("play", now)
                 self.mode_at = now
@@ -875,12 +878,12 @@ class Skill:
         airborne = host.armed and host.landed != "ground"
         first = StickInput(*sequence_mod.sample(seq, start_at, trim), source="agent") if airborne else None
         if self.phase == "mode":
-            self.out = first or self._idle()
+            self.out = first or self._idle(host)
             if self._ensure_mode(host, self.expect_mode, now):
                 self._phase("arm", now)
             return
         if self.phase == "arm":
-            self.out = first or self._idle()
+            self.out = first or self._idle(host)
             if host.armed or self._ensure_armed(host, now):
                 self._phase("play", now)
             return
