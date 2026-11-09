@@ -16,6 +16,7 @@ import { compactVehicle, defineTool, enc, flightHelpers, SESSION_NAME, text, Typ
 import { dangerResolver, deviceTools } from "./tools-device.mjs";
 import { PROGRAM_DANGER, programTools } from "./tools-programs.mjs";
 import { matchTools } from "./tools-match.mjs"; // WP-B (07 §3-§4)
+import { twinTools } from "./tools-twin.mjs"; // 11 §12
 
 export const APIS = ["openai-completions", "anthropic-messages", "openai-responses"];
 /** 08 §2: auto leaves thinking to the endpoint; off, low and high declare a reasoning model and set it. */
@@ -64,6 +65,14 @@ export const STICKS_TOOLS = new Set([
   "relay_timeline_record",
   "relay_timeline_from_record",
 ]);
+/**
+ * 11 §12: tool calls that always wait for the operator, whatever the aircraft and also with "Allow all": hardware in
+ * the loop rewrites and reboots a real flight controller. Returns the danger level, or null.
+ */
+export function alwaysApproved(name, args) {
+  if (name === "relay_hitl" && (args?.action ?? "status") !== "status") return "hitl";
+  return null;
+}
 /** Device tools Relay refuses at "sticks" for every session (attitude and velocity targets fly for the agent). */
 const STICKS_HIDDEN_DEVICE = new Set(["device_attitude", "device_velocity"]);
 
@@ -207,8 +216,9 @@ const ARS = Type.Object(
     format: Type.Literal("ars"),
     version: Type.Literal(1),
     name: Type.Optional(Type.String({ maxLength: 80 })),
-    mode: Type.Union([Type.Literal("stabilize"), Type.Literal("althold"), Type.Literal("poshold")], {
-      description: "althold: throttle 0.5 holds height; stabilize: the throttle is thrust (simulators with hover assist off)",
+    mode: Type.Union([Type.Literal("stabilize"), Type.Literal("althold"), Type.Literal("poshold"), Type.Literal("acro")], {
+      description:
+        "althold: throttle 0.5 holds height; stabilize: the throttle is thrust (simulators with hover assist off); acro (11 §9): the sticks set body rates, no self-levelling, flips and inverted flight possible",
     }),
     duration_s: Type.Optional(Type.Number({ maximum: 600 })),
     trim: Type.Optional(ARS_TRIM),
@@ -516,6 +526,7 @@ export function toolsFor(relay, scope = "all", danger = dangerResolver(relay), l
   const tools = relayTools(relay).filter((t) => !sticks || STICKS_TOOLS.has(t.name));
   tools.push(...programTools(relay));
   tools.push(...matchTools(relay)); // WP-B: dogfight and leaderboard, in every scope
+  tools.push(...twinTools(relay)); // 11 §12: firmware twins are simulators, in every scope and at every level
   if (scope === "flight") return tools;
   tools.push(...deviceTools(relay, danger).filter((t) => !sticks || !STICKS_HIDDEN_DEVICE.has(t.name)));
   if (scope === "flight+device") return tools;
@@ -545,6 +556,8 @@ export function systemPrompt(lang, scope = "all", level = "full") {
     "- program_*, challenge_*, job_status, duel_run, ladder, airframe_set (programs): write, check, test, judge and deploy onboard flight programs that fly the aircraft at 50 Hz, tune them live, read their status and log, run duels, and set simulator airframe defects. The guide at the end of these instructions explains how to write them.",
     // WP-B (07 §3-§4)
     "- dogfight_start, dogfight_stop, dogfight_status, leaderboard (arena): start a timed dogfight of simulated aircraft in one call (Relay adds the simulators, arms them and deploys a program per role; the programs fly with sticks only), stop it, read its state and the leaderboard of this terminal and its LAN peers.",
+    // 11 §12
+    "- relay_autopilots_list, relay_firmware_identify, relay_twin_* and relay_sim_frame (firmware twins): the official PX4 or ArduPilot firmware with a real aircraft's version and parameters flies against Relay's physics as a simulator (sim-N). Identify the real aircraft's firmware, capture a twin profile once its parameters are read, start the twin and fly it with the flight tools; relay_twin_status reports the process and the parameters left out.",
   );
   if (scope !== "flight") {
     parts.push(
@@ -553,7 +566,8 @@ export function systemPrompt(lang, scope = "all", level = "full") {
   }
   if (scope === "all") {
     parts.push(
-      "- app_* (application): the ANet Relay window and backend: language, workspace, selection, stage view, inspector, settings, connect dialog, preferences, controllers and possession, records and replay, the Copilot window, the main window, screenshots, network scan, connecting, simulators, settings, alerts, records and refly options. The window shows a notice for what you do there.",
+      "- app_* (application): the ANet Relay window and backend: language, workspace, selection, stage view, inspector, settings, connect dialog, preferences, controllers and possession, records and replay, the Copilot window, the main window, screenshots, network scan, connecting (also over a USB serial port: relay_serial_ports, app_connect serial), simulators, settings, alerts, records and refly options. The window shows a notice for what you do there.",
+      "- relay_hitl (hardware in the loop, PX4 only, USB serial link): status, start and stop. Only on the user's explicit request; pass confirm HITL with start. start and stop always wait for the operator's approval, also with Allow all: the card asks them to confirm the propellers are removed. For ArduPilot recommend a firmware twin instead (ArduPilot removed HIL).",
     );
   }
   parts.push(
@@ -846,6 +860,13 @@ export function createCopilot({ relay, models, model, emit, lang = () => "en", s
     toolExecution: "sequential",
     identity: { attribution: null },
     beforeToolCall: async ({ toolCall, args }) => {
+      // 11 §12: some calls ask on every aircraft, and "Allow all" never approves them
+      const always = alwaysApproved(toolCall.name, args);
+      if (always) {
+        const info = (await kindOf(args.vehicle)) ?? { label: String(args.vehicle ?? "") };
+        const ok = await requestApproval(toolCall.id, toolCall.name, args, info, always);
+        return ok ? undefined : { block: true, reason: "The operator declined this command. Do not retry it unless asked." };
+      }
       const level = await levelOf(toolCall.name, args);
       if (!level) return undefined;
       const info = await kindOf(args.vehicle);

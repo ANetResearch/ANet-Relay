@@ -232,7 +232,13 @@ function ApprovalCard({ item }: { item: Extract<CopilotItem, { kind: 'approval' 
       {item.state === 'pending' ? (
         <>
           <p className="text-[var(--g400)]">
-            {danger === 'program' ? t('cp.approval.programBody') : generic ? t('cp.approval.dangerBody') : t('cp.approval.body')}
+            {danger === 'hitl'
+              ? t('cp.approval.hitlBody')
+              : danger === 'program'
+                ? t('cp.approval.programBody')
+                : generic
+                  ? t('cp.approval.dangerBody')
+                  : t('cp.approval.body')}
           </p>
           <div className="flex gap-1.5">
             <button type="button" className="cp-approve" onClick={() => decide(true)} data-approve="">
@@ -242,9 +248,12 @@ function ApprovalCard({ item }: { item: Extract<CopilotItem, { kind: 'approval' 
               {t('cp.approval.decline')}
             </Button>
             <span className="flex-1" />
-            <Button variant="ghost" size="sm" onClick={() => void allowAll()} title={t('cp.approval.allHint')} data-approve-all="">
-              {t('cp.approval.all')}
-            </Button>
+            {/* 11 §12: hardware in the loop is approved one command at a time; Allow all does not cover it */}
+            {danger === 'hitl' ? null : (
+              <Button variant="ghost" size="sm" onClick={() => void allowAll()} title={t('cp.approval.allHint')} data-approve-all="">
+                {t('cp.approval.all')}
+              </Button>
+            )}
           </div>
         </>
       ) : (

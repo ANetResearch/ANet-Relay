@@ -47,6 +47,9 @@ const en = {
   // onboard programs (WP-4b, 06 §6)
   'cp.danger.program': 'Onboard program',
   'cp.approval.programBody': 'Copilot wants to run an onboard program on a real aircraft. The program flies it until it is stopped. Check the area and the aircraft, and keep the stop control within reach.',
+  // hardware in the loop (11 §7, §12): always asked, never covered by Allow all
+  'cp.danger.hitl': 'Hardware in the loop',
+  'cp.approval.hitlBody': 'Copilot wants to start or stop hardware in the loop on this flight controller. Relay backs up and rewrites its parameters and reboots it. Approve only with the propellers removed. Allow all does not apply to this command.',
   'cp.suggest.program': 'Write a hover program for the selected simulator and run its tests',
   'cp.approval.approve': 'Approve',
   'cp.approval.decline': 'Decline',
@@ -193,6 +196,9 @@ const zh: Record<CopilotKey, string> = {
   // 机载程序（WP-4b，06 §6）
   'cp.danger.program': '机载程序',
   'cp.approval.programBody': 'Copilot 请求在一架真机上运行机载程序。程序将持续驾驶飞机，直到被停止。批准前请确认场地与飞机状态，并随时准备急停。',
+  // 硬件在环（11 §7、§12）：每次都需批准，不受“全部允许”影响
+  'cp.danger.hitl': '硬件在环',
+  'cp.approval.hitlBody': 'Copilot 请求在这块飞控上启动或停止硬件在环。Relay 将备份并改写其参数，然后重启飞控。请确认已拆下螺旋桨后再批准。“全部允许”对此命令不适用。',
   'cp.suggest.program': '为选中的模拟机编写一个悬停程序并运行单元测试',
   'cp.approval.approve': '批准',
   'cp.approval.decline': '拒绝',

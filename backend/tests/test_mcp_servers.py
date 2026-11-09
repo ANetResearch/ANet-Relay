@@ -167,12 +167,16 @@ def test_prefixes_and_counts(stub):
         device_mcp: [t.name for t in device_mcp.build_tools()],
         app_mcp: [t.name for t in app_mcp.build_tools()],
     }
-    assert len(names[flight_mcp]) == 26 and {"relay_sticks_for", "relay_refly"} <= set(names[flight_mcp])
+    assert len(names[flight_mcp]) == 34 and {"relay_sticks_for", "relay_refly"} <= set(names[flight_mcp])
+    assert len(flight_mcp.STICKS_TOOL_NAMES) == 26 and TWIN_TOOLS <= flight_mcp.STICKS_TOOL_NAMES
     assert all(n.startswith("relay_") for n in names[flight_mcp])
     assert all(n.startswith("device_") for n in names[device_mcp])
     # WP-4b: the program tools keep the names of the 06 §6 table
     # WP-B: and the dogfight tools of 07 §3
     extra = set(programs_mcp.PROGRAM_TOOL_NAMES) | set(match_mcp.MATCH_TOOL_NAMES)
+    extra |= {"relay_hitl", "relay_serial_ports"}  # 11 §12: named like the Copilot tools
+    assert len(names[app_mcp]) == 67 and extra - set(names[app_mcp]) == set()
+    assert not {"relay_hitl", "relay_serial_ports"} & set(names[flight_mcp])  # HITL: app server only
     assert all(n.startswith("app_") or n in extra for n in names[app_mcp])
     ui = {
         "app_set_language",
@@ -502,6 +506,40 @@ APP_REST = [
         None,
     ),
     ("app_sims_remove", {"id": ["sim-2", "sim-3"]}, "DELETE", "/sims", None, None),
+    (
+        "app_sims_add",
+        {"engine": "sitl", "pack": "px4-1.16.2", "frame": {"preset": "small-250"}},
+        "POST",
+        "/sims",
+        {"engine": "sitl", "pack": "px4-1.16.2", "frame": {"preset": "small-250"}},
+        None,
+    ),
+    (
+        "app_connect_address",
+        {"serial": {"device": "/dev/ttyACM0", "baud": "auto"}},
+        "POST",
+        "/vehicles",
+        {"serial": {"device": "/dev/ttyACM0", "baud": "auto"}},
+        None,
+    ),
+    ("relay_serial_ports", {}, "GET", "/serial/ports", None, None),
+    ("relay_hitl", {"vehicle": "real-1"}, "GET", "/vehicles/real-1/hitl", None, None),
+    (
+        "relay_hitl",
+        {"vehicle": "real-1", "action": "start", "confirm": "HITL"},
+        "POST",
+        "/vehicles/real-1/hitl",
+        {"action": "start", "confirm": "HITL"},
+        None,
+    ),
+    (
+        "relay_hitl",
+        {"vehicle": "real-1", "action": "stop"},
+        "POST",
+        "/vehicles/real-1/hitl",
+        {"action": "stop"},
+        None,
+    ),
     ("app_sim_reset", {"vehicle": "sim-1"}, "POST", "/sims/sim-1/reset", {}, None),
     ("app_sim_assist", {"vehicle": "sim-1", "on": False}, "POST", "/sims/sim-1/assist", {"on": False}, None),
     ("app_settings_get", {}, "GET", "/settings", None, None),
@@ -537,6 +575,118 @@ def test_app_rest_tools(stub, tool, args, method, path, body, auth):
         assert req["query"] == {"id": ["sim-2", "sim-3"]}
     if tool == "app_records_list":
         assert req["query"] == {"limit": ["5"]}
+
+
+def test_app_hitl_and_connect_check_their_arguments(stub):
+    """11 §12: HITL start needs the confirm word; a connection is by host or by serial, never both."""
+    server = make(app_mcp, stub)
+    before = len(stub.requests)
+    result = call(server, "relay_hitl", {"vehicle": "real-1", "action": "start"})
+    assert result["isError"] is True and "HITL" in result["content"][0]["text"]
+    result = call(server, "app_connect_address", {"host": "10.0.0.5", "serial": {"device": "COM5"}})
+    assert result["isError"] is True and "host or serial" in result["content"][0]["text"]
+    assert len(stub.requests) == before
+    tool = next(t for t in rpc(server, "tools/list")["result"]["tools"] if t["name"] == "relay_hitl")
+    assert tool["annotations"]["destructiveHint"] is True
+    assert tool["inputSchema"]["properties"]["confirm"]["enum"] == ["HITL"]
+    sims = next(t for t in rpc(server, "tools/list")["result"]["tools"] if t["name"] == "app_sims_add")
+    assert sims["inputSchema"]["properties"]["engine"]["enum"] == ["relay", "sitl"]
+    reset = next(t for t in rpc(server, "tools/list")["result"]["tools"] if t["name"] == "app_sim_reset")
+    assert "crashed" in reset["description"] and "restarts its firmware" in reset["description"]
+    stub.fail["/vehicles/real-1/hitl"] = (
+        409,
+        {"code": "hitl_unavailable", "message_en": "No HITL.", "detail": {"reason": "ArduPilot"}},
+    )
+    result = call(server, "relay_hitl", {"vehicle": "real-1"})
+    assert result["isError"] is True and text(result)["error"] == "hitl_unavailable"
+    assert text(result)["detail"] == {"reason": "ArduPilot"}
+
+
+# ---------------------------------------------------------------------------- 11 §12: firmware twins
+
+TWIN_TOOLS = {
+    "relay_autopilots_list",
+    "relay_firmware_identify",
+    "relay_twin_profiles_list",
+    "relay_twin_profile_get",
+    "relay_twin_profile_capture",
+    "relay_twin_start",
+    "relay_twin_status",
+    "relay_sim_frame",
+}
+
+TWIN_CASES = [
+    ("relay_autopilots_list", {}, "GET", "/autopilots", None),
+    ("relay_firmware_identify", {"vehicle": "real-1"}, "GET", "/vehicles/real-1/firmware", None),
+    ("relay_twin_profile_get", {"profile": "tp-1"}, "GET", "/twins/profiles/tp-1", None),
+    (
+        "relay_twin_profile_capture",
+        {"vehicle": "real-1", "name": "Small", "frame": {"preset": "small-250", "cells": 3}},
+        "POST",
+        "/twins/profiles",
+        {"from_vehicle": "real-1", "name": "Small", "frame": {"preset": "small-250", "cells": 3}},
+    ),
+    (
+        "relay_twin_profile_capture",
+        {"vehicle": "real-1", "profile": "tp-1"},
+        "POST",
+        "/twins/profiles",
+        {"from_vehicle": "real-1", "profile": "tp-1"},
+    ),
+    ("relay_twin_status", {"vehicle": "sim-2"}, "GET", "/sims/sim-2/twin", None),
+    (
+        "relay_sim_frame",
+        {"vehicle": "sim-2", "preset": "large-450", "mass_kg": 1.2},
+        "PUT",
+        "/sims/sim-2/frame",
+        {"preset": "large-450", "mass_kg": 1.2},
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("tool", "args", "method", "path", "body"),
+    TWIN_CASES,
+    ids=[f"{c[0]}-{i}" for i, c in enumerate(TWIN_CASES)],
+)
+def test_twin_tool_requests(stub, tool, args, method, path, body):
+    server = make(flight_mcp, stub)
+    assert call(server, tool, args)["isError"] is False
+    req = last(stub)
+    assert (req["method"], req["path"], req["body"]) == (method, path, body)
+    assert req["session"] == "tok1"
+
+
+def test_twin_start_and_list(stub):
+    server = make(flight_mcp, stub)
+    stub.responses["/sims"] = {"added": ["sim-2", "sim-3"]}
+    result = call(
+        server,
+        "relay_twin_start",
+        {"profile": "tp-1", "count": 2, "home": {"lat": 47.6, "lon": -122.3, "alt_m": 50}},
+    )
+    assert text(result) == {"added": ["sim-2", "sim-3"]}
+    assert last(stub)["body"] == {
+        "count": 2,
+        "engine": "sitl",
+        "profile": "tp-1",
+        "home": {"lat": 47.6, "lon": -122.3, "alt_m": 50},
+    }
+    call(server, "relay_twin_start", {"pack": "ardupilot-copter-4.6.3", "frame": {"preset": "small-250"}})
+    assert last(stub)["body"] == {
+        "count": 1,
+        "engine": "sitl",
+        "pack": "ardupilot-copter-4.6.3",
+        "frame": {"preset": "small-250"},
+    }
+    stub.responses["/twins/profiles"] = {"profiles": [{"id": "tp-1"}]}
+    assert text(call(server, "relay_twin_profiles_list")) == {"profiles": [{"id": "tp-1"}]}
+    stub.fail["/sims"] = (
+        503,
+        {"code": "twin_start_failed", "message_en": "No heartbeat.", "detail": {"reason": "timeout"}},
+    )
+    failed = call(server, "relay_twin_start", {"pack": "px4-1.16.2"})
+    assert failed["isError"] is True and text(failed)["error"] == "twin_start_failed"
 
 
 def test_app_screenshot_returns_image(stub):

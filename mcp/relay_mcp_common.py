@@ -28,6 +28,8 @@ except ImportError:  # running from the repository checkout
 
 __all__ = [
     "DEFAULT_BASE",
+    "FRAME",
+    "HOME",
     "VID",
     "WAIT",
     "McpServer",
@@ -48,6 +50,32 @@ SESSION_ERRORS = ("session_expired", "session_required", "auth_required")
 
 VID = {"type": "string", "description": "Vehicle id from relay_fleet, e.g. sim-1 or real-10-7-7-36"}
 WAIT = {"type": "boolean", "description": "Wait until the skill finishes (default true)", "default": True}
+
+# 11 §5, §8.1: the physics frame of a simulator or firmware twin; omitted values keep the preset's
+FRAME = {
+    "type": "object",
+    "description": "physics frame: a preset and any of its values (omitted: the profile's or micro-120)",
+    "properties": {
+        "preset": {"type": "string", "enum": ["micro-120", "small-250", "large-450"]},
+        "mass_kg": {"type": "number", "exclusiveMinimum": 0},
+        "wheelbase_m": {"type": "number", "exclusiveMinimum": 0},
+        "prop_in": {"type": "number", "exclusiveMinimum": 0},
+        "cells": {"type": "integer", "minimum": 1, "maximum": 14},
+        "capacity_mah": {"type": "number", "exclusiveMinimum": 0},
+    },
+    "additionalProperties": False,
+}
+HOME = {
+    "type": "object",
+    "description": "home of the twin: latitude, longitude, altitude above sea level (omitted: the profile's)",
+    "properties": {
+        "lat": {"type": "number", "minimum": -89, "maximum": 89},
+        "lon": {"type": "number", "minimum": -180, "maximum": 180},
+        "alt_m": {"type": "number", "minimum": -500, "maximum": 9000, "default": 0},
+    },
+    "required": ["lat", "lon"],
+    "additionalProperties": False,
+}
 
 
 @dataclass

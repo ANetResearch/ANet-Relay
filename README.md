@@ -85,20 +85,22 @@ with RelayClient() as relay:                          # http://127.0.0.1:8765
 claude mcp add anet-relay-app -- python3 /path/to/ANet-Relay/mcp/anet_relay_app_mcp.py --name claude-code-app   # or any MCP client
 ```
 
-Three MCP servers cover flight (26 tools), device level down to single motors (36) and the whole application (65). See [MCP Servers](https://github.com/ANetResearch/ANet-Relay/wiki/MCP-Servers).
+Three MCP servers cover flight and firmware twins (34 tools), device level down to single motors (36) and the whole application, including hardware in the loop (67). See [MCP Servers](https://github.com/ANetResearch/ANet-Relay/wiki/MCP-Servers).
 
 ## What is inside
 
 | | |
 |---|---|
-| **Fleet link** | MAVLink 2 over UDP 14550, subnet scan, live/degraded/lost links, full telemetry, parameters and a raw message inspector |
+| **Fleet link** | MAVLink 2 over UDP 14550 or a USB serial port (baud rate detected automatically), subnet scan, live/degraded/lost links, full telemetry, parameters and a raw message inspector |
 | **Control** | Possession, claims and sessions, sticks at 50 Hz, skills and sequences (at level Full), Stop and Stop all that override everything |
-| **Simulator** | Up to 8 aircraft, ArduPilot- or PX4-style autopilots, hover assist, seeded airframe defects (CG offset, unequal motors, damaged props) |
+| **Simulator** | Up to 8 aircraft, ArduPilot- or PX4-style autopilots, hover assist, frame presets (120 g, 250 mm, 450 mm), acro mode (body rates, flips, inverted flight), rigid-body ground contact so a crash bounces, rolls and comes to rest, seeded airframe defects (CG offset, unequal motors, damaged props) |
+| **Firmware twins** | The official ArduCopter (4.3.8 to 4.7.2) and PX4 (1.14.4 to 1.17.0) SITL firmware ships with the installer and flies against Relay's physics with a real aircraft's version and parameters: identify its firmware, capture a twin profile, start the twin. About 5 to 6 MB per pack (2 to 3 MB compressed), 25 to 30 MB per installer; Windows carries ArduPilot only ([runtime packs](docs/autopilot-packs.md)) |
+| **Hardware in the loop** | PX4 over USB: Relay backs up the flight controller's parameters, switches it to HITL, feeds it sensor data from its physics while the firmware keeps the motors locked, then restores and verifies every parameter. ArduPilot removed HIL support; use a firmware twin |
 | **Programs and Lab** | Restricted Python at 50 Hz, unit tests, 10 judged challenges, duels with Elo, trace replay with every round and explosion |
 | **Arena** | Virtual rounds, collisions, matches, dogfights and a leaderboard across the LAN |
 | **Real aircraft** | PX4 or ArduPilot behind an ESP8266 bridge, preflight with confirm words, bench procedures, flight-health diagnostics, FPV picture-in-picture |
 | **Records** | Every flight in local SQLite: charts, event and control tracks, 3D replay, CSV and JSON |
-| **SITL** | PX4 + Gazebo or ArduPilot SITL connect as ordinary MAVLink aircraft ([guide](docs/simulation.md)) |
+| **External SITL** | PX4 + Gazebo or ArduPilot SITL run by hand connect as ordinary MAVLink aircraft ([guide](docs/simulation.md)) |
 
 ## Download
 
@@ -112,7 +114,7 @@ The app bundles its backend. Verify downloads with `SHA256SUMS.txt`.
 
 ## Documentation
 
-The **[Wiki](https://github.com/ANetResearch/ANet-Relay/wiki)** has the guides: installation, controls, real aircraft, physics, collisions, the arena, dogfights, programs, the Lab, agents, MCP, Copilot, SITL, troubleshooting and FAQ. References versioned with the code: [Agent API](docs/agent-api.md) · [Onboard programs](docs/programs.md) · [Simulation](docs/simulation.md) · [Hardware (zh)](docs/hardware.zh-CN.md) · [Design (zh)](docs/design/).
+The **[Wiki](https://github.com/ANetResearch/ANet-Relay/wiki)** has the guides: installation, controls, real aircraft, physics, collisions, the arena, dogfights, programs, the Lab, agents, MCP, Copilot, SITL, troubleshooting and FAQ. References versioned with the code: [Agent API](docs/agent-api.md) · [Onboard programs](docs/programs.md) · [Simulation](docs/simulation.md) · [Autopilot runtime packs](docs/autopilot-packs.md) · [Hardware (zh)](docs/hardware.zh-CN.md) · [Design (zh)](docs/design/).
 
 ## Safety
 
