@@ -1,7 +1,8 @@
 // Dev fixture (?fixture=busy|empty|alerts): realistic snapshots and five minutes of event history so the shell can
-// be reviewed without a backend. busy = 6 aircraft (4 real incl. one lost and one armed under a human, 2 sims), one
-// agent session, one critical alert; alerts = busy plus more alerts; empty = nothing connected. A 10 Hz ticker keeps
-// the data moving; a small REST stand-in handles acknowledge, stop, possess and release so interactions can be tried.
+// be reviewed without a backend. busy = 9 aircraft (5 real incl. one lost, one armed under a human and a PX4 board
+// on USB serial; 4 sims incl. a firmware twin and a crashed one), one agent session, one critical alert; alerts =
+// busy plus more alerts; empty = nothing connected. A 10 Hz ticker keeps the data moving; a small REST stand-in
+// handles acknowledge, stop, possess and release so interactions can be tried.
 import type { Alert, Fleet, FixtureName, RelayEvent, Vehicle } from '@/api'
 import { installStream, setTransport, type RestTransport } from '@/api'
 import { useRelay } from '@/store/relay'
@@ -14,6 +15,8 @@ import { startAirframeFixture } from './airframeFixture'
 import { startLabFixture } from './labFixture'
 // WP-C v0.5: six-aircraft dogfight (?fixture=dogfight) and the busy fixture's leaderboard
 import { busyBoard, startDogfightFixture } from './dogfightFixture'
+// 11: firmware twins, runtime packs, USB serial and hardware in the loop
+import { startTwinFixture } from './twinFixture'
 
 type V = Vehicle
 
@@ -139,6 +142,29 @@ function busyVehicles(now: number): V[] {
       course: { course_id: 'cage-loop', name_en: 'Cage loop', name_zh: '笼内环线', rings: [], state: 'running', next: 2, total: 4, started_at: now - 12.48, elapsed_s: 12.48, splits: [4.21, 3.42], best_s: 18.2, reason: null, origin: [0, 0, 0, 0] },
       record_session: 46,
     }),
+    // 11 §7: a PX4 flight controller on USB serial, ready for hardware in the loop
+    Object.assign(
+      base({
+        id: 'q05', label: 'Quad 05', kind: 'real', host: null, autopilot: 'PX4', firmware: 'PX4 1.16.2', sysid: 5, bridge: null, mode: 'STABILIZED',
+        modes: ['MANUAL', 'STABILIZED', 'ALTCTL', 'POSCTL', 'AUTO.LAND', 'OFFBOARD'],
+        firmware_info: { family: 'px4', vehicle: 'copter', version: '1.16.2', type: 'official', git: 'b5f3e2a1', board: 'Pixhawk 6C (fmu-v6c)' },
+        battery: { voltage: 16.6, current: 0.3, remaining_pct: 96, cells: 4, level: 'ok' },
+      }),
+      { serial: { device: '/dev/ttyACM0', baud: 115200 }, hitl: { state: 'idle' } },
+    ),
+    // 11 §6: a firmware twin of Quad 02 (exact match) on the small frame
+    base({
+      id: 'sim-3', label: 'SIM-3', kind: 'sim', sysid: 13, firmware: 'ArduCopter V4.5.7',
+      position: { frame: 'sim', x: 1.2, y: -0.6, z: 0, vx: 0, vy: 0, vz: 0, age_s: 0.02 },
+      sim: { hover_assist: true, turbulence: 0.3, airframe: { preset: 'typical', seed: 4243 }, engine: 'sitl', frame: 'small-250', firmware: { family: 'ardupilot', version: '4.5.7', pack: 'ardupilot-copter-4.5.7', match: 'exact', state: 'running' } },
+    }),
+    // 11 §8.3: a crashed simulator lying on its back (the stage keeps the wreck's pose; the label offers the reset)
+    base({
+      id: 'sim-4', label: 'SIM-4', kind: 'sim', sysid: 14, crashed: true, mode: 'STABILIZE', landed: 'ground',
+      position: { frame: 'sim', x: -1.6, y: 1.1, z: 0.02, vx: 0, vy: 0, vz: 0, age_s: 0.02 },
+      attitude: { roll: 2.95, pitch: 0.21, yaw: 0.8 },
+      statustext: [{ t: now - 30, severity: 2, text: 'Crash: Disarming (ground impact 3.4 m/s)' }],
+    }),
   ]
 }
 
@@ -245,8 +271,27 @@ export function startFixture(name: FixtureName): () => void {
     emit: (kind, vehicle, data) => emit(kind as RelayEvent['kind'], vehicle, data),
   })
 
+  // 11: twin, pack, serial and HITL stand-in; it adds and removes aircraft through the fixture's fleet
+  const twin = startTwinFixture({
+    now: () => Date.now() / 1000,
+    vehicles: () => fleet.vehicles,
+    mutate,
+    add: (v) => {
+      fleet = { ...fleet, vehicles: [...fleet.vehicles, v] }
+      useRelay.getState().applyFleet({ ...fleet, t: now })
+    },
+    remove: (id) => {
+      fleet = { ...fleet, vehicles: fleet.vehicles.filter((v) => v.id !== id) }
+      useRelay.getState().applyFleet({ ...fleet, t: now })
+    },
+    emit: (kind, vehicle, data) => emit(kind as RelayEvent['kind'], vehicle, data),
+    base,
+  })
+
   const transport: RestTransport = {
     async request(method, path, body) {
+      const twinned = twin.handle(method, path, body) // 11
+      if (twinned !== undefined) return twinned
       const labbed = lab.handle(method, path, body) // WP-3
       if (labbed !== undefined) return labbed
       // WP-C v0.5: leaderboard, match and dogfight scenario routes
@@ -363,5 +408,6 @@ export function startFixture(name: FixtureName): () => void {
     arena.stop() // WP-D
     dogfight?.stop() // WP-C v0.5
     lab.stop() // WP-3
+    twin.stop() // 11
   }
 }

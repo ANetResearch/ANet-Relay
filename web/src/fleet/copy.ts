@@ -248,7 +248,7 @@ export const en8 = {
   'map.square': 'Square',
   'map.square.do': 'Start or stop the ring course',
   'map.circle': 'Circle, hold 1 s',
-  'map.circle.do': 'Reset a simulated aircraft to its spawn point',
+  'map.circle.do': 'Reset a disarmed or crashed simulated aircraft to its spawn point',
   'map.dpad': 'D-pad left / right',
   'map.dpad.do': 'Select the previous or next aircraft',
   'map.touchpad': 'Touchpad press',
@@ -259,6 +259,7 @@ export const en8 = {
   'set.anet4d': 'ANet4D',
   'set.notConnected': 'The backend is not connected',
   'set.daysUnit': 'days',
+  'set.autopilots': 'Autopilot packs', // 11 §3
 } as const
 
 export type Key8 = keyof typeof en8
@@ -499,7 +500,7 @@ export const zh8: Record<Key8, string> = {
   'map.square': '方块键',
   'map.square.do': '开始或中止穿环',
   'map.circle': '圆圈键按住 1 秒',
-  'map.circle.do': '模拟机复位到出生点',
+  'map.circle.do': '已上锁或已坠毁的模拟机复位到出生点',
   'map.dpad': '十字键左右',
   'map.dpad.do': '切换选中上一架或下一架飞机',
   'map.touchpad': '按下触控板',
@@ -510,6 +511,7 @@ export const zh8: Record<Key8, string> = {
   'set.anet4d': 'ANet4D',
   'set.notConnected': '后端未连接',
   'set.daysUnit': '天',
+  'set.autopilots': '飞控运行包',
 }
 
 export const DICTS8: Record<Lang, Record<Key8, string>> = { en: en8, zh: zh8 }

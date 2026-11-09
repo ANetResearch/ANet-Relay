@@ -2,7 +2,7 @@
 // sysid), tabs 36 (Overview · Control · Bench · Telemetry · Parameters · Log). Rendered in the right panel or inside the
 // compact sheet below 1200 px. The Control tab body is WP7's ControlTab. Contract: CONTRACTS.md#inspector.
 import * as React from 'react'
-import { api } from '@/api'
+import { api, serialOf } from '@/api'
 import { cn } from '@/lib/utils'
 import { notifyError } from '@/shell/notify'
 import { useVehicle } from '@/store/selectors'
@@ -79,7 +79,7 @@ function Header({ id, sheet = false }: { id: string; sheet?: boolean }) {
   const t = useT8()
   const v = useVehicle(id)
   if (!v) return null
-  const meta = [v.kind === 'sim' ? v.id : (v.host ?? t('fleet.noHost')), v.firmware ? `${v.autopilot ?? ''} ${v.firmware}`.trim() : v.autopilot, v.sysid !== null ? t('insp.sysid', { n: v.sysid }) : null]
+  const meta = [v.kind === 'sim' ? v.id : (v.host ?? serialOf(v)?.device ?? t('fleet.noHost')), v.firmware ? `${v.autopilot ?? ''} ${v.firmware}`.trim() : v.autopilot, v.sysid !== null ? t('insp.sysid', { n: v.sysid }) : null]
     .filter(Boolean)
     .join(' · ')
   return (

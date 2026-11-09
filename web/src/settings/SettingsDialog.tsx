@@ -24,6 +24,7 @@ import { CopilotSettings } from '@/copilot/CopilotSettings'
 import { ControllerSettings, SimSettings } from '@/control/ControllerSettings'
 import { ArenaSettings } from '@/arena/ArenaSettings'
 import { AirframeDefaultSetting } from '@/inspector/AirframeSetting' // WP-2a
+import { PacksSection } from '@/twin/PacksSection' // 11 §3
 import './settings.css'
 
 export interface SettingsDialogProps {
@@ -64,6 +65,7 @@ const SECTIONS: { id: SettingsSection; key: AnyKey; icon: Parameters<typeof Icon
   { id: 'controllers', key: 'set.controllers', icon: 'gamepad' },
   { id: 'copilot', key: 'set.copilot', icon: 'copilot' },
   { id: 'network', key: 'set.network', icon: 'network' },
+  { id: 'autopilots', key: 'set.autopilots', icon: 'pack' }, // 11 §3 runtime packs
   { id: 'data', key: 'set.data', icon: 'database' },
   { id: 'about', key: 'set.about', icon: 'info' },
 ]
@@ -391,7 +393,7 @@ export function SettingsDialog({ open, section, onOpenChange }: SettingsDialogPr
     if (open) setCurrent(section)
   }
   const [s, save] = useBackendSettings(open)
-  const needsBackend = current === 'safety' || current === 'network' || current === 'data'
+  const needsBackend = current === 'safety' || current === 'network' || current === 'autopilots' || current === 'data'
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -431,6 +433,8 @@ export function SettingsDialog({ open, section, onOpenChange }: SettingsDialogPr
               <CopilotSettings Row={Row} />
             ) : current === 'network' && s ? (
               <Network s={s} save={save} />
+            ) : current === 'autopilots' && s ? (
+              <PacksSection Row={Row} />
             ) : current === 'data' && s ? (
               <Data s={s} save={save} />
             ) : (

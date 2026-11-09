@@ -1,6 +1,8 @@
 // All aircraft and the one frame loop that moves them. Targets come from ./live (a store subscription outside
 // React); here they are smoothed for display only (02 §6.3: 120 ms exponential smoothing of position and attitude,
-// with a short dead-reckoning step so 10 Hz snapshots glide instead of stepping).
+// with a short dead-reckoning step so 10 Hz snapshots glide instead of stepping). 11 §8.5: the attitude is smoothed
+// as a quaternion (slerp), so inverted flight, full rolls and a tumbling wreck never jump; a wreck keeps the pose
+// the physics leaves it in.
 import * as React from 'react'
 import * as THREE from 'three'
 import { useFrame } from '@react-three/fiber'
@@ -10,7 +12,7 @@ import { useUi } from '@/store/ui'
 import { motionReduced } from '@/ui/motion/tier'
 import { useReplay } from '@/records/replayState'
 import { live } from '../live'
-import { enuToScene, expAlpha, smoothAngle } from '../math'
+import { attitudeQuat, enuToScene, expAlpha, smoothAttitude } from '../math'
 import { useStage } from '../store'
 import { Aircraft, handles, TRAIL_HZ, TRAIL_POINTS, type AircraftHandles } from './Aircraft'
 import { trailJump } from './trail'
@@ -119,21 +121,23 @@ export function Fleet({ template }: { template: AirframeTemplate }) {
       h.ground.visible = true
       let st = live.state.get(id)
       const lead = t.kind === 'position' ? Math.min(LEAD_MAX_S, (now - t.at) / 1000) : 0
-      const [sx, sy, sz] = enuToScene(t.x + t.vx * lead, t.y + t.vy * lead, Math.max(0, t.z + t.vz * lead))
+      // a simulator's height is its centre of mass less the leg height (physics.py): a wreck on its back may sit
+      // a little below 0; the attitude group pivots at the body centre (Aircraft.tsx), so it stays above ground
+      const floor = t.sim ? -template.lift : 0
+      const [sx, sy, sz] = enuToScene(t.x + t.vx * lead, t.y + t.vy * lead, Math.max(floor, t.z + t.vz * lead))
       tmp.set(sx, sy, sz)
+      const target = attitudeQuat(t.roll ?? 0, t.pitch ?? 0, t.yaw ?? st?.yaw ?? 0)
       if (!st) {
-        st = { pos: tmp.clone(), yaw: t.yaw ?? 0, kind: t.kind, ready: true }
+        st = { pos: tmp.clone(), yaw: t.yaw ?? 0, q: target, kind: t.kind, ready: true }
         live.state.set(id, st)
-        h.att.rotation.set(t.pitch ?? 0, 0, -(t.roll ?? 0))
       }
       st.kind = t.kind
       if (st.pos.distanceTo(tmp) > SNAP_DISTANCE) st.pos.copy(tmp)
       else st.pos.lerp(tmp, a)
-      st.yaw = smoothAngle(st.yaw, t.yaw ?? st.yaw, a)
-      const pitch = t.pitch ?? 0
-      const roll = t.roll ?? 0
-      h.att.rotation.x = smoothAngle(h.att.rotation.x, pitch, a)
-      h.att.rotation.z = smoothAngle(h.att.rotation.z, -roll, a)
+      const att = smoothAttitude(st.q, target, a, st.yaw)
+      st.q = att.q
+      st.yaw = att.heading
+      h.att.quaternion.set(att.local[0], att.local[1], att.local[2], att.local[3])
 
       h.root.position.copy(st.pos)
       h.yaw.rotation.y = -st.yaw

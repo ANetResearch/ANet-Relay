@@ -21,6 +21,7 @@ import { HoldProgress, usePillSpec } from '@/ui/relay'
 import { useStage } from '../store'
 import { token } from '../tokens'
 import { instantiate, type AirframeTemplate } from './model'
+import { CrashedReset } from '@/twin/CrashedReset' // v0.5.4
 
 export const TRAIL_SECONDS = 20
 export const TRAIL_HZ = 10
@@ -94,14 +95,19 @@ function noseMarker(color: THREE.Color, ahead: number, height: number): THREE.Me
 function build(template: AirframeTemplate, sim: boolean): AircraftHandles {
   const root = new THREE.Group()
   const yaw = new THREE.Group()
+  // 11 §8.5: the attitude group pivots at the body centre (lift above the feet), so a rolled, inverted or
+  // tumbled airframe turns about itself rather than about its feet; Fleet.tsx sets its quaternion
   const att = new THREE.Group()
-  att.rotation.order = 'XYZ'
+  att.position.y = template.lift
   root.add(yaw)
   yaw.add(att)
+  const body = new THREE.Group()
+  body.position.y = -template.lift
+  att.add(body)
   const inst = instantiate(template)
-  att.add(inst.root)
+  body.add(inst.root)
   const nose = noseMarker(token('g50').color, template.noseAhead, template.lift)
-  att.add(nose)
+  body.add(nose)
 
   const discMat = new THREE.MeshBasicMaterial({ color: token('g300').color, transparent: true, opacity: 0, depthWrite: false, toneMapped: false, side: THREE.DoubleSide })
   const discGeo = new THREE.CircleGeometry(0.0245, 32)
@@ -191,6 +197,7 @@ interface Facts {
   possession: { input: 'keyboard' | 'screen' | 'gamepad'; pad: number | null } | null
   program: string | null // WP-1: name of the onboard program
   programState: string | null // WP-3: its state name (06 §7 PROGRAM · name · state)
+  crashed: boolean // v0.5.4: a crashed simulator offers its reset on the label
 }
 
 /** Narrow, discrete facts for the label and colours; changes at most once a second while the link is lost. */
@@ -207,6 +214,7 @@ function useFacts(id: string): Facts | null {
       possession: v.possession ? { input: v.possession.input, pad: v.possession.pad } : null,
       program: v.program?.name ?? null,
       programState: v.program && v.controller === 'program' ? v.program.state || null : null,
+      crashed: v.kind === 'sim' && v.crashed,
     }
     return JSON.stringify(f)
   })
@@ -258,6 +266,7 @@ function Label({ id, facts, fallback, bind }: { id: string; facts: Facts | null;
           <span>{replay ? t8(`records.ctl.${replay.controller}`) : facts?.programState ? `${spec.label} · ${facts.programState}` : spec.label}</span>
         )}
       </div>
+      {facts?.crashed && !replay && !craft ? <CrashedReset id={id} compact className="mt-0.5" /> : null}
       {hold ? <HoldProgress active durationMs={hold.durationMs} className="stage-label-hold" /> : null}
     </div>
   )

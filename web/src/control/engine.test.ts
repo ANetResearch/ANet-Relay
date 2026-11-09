@@ -310,6 +310,21 @@ describe('buttons', () => {
     step(100, 11)
     expect(h.calls).toEqual(['possess q1 1', 'release q1'])
   })
+  it('Circle held 1 s resets a disarmed or crashed simulator, never one armed in flight (v0.5.4)', () => {
+    const { h, step } = harness([vehicle('sim-1', { armed: true, landed: 'air' })])
+    h.pads = [gp(0)]
+    step(20, 2) // the pad binds to the free simulator
+    const resets = () => h.calls.filter((c) => c.startsWith('reset'))
+    h.pads = [gp(0, [0, 0, 0, 0], [1])]
+    step(100, 12)
+    expect(resets()).toEqual([])
+    h.pads = [gp(0)]
+    step()
+    h.vehicles[0].crashed = true // an armed wreck: the backend resets it
+    h.pads = [gp(0, [0, 0, 0, 0], [1])]
+    step(100, 12)
+    expect(resets()).toEqual(['reset sim-1'])
+  })
   it('Options refuses an aircraft flown by another input', () => {
     const { h, step, possess } = harness([vehicle('q1')])
     possess('q1', { input: 'keyboard', pad: null, since: 0 })

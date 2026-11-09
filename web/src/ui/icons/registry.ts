@@ -14,7 +14,7 @@ import {
   Plane, PlaneTakeoff, PlaneLanding, Crosshair, Network, Link2Off, Power, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
   ArrowUpToLine, ArrowDownToLine, RotateCw, ListOrdered, Sparkles, SendHorizontal, Hourglass, KeyRound, Stethoscope,
   FlaskConical, Code, Save, ListChecks, Swords, Trophy, GitCompare, CopyPlus, Undo2, Redo2, Scissors, Circle,
-  Download, Upload, ZoomIn, ZoomOut, ChartNoAxesGantt, BetweenHorizontalStart,
+  Download, Upload, ZoomIn, ZoomOut, ChartNoAxesGantt, BetweenHorizontalStart, Cpu, Usb, Package, PackagePlus,
 } from 'lucide'
 import type { IconNode } from './types'
 
@@ -132,6 +132,11 @@ export const ICONS = {
   'seq.export': Download,
   'seq.zoomIn': ZoomIn,
   'seq.zoomOut': ZoomOut,
+  // firmware twins, runtime packs and hardware in the loop (11 §11)
+  'chip': Cpu,
+  'usb': Usb,
+  'pack': Package,
+  'pack.import': PackagePlus,
 } as const satisfies Record<string, IconNode>
 
 export type IconKey = keyof typeof ICONS

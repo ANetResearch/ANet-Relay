@@ -1,5 +1,6 @@
-// Discovery and connection dialog (02 §8, 560 wide): Scan · Address · Set up a new bridge. Controlled by the shell
-// through the ui store (`useUi().connect`). Stop all (⌘.) keeps working inside it (shell keyboard layer).
+// Discovery and connection dialog (02 §8, 560 wide): Scan · Address · USB serial (11 §7.1) · Set up a new bridge.
+// Controlled by the shell through the ui store (`useUi().connect`). Stop all (⌘.) keeps working inside it (shell
+// keyboard layer).
 import * as React from 'react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/components/ui/tabs'
@@ -8,6 +9,8 @@ import { useT8 } from '@/fleet/copy'
 import { ScanTab } from './ScanTab'
 import { AddressTab } from './AddressTab'
 import { BridgeWizard } from './BridgeWizard'
+import { SerialTab } from '@/twin/SerialTab' // 11 §7.1
+import { useTT } from '@/twin/strings'
 import './connect.css'
 
 export interface ConnectDialogProps {
@@ -18,6 +21,7 @@ export interface ConnectDialogProps {
 
 export function ConnectDialog({ open, tab, onOpenChange }: ConnectDialogProps) {
   const t = useT8()
+  const tt = useTT()
   const [current, setCurrent] = React.useState<ConnectTab>(tab)
   // follow the tab the shell asks for every time the dialog opens
   const [seen, setSeen] = React.useState({ open, tab })
@@ -42,6 +46,9 @@ export function ConnectDialog({ open, tab, onOpenChange }: ConnectDialogProps) {
             <TabsTrigger value="address" className="line-tab">
               {t('conn.tab.address')}
             </TabsTrigger>
+            <TabsTrigger value="serial" className="line-tab" data-connect-tab="serial">
+              {tt('serial.tab')}
+            </TabsTrigger>
             <TabsTrigger value="bridge" className="line-tab">
               {t('conn.tab.bridge')}
             </TabsTrigger>
@@ -52,6 +59,9 @@ export function ConnectDialog({ open, tab, onOpenChange }: ConnectDialogProps) {
             </TabsContent>
             <TabsContent value="address" className="p-5">
               <AddressTab onDone={close} />
+            </TabsContent>
+            <TabsContent value="serial" className="p-5">
+              {open && current === 'serial' ? <SerialTab onDone={close} /> : null}
             </TabsContent>
             <TabsContent value="bridge" className="p-5">
               {/* remount per opening so the wizard starts at step 1 */}

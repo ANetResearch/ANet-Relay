@@ -8,6 +8,7 @@ import { api } from '@/api'
 import { useRelay } from '@/store/relay'
 import { useReplay, type ReplayState } from '@/records/replayState'
 import { create } from 'zustand'
+import type { Quat } from './math'
 import { fallbackSpawn, frameOffsets, framesUsed, NO_OFFSETS, place, slotPosition, slotRow, type FrameOffsets, type PlaceKind, type SlotRow } from './placement'
 
 /** Frame offsets for React consumers that place things in an aircraft's frame (course rings). */
@@ -39,7 +40,10 @@ export interface Target {
 export interface AircraftState {
   /** scene coordinates of the body */
   pos: THREE.Vector3
+  /** heading of the smoothed orientation (math.ts quatHeading), radians clockwise from north */
   yaw: number
+  /** smoothed orientation in the scene frame (11 §8.5: slerp, so inverted flight and tumbling never jump) */
+  q: Quat
   kind: PlaceKind
   ready: boolean
 }

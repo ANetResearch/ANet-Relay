@@ -42,6 +42,9 @@ import {
   TRACKS,
   TRIM_LIMITS,
   zeroTrim,
+  isManualMode,
+  SEQ_MODES,
+  armWaitThrottle,
   type ArsDoc,
   type Block,
   type SeqEnd,
@@ -257,7 +260,8 @@ export function SequenceDock() {
   let status: string | null = null
   if (flight.flying) {
     if (flight.phase === 'mode') status = st('seq.state.mode')
-    else if (flight.phase === 'arm') status = st('seq.state.arm')
+    // 11 §9: the throttle held while arming (ArduPilot 0; PX4 mid stick in the hold modes)
+    else if (flight.phase === 'arm') status = st('seq.state.armThrottle', { pct: Math.round(armWaitThrottle(doc.mode, v?.autopilot) * 100) })
     else if (flight.phase === 'end') status = st('seq.state.end')
     else if (flight.state === 'done') status = st('seq.state.hold')
     else status = st('seq.state.play', { t: fmtS(now ?? 0), total: fmtS(total) })
@@ -290,7 +294,7 @@ export function SequenceDock() {
           aria-label={st('seq.mode')}
           data-seq-mode=""
         >
-          {(['stabilize', 'althold', 'poshold'] as const).map((m) => (
+          {SEQ_MODES.map((m) => (
             <NativeSelectOption key={m} value={m}>
               {st(`seq.mode.${m}` as SeqKey)}
             </NativeSelectOption>
@@ -385,14 +389,14 @@ export function SequenceDock() {
               </Button>
             ) : (
               <>
-                <Button variant="outline" size="sm" disabled={!human || busy !== null || Boolean(assistOff && doc.mode !== 'stabilize')} onClick={() => onRun(0)} data-seq-run="">
+                <Button variant="outline" size="sm" disabled={!human || busy !== null || Boolean(assistOff && !isManualMode(doc.mode))} onClick={() => onRun(0)} data-seq-run="">
                   <Icon icon="tl.play" />
                   {st('seq.run')}
                 </Button>
                 <Button
                   variant="ghost"
                   size="sm"
-                  disabled={!human || busy !== null || cursor <= 0 || cursor >= total || Boolean(assistOff && doc.mode !== 'stabilize')}
+                  disabled={!human || busy !== null || cursor <= 0 || cursor >= total || Boolean(assistOff && !isManualMode(doc.mode))}
                   onClick={() => onRun(cursor)}
                   data-seq-run-cursor=""
                 >
@@ -419,7 +423,7 @@ export function SequenceDock() {
             ) : null}
             {flight.flying ? <span className="text-hud-sub text-[var(--g500)]">{st('seq.live')}</span> : null}
             {!human ? <span className="text-hud-sub text-[var(--g500)]">{st('seq.possessFirst')}</span> : null}
-            {assistOff && doc.mode !== 'stabilize' ? <span className="text-hud-sub text-[var(--g400)]">{st('seq.assistOff')}</span> : null}
+            {assistOff && !isManualMode(doc.mode) ? <span className="text-hud-sub text-[var(--g400)]">{st('seq.assistOff')}</span> : null}
             <span className="flex-1" />
             <LiveSticks v={v} doc={doc} at={now ?? cursor} />
           </>
@@ -646,7 +650,7 @@ function Tracks({ doc, sel, zoom, cursor, playhead, onCursor, commit }: {
               <g key={name} data-seq-track={name}>
                 <rect x={0} y={y0} width={width} height={ROW} className={row % 2 ? 'seq-row-alt' : 'seq-row'} />
                 {bipolar ? <line x1={0} x2={width} y1={base} y2={base} className="seq-zero" /> : null}
-                {!bipolar && doc.mode !== 'stabilize' ? <line x1={0} x2={width} y1={yOf(0.5)} y2={yOf(0.5)} className="seq-zero" /> : null}
+                {!bipolar && !isManualMode(doc.mode) ? <line x1={0} x2={width} y1={yOf(0.5)} y2={yOf(0.5)} className="seq-zero" /> : null}
                 {blocks(doc, name).map((b) => {
                   const bx = x(b.start)
                   const bw = Math.max(2, x(b.end) - bx)
