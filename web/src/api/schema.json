@@ -2028,7 +2028,11 @@
             "dogfight_started",
             "dogfight_finished",
             "match_started",
-            "match_finished"
+            "match_finished",
+            "twin_started",
+            "twin_exited",
+            "twin_start_failed",
+            "autopilot_pack_imported"
           ],
           "type": "string"
         },

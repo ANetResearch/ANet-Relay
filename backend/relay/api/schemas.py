@@ -556,6 +556,11 @@ EventKind = Literal[
     "dogfight_finished",
     "match_started",
     "match_finished",
+    # v0.5.4 firmware twins (11 §10)
+    "twin_started",
+    "twin_exited",
+    "twin_start_failed",
+    "autopilot_pack_imported",
 ]
 
 

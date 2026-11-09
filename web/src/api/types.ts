@@ -765,6 +765,10 @@ export interface Event {
     | 'dogfight_finished'
     | 'match_started'
     | 'match_finished'
+    | 'twin_started'
+    | 'twin_exited'
+    | 'twin_start_failed'
+    | 'autopilot_pack_imported'
   vehicle: string | null
   session: string | null
   text_en: string
