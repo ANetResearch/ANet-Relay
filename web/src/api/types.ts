@@ -48,6 +48,11 @@ export interface RelaySchema {
   TwinProfile: TwinProfile
   SimTwin: SimTwin
   SimFrame: SimFrame
+  SerialPorts: SerialPorts
+  SerialPort: SerialPort
+  SerialLinkView: SerialLinkView
+  HitlStatus: HitlStatus
+  VehicleHitl: VehicleHitl
 }
 /**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
@@ -161,6 +166,12 @@ export interface Vehicle {
    * real aircraft: the operator allowed programs (reset when the link drops)
    */
   programs_allowed: boolean
+  /**
+   * udp: Wi-Fi bridge; serial: USB / UART port; sim: simulator
+   */
+  transport: 'udp' | 'serial' | 'sim'
+  serial: SerialLinkView | null
+  hitl: VehicleHitl | null
 }
 /**
  * The aircraft's firmware identity (11 §4) from HEARTBEAT and AUTOPILOT_VERSION; null fields are
@@ -659,6 +670,95 @@ export interface ProgramOwner {
   name: string
 }
 /**
+ * The snapshot's ``vehicle.serial``: the port of a serial aircraft (null on UDP and simulators).
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "SerialLinkView".
+ */
+export interface SerialLinkView {
+  /**
+   * current device name (a USB board that reappears renamed is followed)
+   */
+  device: string
+  baud: number
+  /**
+   * false while the device is away; Relay reopens it once a second
+   */
+  open: boolean
+  error: string | null
+  /**
+   * times the port was reopened after an error
+   */
+  reopened: number
+  usb: SerialUsb | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "SerialUsb".
+ */
+export interface SerialUsb {
+  vid: number | null
+  pid: number | null
+  serial_number: string | null
+}
+/**
+ * The snapshot's ``vehicle.hitl``: null without a session. While ``running`` the vehicle's position,
+ * attitude and rates are the physics the board is fed.
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "VehicleHitl".
+ */
+export interface VehicleHitl {
+  state: 'idle' | 'backing_up' | 'writing' | 'rebooting' | 'running' | 'restoring' | 'verifying' | 'restored' | 'failed'
+  engine: 'hitl'
+  /**
+   * Hardware in the loop PX4 1.16.2
+   */
+  label_en: string
+  /**
+   * 硬件在环 PX4 1.16.2
+   */
+  label_zh: string
+  firmware: HitlFirmware
+  pending_restore: boolean
+  pose: HitlPose | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "HitlFirmware".
+ */
+export interface HitlFirmware {
+  family: 'px4'
+  version: string | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "HitlPose".
+ */
+export interface HitlPose {
+  /**
+   * m east of the board's local origin (physics truth)
+   */
+  x: number
+  y: number
+  z: number
+  vx: number
+  vy: number
+  vz: number
+  roll: number
+  pitch: number
+  /**
+   * NED heading, radians
+   */
+  yaw: number
+  /**
+   * FRD to NED quaternion w, x, y, z
+   */
+  q: number[]
+  crashed: boolean
+  on_ground: boolean
+}
+/**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
  * via the `definition` "Alert".
  */
@@ -769,6 +869,9 @@ export interface Event {
     | 'twin_exited'
     | 'twin_start_failed'
     | 'autopilot_pack_imported'
+    | 'hitl_started'
+    | 'hitl_restored'
+    | 'hitl_failed'
   vehicle: string | null
   session: string | null
   text_en: string
@@ -2372,4 +2475,186 @@ export interface SimFrameView {
    * derived from the hover thrust parameter on a twin
    */
   thrust_to_weight: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "SerialPorts".
+ */
+export interface SerialPorts {
+  /**
+   * false: pyserial is missing, serial links cannot be used
+   */
+  available: boolean
+  reason: string | null
+  reason_zh: string | null
+  ports: SerialPort[]
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "SerialPort".
+ */
+export interface SerialPort {
+  /**
+   * path or name to connect with: /dev/ttyACM0, COM5, /dev/cu.usbmodem01
+   */
+  device: string
+  name: string
+  description: string | null
+  manufacturer: string | null
+  /**
+   * USB vendor id
+   */
+  vid: number | null
+  /**
+   * USB product id
+   */
+  pid: number | null
+  /**
+   * USB serial number (PX4 boards report their unique id)
+   */
+  serial_number: string | null
+  /**
+   * a known flight controller USB interface
+   */
+  autopilot: boolean
+  /**
+   * usb-serial: a plain adapter (CP210x, FTDI, CH340), e.g. a telemetry radio
+   */
+  kind: 'autopilot' | 'usb-serial' | 'other'
+  /**
+   * CP210x, FTDI or CH340 for usb-serial
+   */
+  adapter: string | null
+  /**
+   * the aircraft connected on this port
+   */
+  vehicle: string | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "HitlStatus".
+ */
+export interface HitlStatus {
+  id: string
+  /**
+   * start is possible now
+   */
+  available: boolean
+  /**
+   * why not (English)
+   */
+  reason: string | null
+  reason_zh: string | null
+  /**
+   * sim | unidentified | ardupilot | other_firmware | not_serial | busy | pending | link | armed | possession
+   */
+  cause: string | null
+  state: 'idle' | 'backing_up' | 'writing' | 'rebooting' | 'running' | 'restoring' | 'verifying' | 'restored' | 'failed'
+  steps: HitlStep[]
+  backup: HitlBackup | null
+  /**
+   * parameters the session changed: {NAME: {from, to}}
+   */
+  changed: {
+    [k: string]: HitlChange | undefined
+  }
+  mismatches: HitlMismatch[]
+  /**
+   * self-changing parameters not compared
+   */
+  volatile: string[]
+  error: HitlError | null
+  run: HitlRun | null
+  /**
+   * a restore is owed from an earlier session
+   */
+  pending_restore: boolean
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "HitlStep".
+ */
+export interface HitlStep {
+  key: 'confirm' | 'backup' | 'write' | 'reboot' | 'run' | 'restore' | 'verify'
+  state: 'pending' | 'active' | 'done' | 'failed' | 'skipped'
+  detail: string
+  detail_zh: string
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "HitlBackup".
+ */
+export interface HitlBackup {
+  /**
+   * file name in <data dir>/hitl-backups
+   */
+  file: string
+  path: string | null
+  /**
+   * parameters saved
+   */
+  count: number
+  /**
+   * wall clock, UTC epoch seconds
+   */
+  captured_at: number | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "HitlChange".
+ */
+export interface HitlChange {
+  from: number
+  to: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "HitlMismatch".
+ */
+export interface HitlMismatch {
+  name: string
+  /**
+   * backup value; null: not in the backup
+   */
+  expected: number | null
+  /**
+   * value after the restore; null: not reported
+   */
+  actual: number | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "HitlError".
+ */
+export interface HitlError {
+  code: 'hitl_failed' | 'hitl_restore_mismatch'
+  step: string | null
+  message: string
+  message_zh: string
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "HitlRun".
+ */
+export interface HitlRun {
+  /**
+   * HIL_SENSOR frames sent in the last second (250 when healthy)
+   */
+  sensor_hz: number
+  /**
+   * HIL_GPS frames sent in the last second (10)
+   */
+  gps_hz: number
+  /**
+   * HIL_ACTUATOR_CONTROLS received from the board
+   */
+  actuator_frames: number
+  /**
+   * physics steps
+   */
+  steps: number
+  /**
+   * wall clock of the start, UTC epoch seconds
+   */
+  since: number
 }

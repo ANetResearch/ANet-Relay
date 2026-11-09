@@ -130,6 +130,21 @@
     },
     "SimFrame": {
       "$ref": "#/$defs/SimFrame"
+    },
+    "SerialPorts": {
+      "$ref": "#/$defs/SerialPorts"
+    },
+    "SerialPort": {
+      "$ref": "#/$defs/SerialPort"
+    },
+    "SerialLinkView": {
+      "$ref": "#/$defs/SerialLinkView"
+    },
+    "HitlStatus": {
+      "$ref": "#/$defs/HitlStatus"
+    },
+    "VehicleHitl": {
+      "$ref": "#/$defs/VehicleHitl"
     }
   },
   "required": [
@@ -174,7 +189,12 @@
     "TwinProfiles",
     "TwinProfile",
     "SimTwin",
-    "SimFrame"
+    "SimFrame",
+    "SerialPorts",
+    "SerialPort",
+    "SerialLinkView",
+    "HitlStatus",
+    "VehicleHitl"
   ],
   "additionalProperties": false,
   "$defs": {
@@ -2032,7 +2052,10 @@
             "twin_started",
             "twin_exited",
             "twin_start_failed",
-            "autopilot_pack_imported"
+            "autopilot_pack_imported",
+            "hitl_started",
+            "hitl_restored",
+            "hitl_failed"
           ],
           "type": "string"
         },
@@ -2765,6 +2788,451 @@
         "session"
       ],
       "title": "Hello",
+      "type": "object"
+    },
+    "HitlBackup": {
+      "properties": {
+        "file": {
+          "description": "file name in <data dir>/hitl-backups",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "count": {
+          "description": "parameters saved",
+          "type": "integer"
+        },
+        "captured_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "wall clock, UTC epoch seconds"
+        }
+      },
+      "required": [
+        "file",
+        "path",
+        "count",
+        "captured_at"
+      ],
+      "title": "HitlBackup",
+      "type": "object"
+    },
+    "HitlChange": {
+      "properties": {
+        "from": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "integer"
+            }
+          ]
+        },
+        "to": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "integer"
+            }
+          ]
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "title": "HitlChange",
+      "type": "object"
+    },
+    "HitlError": {
+      "properties": {
+        "code": {
+          "enum": [
+            "hitl_failed",
+            "hitl_restore_mismatch"
+          ],
+          "type": "string"
+        },
+        "step": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "message": {
+          "type": "string"
+        },
+        "message_zh": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "step",
+        "message",
+        "message_zh"
+      ],
+      "title": "HitlError",
+      "type": "object"
+    },
+    "HitlFirmware": {
+      "properties": {
+        "family": {
+          "const": "px4",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "family",
+        "version"
+      ],
+      "title": "HitlFirmware",
+      "type": "object"
+    },
+    "HitlMismatch": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "expected": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "backup value; null: not in the backup"
+        },
+        "actual": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "value after the restore; null: not reported"
+        }
+      },
+      "required": [
+        "name",
+        "expected",
+        "actual"
+      ],
+      "title": "HitlMismatch",
+      "type": "object"
+    },
+    "HitlPose": {
+      "properties": {
+        "x": {
+          "description": "m east of the board's local origin (physics truth)",
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "z": {
+          "type": "number"
+        },
+        "vx": {
+          "type": "number"
+        },
+        "vy": {
+          "type": "number"
+        },
+        "vz": {
+          "type": "number"
+        },
+        "roll": {
+          "type": "number"
+        },
+        "pitch": {
+          "type": "number"
+        },
+        "yaw": {
+          "description": "NED heading, radians",
+          "type": "number"
+        },
+        "q": {
+          "description": "FRD to NED quaternion w, x, y, z",
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "crashed": {
+          "type": "boolean"
+        },
+        "on_ground": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "z",
+        "vx",
+        "vy",
+        "vz",
+        "roll",
+        "pitch",
+        "yaw",
+        "q",
+        "crashed",
+        "on_ground"
+      ],
+      "title": "HitlPose",
+      "type": "object"
+    },
+    "HitlRun": {
+      "properties": {
+        "sensor_hz": {
+          "description": "HIL_SENSOR frames sent in the last second (250 when healthy)",
+          "type": "number"
+        },
+        "gps_hz": {
+          "description": "HIL_GPS frames sent in the last second (10)",
+          "type": "number"
+        },
+        "actuator_frames": {
+          "description": "HIL_ACTUATOR_CONTROLS received from the board",
+          "type": "integer"
+        },
+        "steps": {
+          "description": "physics steps",
+          "type": "integer"
+        },
+        "since": {
+          "description": "wall clock of the start, UTC epoch seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "sensor_hz",
+        "gps_hz",
+        "actuator_frames",
+        "steps",
+        "since"
+      ],
+      "title": "HitlRun",
+      "type": "object"
+    },
+    "HitlStatus": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "available": {
+          "description": "start is possible now",
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "why not (English)"
+        },
+        "reason_zh": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cause": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "sim | unidentified | ardupilot | other_firmware | not_serial | busy | pending | link | armed | possession"
+        },
+        "state": {
+          "enum": [
+            "idle",
+            "backing_up",
+            "writing",
+            "rebooting",
+            "running",
+            "restoring",
+            "verifying",
+            "restored",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/HitlStep"
+          },
+          "type": "array"
+        },
+        "backup": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HitlBackup"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "changed": {
+          "additionalProperties": {
+            "$ref": "#/$defs/HitlChange"
+          },
+          "description": "parameters the session changed: {NAME: {from, to}}",
+          "type": "object"
+        },
+        "mismatches": {
+          "items": {
+            "$ref": "#/$defs/HitlMismatch"
+          },
+          "type": "array"
+        },
+        "volatile": {
+          "description": "self-changing parameters not compared",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HitlError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HitlRun"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pending_restore": {
+          "description": "a restore is owed from an earlier session",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "available",
+        "reason",
+        "reason_zh",
+        "cause",
+        "state",
+        "steps",
+        "backup",
+        "changed",
+        "mismatches",
+        "volatile",
+        "error",
+        "run",
+        "pending_restore"
+      ],
+      "title": "HitlStatus",
+      "type": "object"
+    },
+    "HitlStep": {
+      "properties": {
+        "key": {
+          "enum": [
+            "confirm",
+            "backup",
+            "write",
+            "reboot",
+            "run",
+            "restore",
+            "verify"
+          ],
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "pending",
+            "active",
+            "done",
+            "failed",
+            "skipped"
+          ],
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "detail_zh": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "state",
+        "detail",
+        "detail_zh"
+      ],
+      "title": "HitlStep",
       "type": "object"
     },
     "Job": {
@@ -5002,6 +5470,255 @@
         "healthy"
       ],
       "title": "Sensor",
+      "type": "object"
+    },
+    "SerialLinkView": {
+      "description": "The snapshot's ``vehicle.serial``: the port of a serial aircraft (null on UDP and simulators).",
+      "properties": {
+        "device": {
+          "description": "current device name (a USB board that reappears renamed is followed)",
+          "type": "string"
+        },
+        "baud": {
+          "type": "integer"
+        },
+        "open": {
+          "description": "false while the device is away; Relay reopens it once a second",
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reopened": {
+          "description": "times the port was reopened after an error",
+          "type": "integer"
+        },
+        "usb": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SerialUsb"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "device",
+        "baud",
+        "open",
+        "error",
+        "reopened",
+        "usb"
+      ],
+      "title": "SerialLinkView",
+      "type": "object"
+    },
+    "SerialPort": {
+      "properties": {
+        "device": {
+          "description": "path or name to connect with: /dev/ttyACM0, COM5, /dev/cu.usbmodem01",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "manufacturer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "vid": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "USB vendor id"
+        },
+        "pid": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "USB product id"
+        },
+        "serial_number": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "USB serial number (PX4 boards report their unique id)"
+        },
+        "autopilot": {
+          "description": "a known flight controller USB interface",
+          "type": "boolean"
+        },
+        "kind": {
+          "description": "usb-serial: a plain adapter (CP210x, FTDI, CH340), e.g. a telemetry radio",
+          "enum": [
+            "autopilot",
+            "usb-serial",
+            "other"
+          ],
+          "type": "string"
+        },
+        "adapter": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CP210x, FTDI or CH340 for usb-serial"
+        },
+        "vehicle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "the aircraft connected on this port"
+        }
+      },
+      "required": [
+        "device",
+        "name",
+        "description",
+        "manufacturer",
+        "vid",
+        "pid",
+        "serial_number",
+        "autopilot",
+        "kind",
+        "adapter",
+        "vehicle"
+      ],
+      "title": "SerialPort",
+      "type": "object"
+    },
+    "SerialPorts": {
+      "properties": {
+        "available": {
+          "description": "false: pyserial is missing, serial links cannot be used",
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason_zh": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ports": {
+          "items": {
+            "$ref": "#/$defs/SerialPort"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "available",
+        "reason",
+        "reason_zh",
+        "ports"
+      ],
+      "title": "SerialPorts",
+      "type": "object"
+    },
+    "SerialUsb": {
+      "properties": {
+        "vid": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pid": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "serial_number": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "vid",
+        "pid",
+        "serial_number"
+      ],
+      "title": "SerialUsb",
       "type": "object"
     },
     "SessionOpened": {
@@ -7549,6 +8266,38 @@
           "default": true,
           "description": "real aircraft: the operator allowed programs (reset when the link drops)",
           "type": "boolean"
+        },
+        "transport": {
+          "default": "udp",
+          "description": "udp: Wi-Fi bridge; serial: USB / UART port; sim: simulator",
+          "enum": [
+            "udp",
+            "serial",
+            "sim"
+          ],
+          "type": "string"
+        },
+        "serial": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SerialLinkView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "hitl": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VehicleHitl"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -7601,7 +8350,10 @@
         "sim",
         "procedure",
         "program",
-        "programs_allowed"
+        "programs_allowed",
+        "transport",
+        "serial",
+        "hitl"
       ],
       "title": "Vehicle",
       "type": "object"
@@ -7676,6 +8428,64 @@
         "match"
       ],
       "title": "VehicleFirmware",
+      "type": "object"
+    },
+    "VehicleHitl": {
+      "description": "The snapshot's ``vehicle.hitl``: null without a session. While ``running`` the vehicle's position,\nattitude and rates are the physics the board is fed.",
+      "properties": {
+        "state": {
+          "enum": [
+            "idle",
+            "backing_up",
+            "writing",
+            "rebooting",
+            "running",
+            "restoring",
+            "verifying",
+            "restored",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "engine": {
+          "const": "hitl",
+          "type": "string"
+        },
+        "label_en": {
+          "description": "Hardware in the loop PX4 1.16.2",
+          "type": "string"
+        },
+        "label_zh": {
+          "description": "硬件在环 PX4 1.16.2",
+          "type": "string"
+        },
+        "firmware": {
+          "$ref": "#/$defs/HitlFirmware"
+        },
+        "pending_restore": {
+          "type": "boolean"
+        },
+        "pose": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HitlPose"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "engine",
+        "label_en",
+        "label_zh",
+        "firmware",
+        "pending_restore",
+        "pose"
+      ],
+      "title": "VehicleHitl",
       "type": "object"
     }
   }
