@@ -3,7 +3,8 @@
 Two flavours share one flight model:
 
 * ``ardupilot``: ArduPilot Copter 4.5 subset (autopilot=3, QUADROTOR), RC_CHANNELS_OVERRIDE from
-  SYSID_MYGCS only, REQUEST_DATA_STREAM groups, modes STABILIZE / ALT_HOLD / LOITER / GUIDED / LAND / RTL.
+  SYSID_MYGCS only, REQUEST_DATA_STREAM groups, modes STABILIZE / ACRO / ALT_HOLD / LOITER / GUIDED / LAND /
+  RTL.
 * ``px4``: PX4 subset (autopilot=12), MANUAL_CONTROL gated by COM_RC_IN_MODE, SET_MESSAGE_INTERVAL,
   PX4 mode names, OFFBOARD position setpoints, bytewise integer parameters.
 
@@ -33,7 +34,13 @@ loop per axis (PID, derivative on the measurement through a low-pass filter, cla
 on the ground and holds while the mixer saturates) gives angular-acceleration demands; the mixer turns them
 into per-rotor thrust with the nominal geometry and desaturates with roll and pitch first (thrust only
 reduced, then roll / pitch scaled, yaw last), like PX4 with airmode off. SERVO_OUTPUT_RAW reports the mixer's
-outputs. The gains are internal to the simulator (sessions fly at the ``sticks`` level, 06 §5).
+outputs. The gains are internal to the simulator (sessions fly at the ``sticks`` level, 06 §5); the mixer's
+scale follows the aircraft's frame (``sim.frame``, 11 §8.1).
+
+ACRO (11 §8.4) is a rate mode on both autopilots: the sticks command body rates (ArduPilot ``ACRO_RP_RATE`` /
+``ACRO_Y_RATE``, PX4 ``MC_ACRO_R_MAX`` / ``MC_ACRO_P_MAX`` / ``MC_ACRO_Y_MAX``, deg/s at full stick), the
+throttle stick is the collective output, nothing levels the aircraft and there is no tilt limit: it rolls,
+flips and flies inverted.
 """
 
 from __future__ import annotations
@@ -46,6 +53,7 @@ from ..mav import modes as modetab
 from ..mav.decode import px4_param_decode, px4_param_encode
 from ..mav.mavlink import Encoder, M, Parser
 from .airframe import Airframe, specific_force_body
+from .frame import FrameModel
 from .physics import (
     ARM,
     DRAG_LINEAR,
@@ -55,7 +63,6 @@ from .physics import (
     IYY,
     IZZ,
     K_M,
-    MASS,
     MAX_YAW_RATE,
     ROTOR_THRUST_MAX,
     THR_MDL_FAC,
@@ -84,10 +91,12 @@ KP_VZ = 4.0
 KI_VZ = 2.0
 KP_YAW = 2.5
 MAX_STEPS = 500
+LEAN_ARM_MAX = math.radians(25.0)  # arming refused beyond this tilt
 
 # Hover assist off (05 §5.1).
 ASSIST_RAMP_S = 0.3  # thrust ramp from the held output to the stick after assist turns off in flight
-ASSIST_OFF_BEHAVIOURS = {"stab", "land", "attitude"}  # what a flight controller without baro/position flies
+# what a flight controller without barometer or position source flies
+ASSIST_OFF_BEHAVIOURS = {"stab", "acro", "land", "attitude"}
 ASSIST_FOLD = {"althold": "stab", "loiter": "stab"}
 ASSIST_DENIED_TEXT = "Mode requires hover assist"
 OPEN_LAND_SPEED = 0.25  # m/s nominal open-loop descent
@@ -98,7 +107,7 @@ HOVER_LEARN_TAU = 2.0  # s, low-pass of the motor output used as the hover thrus
 # Behaviour per mode name.
 _AP_BEHAVIOUR = {
     "STABILIZE": "stab",
-    "ACRO": "stab",
+    "ACRO": "acro",
     "DRIFT": "stab",
     "ALT_HOLD": "althold",
     "SPORT": "althold",
@@ -117,7 +126,7 @@ _AP_BEHAVIOUR = {
 _PX4_BEHAVIOUR = {
     "MANUAL": "stab",
     "STABILIZED": "stab",
-    "ACRO": "stab",
+    "ACRO": "acro",
     "ALTCTL": "althold",
     "POSCTL": "loiter",
     "LOITER": "hold",
@@ -127,9 +136,9 @@ _PX4_BEHAVIOUR = {
     "LAND": "land",
     "RTL": "rtl",
 }
-PILOT_NEEDED = {"stab", "althold"}
+PILOT_NEEDED = {"stab", "acro", "althold"}
 POSITION_BEHAVIOURS = {"loiter", "guided", "rtl", "hold", "takeoff"}
-MANUAL_THROTTLE = {"stab"}
+MANUAL_THROTTLE = {"stab", "acro"}
 PILOT_BEHAVIOURS = MANUAL_THROTTLE | {"althold", "loiter"}  # arming needs stick input present
 
 # ArduPilot REQUEST_DATA_STREAM groups.
@@ -194,6 +203,8 @@ ARDUPILOT_PARAMS: list[tuple[str, float, int]] = [
     ("WPNAV_ACCEL", 250.0, F),
     ("LOIT_SPEED", 300.0, F),
     ("ANGLE_MAX", 3000, I16),
+    ("ACRO_RP_RATE", 360.0, F),
+    ("ACRO_Y_RATE", 202.5, F),
     ("RTL_ALT", 150, I32),
     ("LAND_SPEED", 60, I16),
     ("DISARM_DELAY", 10, I8),
@@ -252,6 +263,9 @@ PX4_PARAMS: list[tuple[str, float, int]] = [
     ("MC_ROLLRATE_P", 0.15, F),
     ("MC_PITCHRATE_P", 0.15, F),
     ("MC_YAWRATE_P", 0.2, F),
+    ("MC_ACRO_R_MAX", 720.0, F),
+    ("MC_ACRO_P_MAX", 720.0, F),
+    ("MC_ACRO_Y_MAX", 540.0, F),
     ("EKF2_OF_CTRL", 1, I32),
     ("SYS_AUTOSTART", 4001, I32),
 ]
@@ -288,7 +302,21 @@ class FlightController:
 
     def __init__(self) -> None:
         self.out = [0.0, 0.0, 0.0, 0.0]
+        self._frame: Any = None
+        self._gains = (_KR, _KP, _KY)
         self.reset()
+
+    def _mixer_gains(self, quad: Quad) -> tuple[float, float, float]:
+        """Rotor thrust fraction per rad/s^2 of roll, pitch and yaw demand for the quad's frame (cached)."""
+        frame = quad.frame
+        if frame is not self._frame:
+            self._frame = frame
+            self._gains = (
+                quad.ixx / (4.0 * quad.arm * quad.rotor_thrust_max),
+                quad.iyy / (4.0 * quad.arm * quad.rotor_thrust_max),
+                quad.izz / (4.0 * quad.k_m * quad.rotor_thrust_max),
+            )
+        return self._gains
 
     def reset(self) -> None:
         self.i = [0.0, 0.0, 0.0]
@@ -309,22 +337,28 @@ class FlightController:
         if af is not None:  # the board's level is off by the calibration error (06 §4)
             roll -= af.trim[0]
             pitch -= af.trim[1]
-        # Angle loop: Euler-rate targets, then body rates (p, q, r).
-        lim = ANGLE_RATE_MAX
-        er = ANGLE_P * (cmd.roll - roll)
-        ep = ANGLE_P * (cmd.pitch - pitch)
-        er = lim if er > lim else -lim if er < -lim else er
-        ep = lim if ep > lim else -lim if ep < -lim else ep
-        ey = cmd.yaw_rate
-        ey = MAX_YAW_RATE if ey > MAX_YAW_RATE else -MAX_YAW_RATE if ey < -MAX_YAW_RATE else ey
-        sr, cr = math.sin(roll), math.cos(roll)
-        sp, cp = math.sin(pitch), math.cos(pitch)
-        # Rate loop: errors, derivative of the measurement (low-passed), integrators.
         w = s.rates
         p, q, r = w[0], w[1], w[2]
-        e0 = er - sp * ey - p
-        e1 = cr * ep + sr * cp * ey - q
-        e2 = -sr * ep + cr * cp * ey - r
+        target = cmd.rates
+        if target is not None:  # rate mode (ACRO, 11 §8.4): the body-rate targets directly
+            e0 = target[0] - p
+            e1 = target[1] - q
+            e2 = target[2] - r
+        else:
+            # Angle loop: Euler-rate targets, then body rates (p, q, r).
+            lim = ANGLE_RATE_MAX
+            er = ANGLE_P * (cmd.roll - roll)
+            ep = ANGLE_P * (cmd.pitch - pitch)
+            er = lim if er > lim else -lim if er < -lim else er
+            ep = lim if ep > lim else -lim if ep < -lim else ep
+            ey = cmd.yaw_rate
+            ey = MAX_YAW_RATE if ey > MAX_YAW_RATE else -MAX_YAW_RATE if ey < -MAX_YAW_RATE else ey
+            sr, cr = math.sin(roll), math.cos(roll)
+            sp, cp = math.sin(pitch), math.cos(pitch)
+            e0 = er - sp * ey - p
+            e1 = cr * ep + sr * cp * ey - q
+            e2 = -sr * ep + cr * cp * ey - r
+        # Rate loop: errors, derivative of the measurement (low-passed), integrators.
         d = self.d
         prev = self.prev
         if prev is not None:
@@ -350,9 +384,10 @@ class FlightController:
                 i2 = _RM2 if i2 > _RM2 else -_RM2 if i2 < -_RM2 else i2
         i[0], i[1], i[2] = i0, i1, i2
         # Mixer (quad-x: 1 front-right CCW, 2 rear-left CCW, 3 front-left CW, 4 rear-right CW).
-        rr = -_KR * (_RP0 * e0 + i0 - _RD0 * d0)
-        pp = _KP * (_RP1 * e1 + i1 - _RD1 * d1)
-        yy = _KY * (_RP2 * e2 + i2)
+        kr, kp, ky = self._mixer_gains(quad)
+        rr = -kr * (_RP0 * e0 + i0 - _RD0 * d0)
+        pp = kp * (_RP1 * e1 + i1 - _RD1 * d1)
+        yy = ky * (_RP2 * e2 + i2)
         u = cmd.throttle
         u = 1.0 if u > 1.0 else 0.0 if u < 0.0 else u
         f = (_TA + _TB * u) * u
@@ -411,6 +446,7 @@ class SimAutopilot:
         hover_assist: bool = True,
         turbulence: float = 0.0,
         airframe: Airframe | None = None,
+        frame: FrameModel | None = None,
     ) -> None:
         if flavour not in (ARDUPILOT, PX4):
             raise ValueError(flavour)
@@ -432,7 +468,10 @@ class SimAutopilot:
                 self.params[key][0] = float(value)
         # Hover assist survives reset(); the airframe seed is the aircraft name, so turbulence repeats.
         self.hover_assist = bool(hover_assist)
-        self.quad = Quad(effects=not self.hover_assist, turbulence=turbulence, seed=seed_for(name))
+        # 11 §8.1: the airframe type (micro-120 by default) survives reset() like hover assist
+        self.quad = Quad(
+            effects=not self.hover_assist, turbulence=turbulence, seed=seed_for(name), frame=frame
+        )
         self.quad.set_airframe(airframe or Airframe())  # WP-2a: survives reset() like hover assist
         self.fc = FlightController()  # 07 §1
         self.estimator_status = False  # PX4: ESTIMATOR_STATUS streams once hover assist has been off
@@ -597,7 +636,7 @@ class SimAutopilot:
             self.quad.effects = False
             self.assist_ramp = None
             self.open_land_t = None
-            if self.behaviour == "stab" and (airborne or enter_hold):
+            if self.behaviour in MANUAL_THROTTLE and (airborne or enter_hold):
                 self._set_mode(self._hold_mode(), now)
         self.next_heartbeat = 0.0
 
@@ -939,6 +978,8 @@ class SimAutopilot:
             problem = None  # 21196: the pre-arm checks are skipped
         elif not s.on_ground:
             problem = "Vehicle is not on the ground"
+        elif self.quad.tilt > LEAN_ARM_MAX:  # 11 §8.3: lying on its side or back after a tumble
+            problem = "Leaning" if self.flavour == ARDUPILOT else "Attitude failure (tilted)"
         elif self.quad.battery.voltage < self._crit_voltage():
             problem = "Battery critical"
         elif behaviour in ("land", "rtl", "takeoff"):
@@ -1170,7 +1211,7 @@ class SimAutopilot:
     def _crit_voltage(self) -> float:
         if self.flavour == ARDUPILOT:
             return self.param("BATT_CRT_VOLT", 9.9)
-        return 3 * 3.3
+        return self.quad.battery.cells * 3.3
 
     # ------------------------------------------------------------------ output
 
@@ -1264,13 +1305,14 @@ class SimAutopilot:
                 errors_count4=0,
             )
         if name == "BATTERY_STATUS":
-            cell_mv = int(b.voltage / 3 * 1000)
+            cells = min(10, b.cells)
+            cell_mv = int(b.voltage / b.cells * 1000)
             return M.MAVLink_battery_status_message(
                 id=0,
                 battery_function=M.MAV_BATTERY_FUNCTION_ALL,
                 type=M.MAV_BATTERY_TYPE_LIPO,
                 temperature=32767,
-                voltages=[cell_mv, cell_mv, cell_mv] + [65535] * 7,
+                voltages=[cell_mv] * cells + [65535] * (10 - cells),
                 current_battery=int(b.current * 100),
                 current_consumed=int(b.consumed_mah),
                 energy_consumed=-1,
@@ -1632,7 +1674,7 @@ class SimAutopilot:
     def _low_voltage(self) -> float:
         if self.flavour == ARDUPILOT:
             return self.param("BATT_LOW_VOLT", 10.5)
-        return 3 * 3.5
+        return self.quad.battery.cells * 3.5
 
     def _radio_failsafe(self, now: float) -> None:
         if self.failsafe:
@@ -1670,6 +1712,17 @@ class SimAutopilot:
             limit = math.radians(self.param("MPC_MAN_TILT_MAX", 30.0))
         return min(math.radians(60.0), max(math.radians(5.0), limit))
 
+    def _acro_rates(self) -> tuple[float, float, float]:
+        """Full-stick body rates of ACRO (roll, pitch, yaw), rad/s, from the autopilot's parameters."""
+        if self.flavour == ARDUPILOT:
+            rp = self.param("ACRO_RP_RATE", 360.0)
+            roll, pitch, yaw = rp, rp, self.param("ACRO_Y_RATE", 202.5)
+        else:
+            roll = self.param("MC_ACRO_R_MAX", 720.0)
+            pitch = self.param("MC_ACRO_P_MAX", 720.0)
+            yaw = self.param("MC_ACRO_Y_MAX", 540.0)
+        return tuple(math.radians(min(1800.0, max(10.0, x))) for x in (roll, pitch, yaw))  # type: ignore[return-value]
+
     def _auto_tilt(self) -> float:
         return min(math.radians(25.0), self._max_tilt())
 
@@ -1695,7 +1748,7 @@ class SimAutopilot:
     def _thrust_throttle(self, az_cmd: float) -> float:
         s = self.quad.s
         tilt = max(0.5, math.cos(s.roll) * math.cos(s.pitch))
-        needed = MASS * (G + az_cmd) / tilt
+        needed = self.quad.mass * (G + az_cmd) / tilt
         sag = min(1.0, self.quad.battery.cell_voltage / 3.3) if self.quad.battery.cell_voltage > 0 else 1.0
         fraction = needed / (self.quad.max_thrust * max(0.2, sag * sag))  # rotor speed follows the voltage
         return min(1.0, max(0.0, throttle_for_fraction(fraction)))
@@ -1754,11 +1807,15 @@ class SimAutopilot:
             self.fc.reset()
             self.quad.step(None, armed=False, dt=dt)
             return
-        if behaviour == "stab":
-            limit = self._max_tilt()
-            cmd.roll = roll_s * limit
-            cmd.pitch = -pitch_s * limit
-            cmd.yaw_rate = yaw_s * math.radians(120.0)
+        if behaviour == "stab" or behaviour == "acro":
+            if behaviour == "acro":  # 11 §8.4: the sticks are body rates, nothing levels the aircraft
+                rp, pr, yr = self._acro_rates()
+                cmd.rates = (roll_s * rp, -pitch_s * pr, yaw_s * yr)
+            else:
+                limit = self._max_tilt()
+                cmd.roll = roll_s * limit
+                cmd.pitch = -pitch_s * limit
+                cmd.yaw_rate = yaw_s * math.radians(120.0)
             cmd.throttle = thr_s if thr_s is not None else (self.pilot[3] if self.pilot else 0.0)
             if self.assist_ramp is not None:
                 held, since = self.assist_ramp

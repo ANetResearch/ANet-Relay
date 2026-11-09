@@ -57,10 +57,10 @@ class SequenceOps:
             # WP-1 (06 §5): a session at the sticks level flies manual modes only
             flight_level.check_mode(self.settings, actor, v.autopilot, mode)
             sim = getattr(v.driver, "sim", None)
-            if sim is not None and not sim.hover_assist and seq["mode"] != "stabilize":
+            if sim is not None and not sim.hover_assist and seq["mode"] not in seqmod.MANUAL_MODES:
                 raise err(
                     "invalid_request",
-                    reason="hover assist is off on this simulator: fly the sequence in stabilize",
+                    reason="hover assist is off on this simulator: fly the sequence in stabilize or acro",
                 )
             if seq["mode"] == "poshold" and not v.has_capability("position"):
                 raise err("capability_missing", required="position")
@@ -68,7 +68,7 @@ class SequenceOps:
                 self._arm_checks(v, confirm)
             elif (
                 v.landed != "ground"
-                and seq["mode"] == "stabilize"
+                and seq["mode"] in seqmod.MANUAL_MODES
                 and sample_throttle(seq, float(start_at)) <= LANDED_THROTTLE
             ):
                 raise err(
