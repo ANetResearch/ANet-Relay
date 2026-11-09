@@ -74,6 +74,7 @@ from .fleet_airframe import AirframeOps  # WP-2a airframe defects (06 §4)
 from .fleet_device import DeviceOps
 from .fleet_sequence import SequenceOps  # stick timelines, .ars (10 §2)
 from .fleet_sim import SimOps
+from .fleet_twin import TwinOps  # firmware twins (11 §2-§6)
 from .fleet_world import WorldOps  # WP-A collisions (07 §2)
 from .flighthealth import FlightHealth
 from .history import History
@@ -359,7 +360,7 @@ class Vehicle:
         return auth.controller(self.auth, claim is not None and sessions.alive(claim.session_id))
 
 
-class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, WorldOps):
+class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, WorldOps, TwinOps):
     def __init__(
         self,
         settings: Settings | None = None,
@@ -416,6 +417,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
         self._scan_broadcast: list[str] = []
         self._scan_broadcast_at = 0.0
         self.custom_courses: dict[str, dict[str, Any]] = self._load_courses()
+        self._twin_setup()  # 11 §3, §5: runtime packs and twin profiles
         self._best: dict[str, float | None] = {}
         self._skill_seq = 0
         self._plan_seq = 0
@@ -464,6 +466,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
         self.dogfights.close()  # WP-B
         self.judge.close()  # WP-2b: cancel evaluation jobs and wait for their workers
         self.programs.close()  # WP-1
+        self._twin_shutdown()  # 11 §6.3: no firmware process outlives Relay
         self.history.close()
 
     def _shutdown_vehicles(self) -> None:
@@ -1330,14 +1333,45 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
         position: bool = True,
         hover_assist: bool | None = None,
         airframe: dict[str, Any] | None = None,  # WP-2a {preset | params, seed?}; None: sim_airframe_default
+        *,
+        engine: str = "relay",  # 11 §10: "relay" (fast simulator) or "sitl" (firmware twin)
+        profile: str | None = None,
+        pack: str | None = None,
+        frame: dict[str, Any]
+        | None = None,  # 11 §8.1 {preset, mass_kg, wheelbase_m, prop_in, cells, capacity_mah}
+        home: dict[str, Any] | None = None,
+        autopilot_given: bool = True,
     ) -> list[str]:
         if flavour not in (ARDUPILOT, PX4):
             raise err("invalid_request", reason="autopilot must be ardupilot or px4")
         if not 1 <= int(count) <= SIM_LIMIT:
             raise err("invalid_request", reason=f"count must be 1-{SIM_LIMIT}")
+        if engine not in ("relay", "sitl"):
+            raise err("invalid_request", reason="engine must be relay or sitl")
+        if engine == "sitl":
+            if hover_assist is False:
+                raise err("twin_unsupported", operation="hover assist switch", operation_zh="悬停辅助开关")
+            if not position:
+                raise err(
+                    "invalid_request", reason="a firmware twin always has its GPS; position applies to relay"
+                )
+            return self._add_twins(
+                int(count), flavour if autopilot_given else None, airframe, profile, pack, frame, home
+            )
+        if profile is not None or pack is not None or home is not None:
+            raise err("invalid_request", reason="profile, pack and home apply to engine sitl")
+        frame_model = None
+        if frame is not None:
+            from .twin import profile as tprofile
+
+            try:
+                frame_model = tprofile.frame_model(tprofile.normalise_frame(frame), {}, "relay")
+            except (tprofile.ProfileError, ValueError) as exc:
+                reason = exc.reason if isinstance(exc, tprofile.ProfileError) else f"frame {exc.args[0]}"
+                raise err("invalid_request", reason=reason) from None
 
         def run() -> list[str]:
-            existing = {vid for vid, v in self.vehicles.items() if v.kind == "sim"}
+            existing = {vid for vid, v in self.vehicles.items() if v.kind == "sim"} | self._twin_reserved
             if len(existing) + count > SIM_LIMIT:
                 raise err("sim_limit", limit=SIM_LIMIT)
             added = []
@@ -1354,6 +1388,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
                     name=vid,
                     **self._sim_options(hover_assist),  # WP-C: hover assist and turbulence (05 §5)
                     airframe=frame or self._resolve_airframe(None),  # WP-2a: setting default, fresh seed each
+                    frame=frame_model,  # 11 §8.1
                 )
                 v = Vehicle(vid, "sim", f"SIM-{n}", SimDriver(autopilot))
                 self._attach(v)
@@ -1368,6 +1403,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
                     vid,
                     data={
                         "autopilot": flavour,
+                        "engine": "relay",
                         "hover_assist": autopilot.hover_assist,
                         "airframe": autopilot.airframe.ref(),  # WP-2a
                     },
@@ -1408,6 +1444,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
         if v.record_session is not None:
             self.history.end_session(v.record_session, wall)
         if v.kind == "sim":
+            self._close_twin(v)  # 11 §6.3: the firmware process ends with its simulator
             self.events.emit("sim_removed", v.id, labels={"vehicle": v.label})
         self.vehicles.pop(v.id, None)
         if v.host:
@@ -2871,6 +2908,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
             "host": v.host,
             "autopilot": v.autopilot,
             "firmware": st["firmware"],
+            "firmware_info": self._firmware_info(v),  # 11 §4, §10
             "sysid": st["sysid"],
             "bridge": v.bridge,
             "link": link,

@@ -107,6 +107,8 @@ class Settings:
     agent_flight_level: str = "sticks"
     # WP-2a airframe defects (06 §4): the preset new simulators take (ideal | typical | rough), new seed each.
     sim_airframe_default: str = "typical"
+    # Firmware twins (11 §6.3): how many may run at once (each is one firmware process), at most SIM_LIMIT.
+    twin_limit: int = 8
 
     RESTART_FIELDS: ClassVar[tuple[str, ...]] = ("listen_port",)
     READ_ONLY: ClassVar[dict[str, float]] = {"stick_timeout_s": STICK_TIMEOUT_S}
@@ -173,6 +175,8 @@ class Settings:
             return "agent_flight_level"
         if self.sim_airframe_default not in ("ideal", "typical", "rough"):  # WP-2a
             return "sim_airframe_default"
+        if not 1 <= self.twin_limit <= SIM_LIMIT:  # 11 §6.3
+            return "twin_limit"
         if not 1 <= self.retention_days <= 3650:
             return "retention_days"
         for name in ("listen_port", "bridge_port"):

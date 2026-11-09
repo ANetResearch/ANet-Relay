@@ -271,6 +271,39 @@ CATALOGUE: dict[str, tuple[int, str, str]] = {
         "可用模拟机不足：需要 {needed} 架，空闲 {free} 架，最多 {limit} 架。",
     ),
     "match_running": (409, "A match is already running.", "已有一局对局在进行。"),
+    # firmware twins (11 §3-§6, §10)
+    "pack_missing": (404, "Autopilot pack {pack} is not installed.", "未安装飞控运行包 {pack}。"),
+    "pack_unsupported": (
+        400,
+        "The autopilot pack cannot be used: {reason}.",
+        "无法使用该飞控运行包：{reason_zh}。",
+    ),
+    "twin_start_failed": (
+        503,
+        "The firmware twin did not start: {reason}.",
+        "固件孪生未能启动：{reason_zh}。",
+    ),
+    "twin_limit": (
+        409,
+        "Relay runs at most {limit} firmware twins at a time.",
+        "Relay 同时最多运行 {limit} 个固件孪生。",
+    ),
+    "frame_unsupported": (
+        409,
+        "A firmware twin cannot fly this frame: {reason}.",
+        "固件孪生不支持该机型：{reason_zh}。",
+    ),
+    "twin_unsupported": (
+        409,
+        "A firmware twin has no {operation}.",
+        "固件孪生不支持{operation_zh}。",
+    ),
+    "profile_not_found": (404, "There is no twin profile {profile}.", "没有孪生配置 {profile}。"),
+    "params_incomplete": (
+        409,
+        "Read the aircraft's whole parameter table first ({received} of {total} received).",
+        "须先读完飞机的全部参数（已收到 {received}/{total}）。",
+    ),
 }
 
 

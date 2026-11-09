@@ -26,6 +26,7 @@ from relay.api import (  # noqa: E402
     schemas_match,  # WP-B
     schemas_procedures,
     schemas_programs,
+    schemas_twin,  # 11 §10
 )
 
 DEFAULT_OUT = ROOT / "web" / "src" / "api" / "schema.json"
@@ -63,6 +64,7 @@ def build() -> dict[str, Any]:
         **schemas_programs.EXPORTED,  # WP-1
         **schemas_judge.EXPORTED,  # WP-2b
         **schemas_match.EXPORTED,  # WP-B (07 §3-§4)
+        **schemas_twin.EXPORTED,  # 11 §10: firmware twins
     }
     models = [(model, "serialization") for model in exported.values()]
     keys, defs = models_json_schema(models, by_alias=True, ref_template="#/$defs/{model}")

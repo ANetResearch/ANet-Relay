@@ -33,10 +33,14 @@ class SimOps:
         if v.kind != "sim":
             return None
         sim = v.driver.sim
+        twin = getattr(sim, "engine", "relay") == "sitl"  # 11 §10: firmware twin
         return {
             "hover_assist": sim.hover_assist,
             "turbulence": round(sim.turbulence, 2),
             "airframe": sim.airframe.ref(),  # WP-2a (06 §4): preset and seed only
+            "engine": "sitl" if twin else "relay",
+            "firmware": {**sim.firmware, "state": sim.state} if twin else None,
+            "frame": sim.quad.frame.preset,  # 11 §8.1
         }
 
     def _apply_sim_settings(self) -> None:
@@ -62,6 +66,8 @@ class SimOps:
             v = self._vehicle(vid)
             if v.kind != "sim":
                 raise err("sim_only")
+            if getattr(v.driver.sim, "engine", "relay") == "sitl":  # 11 §8: the firmware is the brain
+                raise err("twin_unsupported", operation="hover assist switch", operation_zh="悬停辅助开关")
             self._check_sim_assist(v, actor, app_control)
             flight_level.check_sim_assist(self.settings, actor, bool(on))  # WP-1 (06 §5)
             sim = v.driver.sim

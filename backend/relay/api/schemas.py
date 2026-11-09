@@ -299,12 +299,43 @@ class SimAirframe(_Model):
     limits: dict[str, list[float]] = Field(description="[min, max] of every parameter")
 
 
+FirmwareFamily = Literal["ardupilot", "px4"]
+MatchLevel = Literal["exact", "version", "series", "nearest", "none"]
+TwinState = Literal["new", "booting", "running", "restarting", "exited", "failed", "stopped"]
+
+
+class SimFirmware(_Model):
+    """A firmware twin's firmware (11 §10): runtime pack, match level against its profile, process state."""
+
+    family: FirmwareFamily
+    version: str
+    pack: str
+    match: MatchLevel | None = Field(description="against the profile's firmware; null without a profile")
+    state: TwinState = Field(description="running: the firmware flies; restarting after a reset; exited")
+
+
 class SimView(_Model):
     """Simulator flight model (05 §5.2, WP-C); null on real aircraft."""
 
     hover_assist: bool = Field(description="altitude and position hold available; false: physical flight")
     turbulence: float = Field(description="turbulence strength 0..1 (acts only with hover assist off)")
     airframe: AirframeRef  # WP-2a (06 §4)
+    # 11 §10: the engine and, for a firmware twin, its firmware
+    engine: Literal["relay", "sitl"] = Field(default="relay", description="relay: fast simulator; sitl: twin")
+    firmware: SimFirmware | None = None
+    frame: str = Field(default="micro-120", description="frame preset of the physics (11 §8.1)")
+
+
+class FirmwareInfo(_Model):
+    """The aircraft's firmware identity (11 §4) from HEARTBEAT and AUTOPILOT_VERSION; null fields are
+    not reported by the aircraft (or not decoded yet)."""
+
+    family: FirmwareFamily | None
+    vehicle: str | None = Field(description="copter / plane / rover / ... from HEARTBEAT type")
+    version: str | None = Field(description="x.y.z")
+    type: Literal["dev", "alpha", "beta", "rc", "official"] | None = Field(description="release type")
+    git: str | None = Field(description="first 8 hex digits of the firmware's git hash")
+    board: str | None = Field(description="flight controller board name for common boards, e.g. Pixracer")
 
 
 class ProcedureBrief(_Model):
@@ -362,6 +393,7 @@ class Vehicle(_Model):
     host: str | None
     autopilot: Literal["PX4", "ArduPilot"] | None
     firmware: str | None
+    firmware_info: FirmwareInfo | None = None  # 11 §4, §10
     sysid: int | None
     bridge: Bridge | None
     link: Link
@@ -861,9 +893,31 @@ class MotorTestBody(_Body):
     confirm: str | None = None
 
 
+class FrameBody(_Body):
+    """A simulator frame (11 §5, §8.1): a preset and any of its values; omitted values keep the preset's (or
+    the current frame's on PUT /sims/{id}/frame)."""
+
+    preset: Literal["micro-120", "small-250", "large-450"] | None = None
+    mass_kg: float | None = Field(default=None, gt=0)
+    wheelbase_m: float | None = Field(default=None, gt=0)
+    prop_in: float | None = Field(default=None, gt=0)
+    cells: int | None = Field(default=None, ge=1, le=14)
+    capacity_mah: float | None = Field(default=None, gt=0)
+
+
+class HomeBody(_Body):
+    """A twin's home (11 §5): the physics origin's position, altitude above mean sea level."""
+
+    lat: float = Field(ge=-89, le=89)
+    lon: float = Field(ge=-180, le=180)
+    alt_m: float = Field(default=0.0, ge=-500, le=9000)
+
+
 class SimsBody(_Body):
     count: int = Field(default=1, ge=1, le=8)
-    autopilot: Literal["ardupilot", "px4"] = "ardupilot"
+    autopilot: Literal["ardupilot", "px4"] | None = Field(
+        default=None, description="omitted: ardupilot, or the firmware of the twin's profile / pack"
+    )
     position: bool = Field(default=True, description="false: no position estimate (barometer only)")
     hover_assist: bool | None = Field(
         default=None,
@@ -871,6 +925,21 @@ class SimsBody(_Body):
     )
     airframe: AirframeBody | None = Field(  # WP-2a
         default=None, description="airframe defects for every new simulator; omitted: sim_airframe_default"
+    )
+    # 11 §10: firmware twins
+    engine: Literal["relay", "sitl"] = Field(
+        default="relay",
+        description="relay: Relay's fast simulator; sitl: a firmware twin (official SITL build)",
+    )
+    profile: str | None = Field(default=None, description="sitl: twin profile id (tp-...)")
+    pack: str | None = Field(
+        default=None, description="sitl: runtime pack id; omitted: the profile's or newest"
+    )
+    frame: FrameBody | None = Field(
+        default=None, description="frame of the physics; omitted: profile or micro-120"
+    )
+    home: HomeBody | None = Field(
+        default=None, description="sitl: home position; omitted: the profile's or default"
     )
 
 

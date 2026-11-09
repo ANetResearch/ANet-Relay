@@ -62,7 +62,17 @@ def add_sims(request: Request, body: schemas.SimsBody | None = None) -> dict[str
         flight_level.check_sim_assist(service(request).settings, actor(request, "other"), True)
     return {
         "added": service(request).add_sims(
-            body.count, body.autopilot, body.position, body.hover_assist, airframe
+            body.count,
+            body.autopilot or "ardupilot",
+            body.position,
+            body.hover_assist,
+            airframe,
+            engine=body.engine,  # 11 §10: firmware twins
+            profile=body.profile,
+            pack=body.pack,
+            frame=body.frame.model_dump(exclude_none=True) if body.frame else None,
+            home=body.home.model_dump() if body.home else None,
+            autopilot_given=body.autopilot is not None,
         )
     }
 

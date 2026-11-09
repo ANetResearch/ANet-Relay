@@ -67,6 +67,20 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     "param_set": ("{vehicle} parameter {name} set to {value}.", "{vehicle} 参数 {name} 已设为 {value}。"),
     "sim_added": ("Simulated aircraft {vehicle} added.", "已添加模拟机 {vehicle}。"),
     "sim_removed": ("Simulated aircraft {vehicle} removed.", "已删除模拟机 {vehicle}。"),
+    # firmware twins (11 §6.3, §10)
+    "twin_started": (
+        "{vehicle} firmware twin running: {firmware}.",
+        "{vehicle} 固件孪生已运行：{firmware}。",
+    ),
+    "twin_exited": (
+        "{vehicle} firmware twin process exited (code {code}). The link is lost.",
+        "{vehicle} 固件孪生进程已退出（退出码 {code}），链路丢失。",
+    ),
+    "twin_start_failed": (
+        "{vehicle} firmware twin did not restart: {reason}.",
+        "{vehicle} 固件孪生未能重新启动：{reason}。",
+    ),
+    "autopilot_pack_imported": ("Autopilot pack {pack} imported.", "已导入飞控运行包 {pack}。"),
     "bridge_configured": (
         "Bridge {host} settings written. The bridge is restarting.",
         "数传 {host} 设置已写入，正在重启。",

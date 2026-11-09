@@ -240,6 +240,8 @@ class Dogfights:
                 raise err("dogfight_real_aircraft", vehicle=str(vid))
             if v is None:
                 raise err("not_found", resource=str(vid))
+            if getattr(v.driver.sim, "engine", "relay") == "sitl":  # 11 §2: dogfights fly fast simulators
+                raise err("twin_unsupported", operation="dogfight", operation_zh="狗斗")
         if n > SIM_LIMIT:
             raise err("dogfight_no_aircraft", needed=n, free=SIM_LIMIT, limit=SIM_LIMIT)
         roles_raw = body.get("roles")
@@ -334,6 +336,7 @@ class Dogfights:
         fleet = self.fleet
         return (
             v.kind == "sim"
+            and getattr(v.driver.sim, "engine", "relay") != "sitl"  # firmware twins stay out (11 §2)
             and not v.armed
             and v.auth.possession is None
             and not fleet._claim_alive(v)
