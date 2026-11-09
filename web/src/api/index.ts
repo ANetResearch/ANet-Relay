@@ -23,6 +23,6 @@ export type { StickSink } from './stream'
 // 11: firmware twins (packs, identity, profiles, twin details, frames)
 export type { AutopilotPacks, AutopilotPack, VehicleFirmware, FirmwareIdentity, FirmwareMatch, FirmwareCandidate, FirmwareInfo, TwinProfiles, TwinProfileSummary, TwinProfile, TwinFrame, TwinHome, ExcludedParam, SimTwin, SimFirmware, SimFrame, SimFrameView, TwinFrameView } from './types'
 export type { FrameBody, HomeBody, TwinCaptureBody, TwinProfilePatch } from './rest'
-// 11 §7: USB serial link and PX4 hardware in the loop (hand-written until the schema carries them)
-export type { SerialPort, SerialPorts, SerialBaud, SerialLinkView, HitlState, HitlStep, HitlStepKey, HitlStepState, HitlAction, HitlStatus, HitlBackup, HitlMismatch, HitlRun, HitlError, VehicleHitlRef, VehicleLinkExt } from './hitl'
+// 11 §7: USB serial link and PX4 hardware in the loop
+export type { SerialPort, SerialPorts, SerialBaud, SerialLinkView, SerialUsb, HitlState, HitlStep, HitlStepKey, HitlStepState, HitlAction, HitlStatus, HitlBackup, HitlChange, HitlMismatch, HitlRun, HitlError, HitlPose, HitlFirmware, VehicleHitl, VehicleHitlRef, VehicleLinkExt } from './hitl'
 export { linkKind, serialOf, hitlOf } from './hitl'

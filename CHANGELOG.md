@@ -7,7 +7,7 @@ GitHub Release notes for its tag.
 
 ## [0.5.4] - 2026-11-09
 
-<!-- Draft written with the Copilot, MCP, SDK and documentation work; the release step completes it. -->
+<!-- Integrated on main; the release step confirms the date and replaces the pack and installer sizes with the per-platform figures. -->
 
 Firmware twins fly the official PX4 and ArduPilot firmware against Relay's
 physics with a real aircraft's version and parameters, PX4 flight controllers
@@ -22,6 +22,10 @@ crashes that tumble.
   it is a simulator: claims, sticks, skills, plans, timelines, programs, the
   stage and the arena work unchanged, with the firmware's own control loop,
   arming checks and failsafes. The firmware only talks to Relay on loopback.
+  - The pack's firmware on screen: Settings → Autopilot packs, an Add
+    simulator dialog with the fast simulator or a firmware twin, a firmware
+    block in the inspector (identity, Generate twin profile, Start twin) and a
+    twin inspector with the process, lockstep and parameter details.
   - Relay identifies a real aircraft's firmware (family, version, git hash,
     board) and ranks the installed packs: exact, version, series, nearest.
   - Twin profiles capture an aircraft's whole parameter table; calibration,
@@ -37,17 +41,34 @@ crashes that tumble.
   not on Windows). About 5 to 6 MB per pack, 25 to 30 MB per installer.
   Settings lists them and imports further packs. Format:
   [docs/autopilot-packs.md](docs/autopilot-packs.md).
+  - ArduPilot packs built from source bind SITL's RC input and the JSON
+    physics socket to 127.0.0.1 (`"loopback": true` in the manifest), so no
+    firmware socket listens on other interfaces. The linux-x64 ArduPilot packs
+    are now static builds from source; the official binary stays available as
+    a build option.
 - **Hardware in the loop (PX4).** Over a USB serial link Relay backs up the
   flight controller's parameters, switches it to HITL, feeds it sensor data
   from its physics while the firmware keeps the motors locked, and afterwards
   restores and verifies every parameter. A step-by-step dialog in the
   inspector shows each stage. ArduPilot removed HIL support; Relay explains
-  this and recommends a firmware twin. The PX4 protocol is tested against a
-  simulated serial port; the full flow on a real board is verified once the
-  larger PX4 aircraft is available.
+  this and recommends a firmware twin.
+  - Only `SYS_HITL` and `SYS_AUTOSTART` change; the whole parameter table is
+    backed up first, and the restore reads every parameter back and compares
+    it with the backup (flight-time counters and the flight UUID excepted).
+  - Starting needs the operator to type HITL, a disarmed aircraft and the
+    operator's possession.
+  - If Relay quits during a session, the parameters are restored the next
+    time the board connects over USB, once it is disarmed.
+  - The flow is tested against a scripted PX4 board on a pseudo-terminal; the
+    full flow on a real board is verified once the larger PX4 aircraft is
+    available.
 - **Serial link.** Connect an aircraft over a USB serial port (the flight
-  controller's own USB socket or a USB-serial adapter); known flight-controller
-  interfaces are marked and the baud rate is detected automatically.
+  controller's own USB socket or a USB-serial adapter) from the USB serial tab
+  of the Connect dialog; known flight-controller interfaces and USB-serial
+  adapters are marked and the baud rate is detected automatically. An
+  unplugged board goes delayed, lost and offline like a UDP aircraft and
+  reconnects when it comes back, also under a new device name. Needs pyserial
+  3.5, which ships with the backend.
 - **Simulator physics.**
   - Rigid-body ground contact at the feet, propeller tips and top: a normal
     landing stays upright, a crash bounces, rolls and comes to rest in its
@@ -59,12 +80,18 @@ crashes that tumble.
     magnetometer and GPS.
   - The stage interpolates attitude with quaternions, so flips and inverted
     flight do not jump; twins and HITL aircraft carry an engine badge.
+  - **Reset simulator** in the inspector, the fleet card menu, the command
+    palette and a prompt on the stage over a crashed simulator; holding
+    Circle on the gamepad also resets a crashed simulator.
+  - Timelines arm with the throttle the mode needs: 0 on ArduPilot, 50 % on
+    PX4 in the hold modes.
 - API: `GET /autopilots`, `POST /autopilots/import`, `DELETE
   /autopilots/{id}`, `GET /vehicles/{id}/firmware`, `GET`/`POST
   /twins/profiles`, `GET`/`PUT`/`DELETE /twins/profiles/{pid}`, `POST /sims`
   with `engine`, `profile`, `pack`, `frame` and `home`, `GET /sims/{id}/twin`,
   `PUT /sims/{id}/frame`, `GET /serial/ports`, `POST /vehicles` with `serial`,
-  `GET`/`POST /vehicles/{id}/hitl`. Events `twin_started`, `twin_exited`,
+  `GET`/`POST /vehicles/{id}/hitl`. Snapshot fields `transport` (`udp`,
+  `serial`, `sim`), `serial` and `hitl`. Events `twin_started`, `twin_exited`,
   `twin_start_failed`, `autopilot_pack_imported`, `hitl_started`,
   `hitl_restored`, `hitl_failed`. Errors `pack_missing`, `pack_unsupported`,
   `twin_start_failed`, `twin_limit`, `frame_unsupported`, `twin_unsupported`,
@@ -86,7 +113,7 @@ crashes that tumble.
   - The SDK adds `autopilots()`, `firmware()`, `twin_profiles()`,
     `twin_profile()`, `capture_twin_profile()`, `update_twin_profile()`,
     `delete_twin_profile()`, `start_twin()`, `twin()`, `set_frame()`,
-    `serial_ports()`, `connect()` and `hitl()`.
+    `serial_ports()`, `serial_ports_status()`, `connect()` and `hitl()`.
 
 ### Changed
 

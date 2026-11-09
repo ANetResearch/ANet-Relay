@@ -153,7 +153,7 @@ function busyVehicles(now: number): V[] {
         firmware_info: { family: 'px4', vehicle: 'copter', version: '1.16.2', type: 'official', git: 'b5f3e2a1', board: 'Pixhawk 6C (fmu-v6c)' },
         battery: { voltage: 16.6, current: 0.3, remaining_pct: 96, cells: 4, level: 'ok' },
       }),
-      { serial: { device: '/dev/ttyACM0', baud: 115200 }, hitl: { state: 'idle' } },
+      { transport: 'serial', serial: { device: '/dev/ttyACM0', baud: 115200, open: true, error: null, reopened: 0, usb: { vid: 0x26ac, pid: 0x0038, serial_number: '0' } }, hitl: null },
     ),
     // 11 §6: a firmware twin of Quad 02 (exact match) on the small frame
     base({

@@ -8,16 +8,16 @@ import { HitlSteps, HitlTables } from './HitlDialog'
 import { EngineBadge, TwinFailure } from './parts'
 
 const status = (over: Partial<HitlStatus> = {}): HitlStatus => ({
-  id: 'q5', available: true, reason: null, reason_zh: null, state: 'running',
+  id: 'q5', available: true, reason: null, reason_zh: null, cause: null, state: 'running',
   steps: [
     { key: 'confirm', state: 'done', detail: 'Propellers removed', detail_zh: '已拆桨' },
     { key: 'backup', state: 'done', detail: '1210 parameters saved', detail_zh: '已保存 1210 项参数' },
-    { key: 'write', state: 'done', detail: null, detail_zh: null },
-    { key: 'reboot', state: 'done', detail: null, detail_zh: null },
-    { key: 'run', state: 'active', detail: 'HIL_SENSOR 250 Hz', detail_zh: null },
+    { key: 'write', state: 'done', detail: '2 parameters written', detail_zh: '已写入 2 项参数' },
+    { key: 'reboot', state: 'done', detail: 'reconnected', detail_zh: '已重新连接' },
+    { key: 'run', state: 'active', detail: 'HIL_SENSOR 250 Hz', detail_zh: '' },
   ],
-  backup: { file: 'hitl-backups/q5.json', count: 1210, captured_at: 1 }, changed: { SYS_HITL: { from: 0, to: 1 } },
-  mismatches: [{ name: 'COM_RC_IN_MODE', expected: 1, actual: 0 }], error: null, run: { sensor_hz: 250, gps_hz: 10, actuator_frames: 900, steps: 900, since: 1 }, pending_restore: false,
+  backup: { file: 'q5.json', path: null, count: 1210, captured_at: 1 }, changed: { SYS_HITL: { from: 0, to: 1 } },
+  mismatches: [{ name: 'COM_RC_IN_MODE', expected: 1, actual: 0 }], volatile: [], error: null, run: { sensor_hz: 250, gps_hz: 10, actuator_frames: 900, steps: 900, since: 1 }, pending_restore: false,
   ...over,
 })
 

@@ -1040,8 +1040,14 @@ class RelayClient:
 
     def serial_ports(self) -> list[dict]:
         """Serial ports on this computer: ``[{device, name, description, manufacturer, vid, pid,
-        serial_number, autopilot}]``; ``autopilot`` marks a known flight-controller USB interface."""
+        serial_number, autopilot, kind, adapter, vehicle}]``; ``autopilot`` marks a known flight-controller
+        USB interface, ``kind`` is autopilot | usb-serial | other and ``vehicle`` the aircraft already on the
+        port. The list is empty when pyserial is missing (``serial_ports_status()`` says why)."""
         return self._get("/serial/ports")["ports"]
+
+    def serial_ports_status(self) -> dict:
+        """``GET /serial/ports`` in full: ``{available, reason, reason_zh, ports}``."""
+        return self._get("/serial/ports")
 
     def connect(
         self,
@@ -1054,7 +1060,8 @@ class RelayClient:
 
         ``serial`` is a device path such as ``/dev/ttyACM0`` or ``COM5``, or ``{device, baud}``; ``baud`` is a
         rate or ``"auto"`` (115200, 57600, 921600 in turn until a heartbeat arrives; USB CDC autopilots ignore
-        it). Errors: ``serial_unavailable`` (``detail.reason/reason_zh``)."""
+        it). Returns ``{id}``; serial aircraft ids look like ``usb-ttyACM0``. Errors: ``serial_unavailable``
+        (``detail.cause/reason/reason_zh``; 409 when the port is busy)."""
         if (host is None) == (serial is None):
             raise ValueError("connect needs exactly one of host and serial")
         if serial is None:
@@ -1070,9 +1077,10 @@ class RelayClient:
         ``start`` needs ``confirm="HITL"`` (the propellers are removed), a disarmed PX4 aircraft on a
         serial link and the operator's possession; Relay backs up the parameters, sets ``SYS_HITL``, reboots
         and feeds the board sensor data from its physics. ``stop`` writes the backup back, reboots and
-        verifies it. Returns the status ``{state, steps, backup, changed, mismatches, error, run,
-        pending_restore}``.
-        Errors: ``hitl_unavailable`` (``detail.reason/reason_zh``), ``serial_unavailable``."""
+        verifies it. Returns the status ``{available, reason, cause, state, steps, backup, changed,
+        mismatches, volatile, error, run, pending_restore}``.
+        Errors: ``hitl_unavailable`` (``detail.reason/reason_zh/cause``), ``confirm_required``,
+        ``serial_unavailable``."""
         if action == "status":
             return self._get(f"/vehicles/{_q(vehicle_id)}/hitl")
         if action not in ("start", "stop"):

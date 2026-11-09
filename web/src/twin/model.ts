@@ -441,7 +441,7 @@ export const HITL_STEPS: readonly HitlStepKey[] = ['confirm', 'backup', 'write',
 /** Every step in order; a step the backend has not reported yet is pending. */
 export function hitlSteps(status: Pick<HitlStatus, 'steps'> | null): HitlStep[] {
   const got = new Map((status?.steps ?? []).map((s) => [s.key, s]))
-  return HITL_STEPS.map((key) => got.get(key) ?? { key, state: 'pending', detail: null, detail_zh: null })
+  return HITL_STEPS.map((key) => got.get(key) ?? { key, state: 'pending', detail: '', detail_zh: '' })
 }
 
 export const hitlBusy = (s: HitlState) => s === 'backing_up' || s === 'writing' || s === 'rebooting' || s === 'restoring' || s === 'verifying'
@@ -455,7 +455,7 @@ export const hitlPollMs = (s: HitlState | null) => (s && hitlActive(s) ? 500 : 2
 
 export function changedRows(changed: HitlStatus['changed']): { name: string; from: number | null; to: number | null }[] {
   return Object.entries(changed)
-    .filter((e): e is [string, { from: number | null; to: number | null }] => e[1] !== undefined)
+    .filter((e): e is [string, { from: number; to: number }] => e[1] !== undefined)
     .map(([name, c]) => ({ name, from: c.from, to: c.to }))
     .sort((a, b) => a.name.localeCompare(b.name))
 }

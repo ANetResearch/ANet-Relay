@@ -46,7 +46,7 @@ export function HitlSteps({ status }: { status: HitlStatus | null }) {
   return (
     <ol className="flex flex-col" data-hitl-steps="">
       {hitlSteps(status).map((s) => {
-        const detail = lang === 'zh' ? (s.detail_zh ?? s.detail) : s.detail
+        const detail = lang === 'zh' ? (s.detail_zh || s.detail) : s.detail
         return (
           <li key={s.key} className="flex min-h-9 items-start gap-2.5 border-b border-dotted border-[var(--border)] py-2 last:border-b-0" data-hitl-step={s.key} data-state={s.state}>
             <span className="flex h-4 w-4 shrink-0 items-center justify-center">
@@ -135,6 +135,11 @@ export function HitlTables({ status }: { status: HitlStatus }) {
           </Table>
         </div>
       ) : null}
+      {status.volatile.length && (status.state === 'restored' || status.state === 'failed') ? (
+        <p className="text-hud-sub text-[var(--g400)]" data-hitl-volatile="">
+          {t('hitl.volatile', { names: status.volatile.join(', ') })}
+        </p>
+      ) : null}
     </>
   )
 }
@@ -183,7 +188,7 @@ function HitlBody({ id, label }: { id: string; label: string }) {
               <span className="text-[12px] font-[560] text-[var(--g50)]">{t('hitl.unavailable')}</span>
               {reason ? <span className="text-ed-value text-[var(--g200)]">{reason}</span> : null}
               {/* the operator starts HITL from the window while possessing the aircraft */}
-              {!possessed ? (
+              {status.cause === 'possession' && !possessed ? (
                 <span className="pt-1.5">
                   <Button variant="outline" size="sm" className="gap-1.5" onClick={() => possess(id)} data-hitl-possess="">
                     <Icon icon="possess" className="size-3.5" />
@@ -210,7 +215,7 @@ function HitlBody({ id, label }: { id: string; label: string }) {
         {status.backup ? (
           <div className="flex flex-col gap-0.5" data-hitl-backup="">
             <span className="cap">{t('hitl.backup')}</span>
-            <span className="truncate font-mono text-[11px] text-[var(--g300)]" title={status.backup.file} data-selectable="">
+            <span className="truncate font-mono text-[11px] text-[var(--g300)]" title={status.backup.path ?? status.backup.file} data-selectable="">
               {t('hitl.backupValue', { count: status.backup.count, file: status.backup.file })}
             </span>
           </div>

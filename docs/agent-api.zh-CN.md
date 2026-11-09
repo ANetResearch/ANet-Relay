@@ -371,15 +371,15 @@ Relay 也可以经 USB 串口连接飞机：飞控自带的 USB 口，或接在�
 
 | 方法与路径 | 鉴权 | 用途 |
 |---|---|---|
-| `GET /serial/ports` | – | `{ports: [{device, name, description, manufacturer, vid, pid, serial_number, autopilot}]}`；`autopilot` 标记已知的飞控 USB 接口（PX4/3DR、ArduPilot、CubePilot、Holybro、mRo、ST 虚拟串口）。USB 串口转换器（CP210x、FTDI、CH340）会列出，但不标记 |
-| `POST /vehicles` | 应用操作 | 以 `{serial: {device, baud?}}` 代替 `{host, port?}`；`baud` 为波特率或 `"auto"`（依次尝试 115200、57600、921600，每个约 2 s，直到收到心跳；USB CDC 飞控忽略波特率）。快照带 `link: "udp" \| "serial"` 与 `serial: {device, baud} \| null`；`DELETE /vehicles/{id}` 关闭串口 |
-| `GET /vehicles/{id}/hitl` | – | `{id, available, reason, reason_zh, state, steps, backup, changed, mismatches, error, run, pending_restore}` |
+| `GET /serial/ports` | – | `{available, reason, reason_zh, ports: [{device, name, description, manufacturer, vid, pid, serial_number, autopilot, kind, adapter, vehicle}]}`；`autopilot` 标记已知的飞控 USB 接口（PX4/3DR、ArduPilot、CubePilot、Holybro、mRo、ST 虚拟串口），`kind` 为 `autopilot`、`usb-serial`（CP210x、FTDI 或 CH340 转换器，型号见 `adapter`）或 `other`；`vehicle` 为已占用该串口的飞机。`available: false` 表示缺少 pyserial。Linux 上的旧式 `/dev/ttyS*` 占位设备不列出 |
+| `POST /vehicles` | 应用操作 | 以 `{serial: {device, baud?}}` 代替 `{host, port?}`（二者不可同时给出）→ `{id}`，例如 `usb-ttyACM0`；`baud` 为波特率或 `"auto"`（依次尝试 115200、57600、921600，每个约 2 s，直到收到心跳；USB CDC 飞控忽略波特率）。快照带 `transport: "udp" \| "serial" \| "sim"` 与 `serial: {device, baud, open, error, reopened, usb} \| null`。串口出错后关闭，约每秒重新打开一次；USB 飞控以新设备名重新出现时，按 USB 序列号重新找到。`DELETE /vehicles/{id}` 关闭串口 |
+| `GET /vehicles/{id}/hitl` | – | `{id, available, reason, reason_zh, cause, state, steps, backup, changed, mismatches, volatile, error, run, pending_restore}`；`cause` 说明不能 `start` 的原因（`sim`、`unidentified`、`ardupilot`、`other_firmware`、`not_serial`、`busy`、`pending`、`link`、`armed`、`possession`）；`volatile` 列出固件自行变化、核对时不比较的参数（飞行时间计数、飞行 UUID）；`error` 为 `{code, step, message, message_zh}` |
 | `POST /vehicles/{id}/hitl` | 操作员，或应用操作 | `{action: start \| stop, confirm?: "HITL"}` → 同一状态对象 |
 
-硬件在环（HITL）让一块真实的 PX4 飞控在 Relay 的物理中运行：Relay 把全部参数备份到数据目录 `hitl-backups/<vehicle>-<time>.json`，写入 `SYS_HITL = 1` 与 HIL 四旋翼 X 机架（`SYS_AUTOSTART 1001`），重启飞控，然后以 250 Hz 发送 `HIL_SENSOR`、10 Hz 发送 `HIL_GPS`，按飞控回传的 `HIL_ACTUATOR_CONTROLS` 推进物理。电机由固件锁死。该飞机显示为“硬件在环”，引擎徽标如“硬件在环 PX4 1.16.2”，快照带 `hitl: {state}`。`stop`（或断开连接，或 Relay 退出后的下次连接）把所有被改过的参数写回，重启，重读全部参数并与备份逐项核对；不一致时以 `mismatches` 报告（`hitl_restore_mismatch`），并保留备份文件。
+硬件在环（HITL）让一块真实的 PX4 飞控在 Relay 的物理中运行：Relay 把全部参数备份到数据目录 `hitl-backups/<vehicle>-<time>.json`，写入 `SYS_HITL = 1` 与 HIL 四旋翼 X 机架（`SYS_AUTOSTART 1001`），重启飞控，然后以 250 Hz 发送 `HIL_SENSOR`、10 Hz 发送 `HIL_GPS`，按飞控回传的 `HIL_ACTUATOR_CONTROLS` 推进物理。电机由固件锁死。该飞机显示为“硬件在环”，引擎徽标如“硬件在环 PX4 1.16.2”，快照带 `hitl: {state, engine: "hitl", label_en, label_zh, firmware: {family, version}, pending_restore, pose} \| null`；运行期间飞机的 `position`（坐标系 `local`）、`attitude` 与 `rates` 显示输入飞控的物理状态。只修改 `SYS_HITL` 与 `SYS_AUTOSTART`；不修改 `SYS_AUTOCONFIG`，因为它会重置全部参数。整数按数值比较，实数按存储字节比较。`stop`（或断开连接，或 Relay 退出后的下次连接）把所有被改过的参数写回，重启，重读全部参数并与备份逐项核对；不一致时以 `mismatches` 报告（`hitl_restore_mismatch`），并保留备份文件。
 
 - `state`：`idle`、`backing_up`、`writing`、`rebooting`、`running`、`restoring`、`verifying`、`restored`、`failed`。`steps`：`confirm`、`backup`、`write`、`reboot`、`run`、`restore`、`verify`，每步为 `pending`、`active`、`done`、`failed` 或 `skipped`，附中英文 `detail`。运行中 `run` 为 `{sensor_hz, gps_hz, actuator_frames, steps, since}`。任何一步失败都进入恢复。
-- `start` 要求 `confirm: "HITL"`（已拆下螺旋桨）、PX4、串口链路、已上锁，且操作员已附身；智能体会话仅在开启应用控制时可调用。不满足时返回 `hitl_unavailable`（409），附 `detail.reason` 与 `detail.reason_zh`。ArduPilot 固件早已移除 HIL，ArduPilot 飞机请使用固件孪生。Wi-Fi 数传带不动传感器数据流，因此 HITL 须经 USB。
+- `start` 要求 `confirm: "HITL"`（已拆下螺旋桨）、PX4、串口链路、已上锁，且操作员已附身；智能体会话仅在开启应用控制时可调用。未输入确认词时返回 `confirm_required`（400，`detail.expected: "HITL"`）；其他条件不满足时返回 `hitl_unavailable`（409），附 `detail.reason`、`detail.reason_zh` 与 `detail.cause`。若上次会话尚欠恢复（会话运行中 Relay 退出），该飞控下次经串口连接且处于上锁状态时自动恢复；`stop` 也会立即执行恢复。ArduPilot 固件早已移除 HIL，ArduPilot 飞机请使用固件孪生。Wi-Fi 数传带不动传感器数据流，因此 HITL 须经 USB。
 - 现状：PX4 协议编码、备份、恢复与核对已用模拟串口测试；真机全流程在大机到位后验证。
 
 ### 机载程序
@@ -562,7 +562,7 @@ SDK：`dogfight_start(...)`、`dogfight_stop()`、`dogfight_status()`、`leaderb
 
 机载程序与控制等级新增：403 `sticks_only`；400 `program_invalid`、`program_param_invalid`；404 `program_not_found`、`revision_not_found`；409 `program_readonly`、`program_load_failed`、`no_program`、`program_not_paused`、`programs_not_allowed`；503 `program_host_unavailable`。狗斗与对局新增 400 `dogfight_real_aircraft`；409 `dogfight_running`、`dogfight_not_running`、`dogfight_no_aircraft`、`match_running`。客户端在没有评测接口的 Relay 上另报 `judge_unavailable`（404）。
 
-固件孪生、串口链路与硬件在环（0.5.4）新增：400 `pack_unsupported`（`detail.reason`）、`serial_unavailable`（`detail.reason`、`detail.reason_zh`：串口被占用、未找到、无心跳、缺少 pyserial；串口被占用时为 409）；404 `pack_missing`、`profile_not_found`；409 `twin_limit`、`frame_unsupported`、`twin_unsupported`（`detail.operation`、`detail.operation_zh`）、`params_incomplete`（`detail.received`、`detail.total`）、`real_only`、`hitl_unavailable`（`detail.reason`、`detail.reason_zh`）；503 `twin_start_failed`。`hitl_restore_mismatch` 在 HITL 状态与 `hitl_restored` 事件中报告，恢复流程仍会完成。
+固件孪生、串口链路与硬件在环（0.5.4）新增：400 `pack_unsupported`（`detail.reason`）、`serial_unavailable`（`detail.device`、`detail.cause`：`busy`、`not_found`、`permission`、`no_heartbeat`、`pyserial_missing`、`invalid`、`io`，并附 `detail.reason` 与 `detail.reason_zh`；串口被占用时为 409）；404 `pack_missing`、`profile_not_found`；409 `twin_limit`、`frame_unsupported`、`twin_unsupported`（`detail.operation`、`detail.operation_zh`）、`params_incomplete`（`detail.received`、`detail.total`）、`real_only`、`hitl_unavailable`（`detail.reason`、`detail.reason_zh`、`detail.cause`）；503 `twin_start_failed`。`hitl_restore_mismatch` 在 HITL 状态与 `hitl_restored` 事件中报告，恢复流程仍会完成。
 
 ## 8. MCP 服务
 
@@ -655,7 +655,7 @@ Relay 不在 8765 端口运行时，追加 `"--base", "http://127.0.0.1:<port>"`
 | `autopilots()` · `import_autopilot(path, sha256)` · `delete_autopilot(pack)` · `firmware(id)` | 运行包（导入与删除需操作员令牌），以及飞机的固件识别结果与匹配的运行包 |
 | `twin_profiles()` · `twin_profile(pid)` · `capture_twin_profile(id, name=None, frame=None, profile=None)` · `update_twin_profile(pid, name, frame, pack, home, clear_home)` · `delete_twin_profile(pid)` | 孪生配置；`frame` 为预设名或机型对象 |
 | `start_twin(profile=None, pack=None, frame=None, home=None, count=1)` · `twin(id)` · `set_frame(id, preset, mass_kg, wheelbase_m, prop_in, cells, capacity_mah)` | 启动固件孪生（返回新编号）、读取孪生详情、更换模拟机机型；`home` 为 `{lat, lon, alt_m}` 或 `(lat, lon[, alt_m])` |
-| `serial_ports()` · `connect(host=None, port=None, serial=None, baud=None)` · `hitl(id, action="status", confirm=None)` | 串口列表、经 UDP 或串口连接、PX4 硬件在环（`start` 须 `confirm="HITL"`） |
+| `serial_ports()` · `serial_ports_status()` · `connect(host=None, port=None, serial=None, baud=None)` · `hitl(id, action="status", confirm=None)` | 串口列表、经 UDP 或串口连接、PX4 硬件在环（`start` 须 `confirm="HITL"`） |
 | `app()` · `ui_state()` · `gamepads()` · `app_actions()` · `ui(action, **args)` | 应用与窗口状态、界面动作 |
 | `scan_network(networks)` · `connect_vehicle(host, port)` · `remove_vehicle(id)` · `add_sims(count, autopilot, hover_assist)` · `remove_sims(ids)` · `sim_assist(id, on)` · `settings()` · `update_settings(**patch)` · `ack_alert(id)` · `stop_all()` | 应用操作：打开会话时以会话身份调用，否则使用操作员令牌 |
 

@@ -97,10 +97,13 @@ const LINES_PX4_FAIL = [
 
 const SERIAL: SerialPorts = {
   ports: [
-    { device: '/dev/ttyUSB0', name: 'ttyUSB0', description: 'CP2102 USB to UART Bridge Controller', manufacturer: 'Silicon Labs', vid: 0x10c4, pid: 0xea60, serial_number: '0001', autopilot: false },
-    { device: '/dev/ttyACM0', name: 'ttyACM0', description: 'PX4 FMU v6C.x', manufacturer: '3D Robotics', vid: 0x26ac, pid: 0x0038, serial_number: '0', autopilot: true },
-    { device: '/dev/ttyACM1', name: 'ttyACM1', description: 'CubeOrange', manufacturer: 'CubePilot', vid: 0x2dae, pid: 0x1016, serial_number: '1E0034', autopilot: true },
+    { device: '/dev/ttyUSB0', name: 'ttyUSB0', description: 'CP2102 USB to UART Bridge Controller', manufacturer: 'Silicon Labs', vid: 0x10c4, pid: 0xea60, serial_number: '0001', autopilot: false, kind: 'usb-serial', adapter: 'CP210x', vehicle: null },
+    { device: '/dev/ttyACM0', name: 'ttyACM0', description: 'PX4 FMU v6C.x', manufacturer: '3D Robotics', vid: 0x26ac, pid: 0x0038, serial_number: '0', autopilot: true, kind: 'autopilot', adapter: null, vehicle: null },
+    { device: '/dev/ttyACM1', name: 'ttyACM1', description: 'CubeOrange', manufacturer: 'CubePilot', vid: 0x2dae, pid: 0x1016, serial_number: '1E0034', autopilot: true, kind: 'autopilot', adapter: null, vehicle: null },
   ],
+  available: true,
+  reason: null,
+  reason_zh: null,
 }
 
 const HITL_ORDER: HitlStepKey[] = ['confirm', 'backup', 'write', 'reboot', 'run', 'restore', 'verify']
@@ -229,22 +232,22 @@ export function startTwinFixture(d: TwinFixtureDeps): TwinFixture {
     const cur = hitl.get(v.id)
     const px4 = v.firmware_info?.family === 'px4' || v.autopilot === 'PX4'
     const serial = serialOf(v) !== null
-    const reason: [string, string] | null = !px4
-      ? ['ArduPilot removed HIL support and the firmware cannot be changed; use the firmware twin', 'ArduPilot 已移除 HIL，且固件不能更改；请使用固件孪生']
+    const reason: [string, string, string] | null = !px4
+      ? ['ArduPilot removed HIL support and the firmware cannot be changed; use the firmware twin', 'ArduPilot 已移除 HIL，且固件不能更改；请使用固件孪生', 'ardupilot']
       : !serial
-        ? ['the flight controller must be connected over USB serial', '飞控须通过 USB 串口连接']
+        ? ['the flight controller must be connected over USB serial', '飞控须通过 USB 串口连接', 'not_serial']
         : v.armed
-          ? ['disarm the aircraft first', '须先给飞机上锁']
+          ? ['disarm the aircraft first', '须先给飞机上锁', 'armed']
           : !(v.controller === 'human' && v.possession)
-            ? ['possess the aircraft first: the operator starts hardware in the loop', '须先附身：硬件在环由操作员启动']
+            ? ['possess the aircraft first: the operator starts hardware in the loop', '须先附身：硬件在环由操作员启动', 'possession']
             : null
     const base: HitlStatus = cur ?? {
-      id: v.id, available: false, reason: null, reason_zh: null, state: 'idle',
-      steps: HITL_ORDER.map((key) => ({ key, state: 'pending', detail: null, detail_zh: null })), backup: null, changed: {}, mismatches: [], error: null, run: null, pending_restore: false,
+      id: v.id, available: false, reason: null, reason_zh: null, cause: null, state: 'idle',
+      steps: HITL_ORDER.map((key) => ({ key, state: 'pending', detail: 'waiting', detail_zh: '等待' })), backup: null, changed: {}, mismatches: [], volatile: [], error: null, run: null, pending_restore: false,
     }
     const ran = base.run ? Math.round((d.now() - base.run.since) * 250) : 0
     const run = base.run && base.state === 'running' ? { ...base.run, steps: ran, actuator_frames: ran } : base.run
-    return { ...base, run, available: reason === null, reason: reason?.[0] ?? null, reason_zh: reason?.[1] ?? null }
+    return { ...base, run, available: reason === null, reason: reason?.[0] ?? null, reason_zh: reason?.[1] ?? null, cause: reason?.[2] ?? null }
   }
   const setHitl = (id: string, patch: Partial<HitlStatus>, steps?: Partial<Record<HitlStepKey, Partial<HitlStep>>>) => {
     const v = vehicle(id)
@@ -253,19 +256,21 @@ export function startTwinFixture(d: TwinFixtureDeps): TwinFixture {
     const nextSteps = cur.steps.map((s) => (steps?.[s.key] ? { ...s, ...steps[s.key] } : s))
     const next = { ...cur, ...patch, steps: nextSteps }
     hitl.set(id, next)
-    d.mutate(id, (x) => ({ ...x, hitl: { state: next.state } }) as V)
+    const version = v.firmware_info?.version ?? null
+    const tail = version ? ` PX4 ${version}` : ' PX4'
+    d.mutate(id, (x) => ({ ...x, hitl: { state: next.state, engine: 'hitl', label_en: `Hardware in the loop${tail}`, label_zh: `硬件在环${tail}`, firmware: { family: 'px4', version }, pending_restore: next.pending_restore, pose: null } }) as V)
   }
   const hitlStart = (id: string) => {
     const now = d.now()
     setHitl(id, { state: 'backing_up', mismatches: [], error: null, run: null }, {
       confirm: { state: 'done', detail: 'Propellers removed, confirmed by the operator', detail_zh: '操作员已确认拆桨' },
       backup: { state: 'active', detail: 'Reading 1210 parameters', detail_zh: '正在读取 1210 项参数' },
-      write: { state: 'pending', detail: null, detail_zh: null }, reboot: { state: 'pending', detail: null, detail_zh: null }, run: { state: 'pending', detail: null, detail_zh: null },
-      restore: { state: 'pending', detail: null, detail_zh: null }, verify: { state: 'pending', detail: null, detail_zh: null },
+      write: { state: 'pending', detail: 'waiting', detail_zh: '等待' }, reboot: { state: 'pending', detail: 'waiting', detail_zh: '等待' }, run: { state: 'pending', detail: 'waiting', detail_zh: '等待' },
+      restore: { state: 'pending', detail: 'waiting', detail_zh: '等待' }, verify: { state: 'pending', detail: 'waiting', detail_zh: '等待' },
     })
     const file = `hitl-backups/${id}-${new Date(now * 1000).toISOString().replace(/[:.]/g, '').slice(0, 15)}.json`
     later(1200, () =>
-      setHitl(id, { state: 'writing', backup: { file, count: 1210, captured_at: now + 1.2 }, changed: { SYS_HITL: { from: 0, to: 1 }, SYS_AUTOSTART: { from: 4001, to: 1001 } } }, {
+      setHitl(id, { state: 'writing', backup: { file, path: null, count: 1210, captured_at: now + 1.2 }, changed: { SYS_HITL: { from: 0, to: 1 }, SYS_AUTOSTART: { from: 4001, to: 1001 } } }, {
         backup: { state: 'done', detail: `1210 parameters saved to ${file}`, detail_zh: `已保存 1210 项参数到 ${file}` },
         write: { state: 'active', detail: 'SYS_HITL 1, SYS_AUTOSTART 1001', detail_zh: 'SYS_HITL 1，SYS_AUTOSTART 1001' },
       }),
@@ -294,7 +299,7 @@ export function startTwinFixture(d: TwinFixtureDeps): TwinFixture {
     later(2700, () => {
       const mismatches = [{ name: 'COM_RC_IN_MODE', expected: 1, actual: 0 }]
       setHitl(id, { state: 'restored', mismatches, pending_restore: false }, { verify: { state: 'failed', detail: '1 parameter differs from the backup', detail_zh: '1 项参数与备份不一致' } })
-      d.emit('hitl_restored', id, { vehicle: id, restored: 2, mismatches })
+      d.emit('hitl_restored', id, { vehicle: id, restored: ['SYS_AUTOSTART', 'SYS_HITL'], mismatches })
     })
   }
 
@@ -440,18 +445,20 @@ export function startTwinFixture(d: TwinFixtureDeps): TwinFixture {
         const s = b.serial as { device?: string; baud?: number | 'auto' }
         const device = String(s.device ?? '')
         const port = SERIAL.ports.find((p) => p.device === device)
-        const reason = (en: string, zh: string) => fail(409, 'serial_unavailable', `The serial port is not available: ${en}.`, `串口不可用：${zh}。`, { reason: en, reason_zh: zh, device })
-        if (!port) throw reason('device not found', '找不到设备')
-        if (d.vehicles().some((v) => serialOf(v)?.device === device)) throw reason('device busy', '设备被占用')
-        if (!port.autopilot) throw reason('no heartbeat at 115200, 57600 or 921600 baud', '115200、57600 与 921600 波特率下均无心跳')
-        const id = `fc-${device.replace(/\W+/g, '')}`
+        const reason = (status: number, cause: string, en: string, zh: string) =>
+          fail(status, 'serial_unavailable', `The serial port is not available: ${en}.`, `串口不可用：${zh}。`, { device, cause, reason: en, reason_zh: zh })
+        if (!port) throw reason(400, 'not_found', 'device not found', '找不到设备')
+        if (d.vehicles().some((v) => serialOf(v)?.device === device)) throw reason(409, 'busy', 'device busy', '设备被占用')
+        if (!port.autopilot) throw reason(400, 'no_heartbeat', 'no heartbeat at 115200, 57600 or 921600 baud', '115200、57600 与 921600 波特率下均无心跳')
+        const id = `usb-${device.split(/[\\/]/).pop() ?? device}`
         const px4 = /PX4/.test(port.description ?? '')
         const v = d.base({
           id, label: px4 ? 'FMU v6C' : 'CubeOrange', kind: 'real', host: null, sysid: 1, bridge: null,
           autopilot: px4 ? 'PX4' : 'ArduPilot', firmware: px4 ? 'PX4 1.16.2' : 'ArduCopter 4.6.3',
           firmware_info: px4 ? { family: 'px4', vehicle: 'copter', version: '1.16.2', type: 'official', git: 'b5f3e2a1', board: 'Pixhawk 6C (fmu-v6c)' } : { family: 'ardupilot', vehicle: 'copter', version: '4.6.3', type: 'official', git: '3fc7011a', board: 'CubeOrange' },
         })
-        d.add(Object.assign(v, { serial: { device, baud: s.baud === 'auto' || s.baud === undefined ? 115200 : s.baud }, hitl: px4 ? { state: 'idle' } : null }))
+        const baud = s.baud === 'auto' || s.baud === undefined ? 115200 : s.baud
+        d.add(Object.assign(v, { transport: 'serial' as const, serial: { device, baud, open: true, error: null, reopened: 0, usb: { vid: port.vid, pid: port.pid, serial_number: port.serial_number } }, hitl: null }))
         return { id }
       }
       const rm = path.match(/^\/vehicles\/([^/]+)$/)
@@ -471,7 +478,7 @@ export function startTwinFixture(d: TwinFixtureDeps): TwinFixture {
         if (method === 'GET') return st
         if (b.action === 'start') {
           if (b.confirm !== 'HITL') throw fail(400, 'confirm_required', 'Type HITL to confirm the propellers are removed.', '请输入 HITL 确认已拆桨。')
-          if (!st.available) throw fail(409, 'hitl_unavailable', `Hardware in the loop is not available: ${st.reason}.`, `硬件在环不可用：${st.reason_zh}。`, { reason: st.reason, reason_zh: st.reason_zh })
+          if (!st.available) throw fail(409, 'hitl_unavailable', `Hardware in the loop is not available: ${st.reason}.`, `硬件在环不可用：${st.reason_zh}。`, { reason: st.reason, reason_zh: st.reason_zh, cause: st.cause })
           hitlStart(id)
         } else if (b.action === 'stop') hitlStop(id)
         return hitlFor(vehicle(id)!)

@@ -195,18 +195,18 @@ describe('firmware block (11 §4, §5, §7)', () => {
   it('offers HITL to PX4 on USB serial; explains it for ArduPilot', () => {
     const px4 = veh({ id: 'q5', kind: 'real', sim: null, autopilot: 'PX4', firmware_info: { family: 'px4', vehicle: 'copter', version: '1.16.2', type: 'official', git: null, board: null } })
     expect(hitlEntry(px4, null)).toEqual({ mode: 'button', block: { key: 'hitl.block.serial' } })
-    expect(hitlEntry({ ...px4, serial: { device: '/dev/ttyACM0', baud: 115200 } } as Vehicle, null)).toEqual({ mode: 'button', block: null })
+    expect(hitlEntry({ ...px4, transport: 'serial', serial: { device: '/dev/ttyACM0', baud: 115200, open: true, error: null, reopened: 0, usb: null } }, null)).toEqual({ mode: 'button', block: null })
     expect(hitlEntry(veh({ id: 'q2', kind: 'real', sim: null }), null)).toEqual({ mode: 'note', note: { key: 'hitl.ardupilot' } })
     expect(hitlEntry(veh(), null)).toEqual({ mode: 'none' })
-    expect(linkKind({ ...px4, serial: { device: 'COM5', baud: null } } as Vehicle)).toBe('serial')
-    expect(linkKind({ ...px4, link: { ...px4.link, kind: 'serial' } } as unknown as Vehicle)).toBe('serial')
+    expect(linkKind({ ...px4, transport: 'serial' })).toBe('serial')
+    expect(linkKind({ ...px4, serial: { device: 'COM5', baud: 115200, open: false, error: 'device away', reopened: 1, usb: null } })).toBe('serial')
     expect(linkKind(px4)).toBe('udp')
   })
 })
 
 describe('HITL session (11 §7.2)', () => {
   const status = (over: Partial<HitlStatus> = {}): HitlStatus => ({
-    id: 'q5', available: true, reason: null, reason_zh: null, state: 'idle', steps: [], backup: null, changed: {}, mismatches: [], error: null, run: null, pending_restore: false, ...over,
+    id: 'q5', available: true, reason: null, reason_zh: null, cause: null, state: 'idle', steps: [], backup: null, changed: {}, mismatches: [], volatile: [], error: null, run: null, pending_restore: false, ...over,
   })
   it('lists all seven steps in order, pending until reported', () => {
     const steps = hitlSteps(status({ steps: [{ key: 'backup', state: 'active', detail: 'Reading', detail_zh: '读取' }] }))
@@ -240,9 +240,9 @@ describe('HITL session (11 §7.2)', () => {
 describe('serial ports (11 §7.1)', () => {
   it('lists flight controllers first and names the USB ids', () => {
     const ports = [
-      { device: '/dev/ttyUSB0', name: 'ttyUSB0', description: 'CP2102', manufacturer: null, vid: 0x10c4, pid: 0xea60, serial_number: null, autopilot: false },
-      { device: '/dev/ttyACM10', name: 'ttyACM10', description: 'n/a', manufacturer: null, vid: null, pid: null, serial_number: null, autopilot: true },
-      { device: '/dev/ttyACM2', name: 'ttyACM2', description: 'PX4 FMU', manufacturer: null, vid: 0x26ac, pid: 0x0038, serial_number: null, autopilot: true },
+      { device: '/dev/ttyUSB0', name: 'ttyUSB0', description: 'CP2102', manufacturer: null, vid: 0x10c4, pid: 0xea60, serial_number: null, autopilot: false, kind: 'usb-serial' as const, adapter: 'CP210x', vehicle: null },
+      { device: '/dev/ttyACM10', name: 'ttyACM10', description: 'n/a', manufacturer: null, vid: null, pid: null, serial_number: null, autopilot: true, kind: 'autopilot' as const, adapter: null, vehicle: null },
+      { device: '/dev/ttyACM2', name: 'ttyACM2', description: 'PX4 FMU', manufacturer: null, vid: 0x26ac, pid: 0x0038, serial_number: null, autopilot: true, kind: 'autopilot' as const, adapter: null, vehicle: null },
     ]
     expect(sortPorts(ports).map((p) => p.device)).toEqual(['/dev/ttyACM2', '/dev/ttyACM10', '/dev/ttyUSB0'])
     expect(vidPid(ports[2])).toBe('26AC:0038')

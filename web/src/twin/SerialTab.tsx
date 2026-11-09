@@ -66,7 +66,7 @@ export function SerialTab({ onDone }: { onDone(): void }) {
         // the first flight controller not yet in the fleet, else the first free port
         const ports = sortPorts(d.ports)
         const taken = new Set((useRelay.getState().fleet?.vehicles ?? []).map((v) => serialOf(v)?.device))
-        const free = ports.filter((p) => !taken.has(p.device))
+        const free = ports.filter((p) => p.vehicle === null && !taken.has(p.device))
         setDevice((cur) => (cur && ports.some((p) => p.device === cur) ? cur : (free.find((p) => p.autopilot)?.device ?? free[0]?.device ?? ports[0]?.device ?? null)))
       })
       .catch((e: unknown) => alive && setError(twinErrorView(e, lang)))
@@ -114,6 +114,11 @@ export function SerialTab({ onDone }: { onDone(): void }) {
           <TwinFailure failure={error} />
         ) : !data ? (
           <p className="text-hud-sub text-[var(--g500)]">{t('serial.loading')}</p>
+        ) : !data.available ? (
+          <p className="rounded-md border border-[var(--g600)] px-3 py-3 text-hud-sub text-[var(--g200)]" data-serial-unavailable="">
+            {t('serial.unavailable')}
+            {data.reason ? `${lang === 'zh' ? '：' : ': '}${lang === 'zh' ? (data.reason_zh ?? data.reason) : data.reason}` : ''}
+          </p>
         ) : ports.length === 0 ? (
           <p className="rounded-md border border-dashed border-[var(--g700)] px-3 py-3 text-hud-sub text-[var(--g400)]">{t('serial.none')}</p>
         ) : (
@@ -128,7 +133,7 @@ export function SerialTab({ onDone }: { onDone(): void }) {
             <TableBody>
               {ports.map((p) => {
                 const selected = p.device === device
-                const taken = used.has(p.device)
+                const taken = p.vehicle !== null || used.has(p.device)
                 return (
                   <TableRow
                     key={p.device}
@@ -150,7 +155,7 @@ export function SerialTab({ onDone }: { onDone(): void }) {
                       <div className="flex flex-col">
                         <span className="addr">{p.device}</span>
                         <span className={p.autopilot ? 'text-[10px] font-[560] text-[var(--g100)]' : 'text-[10px] text-[var(--g500)]'}>
-                          {t(p.autopilot ? 'serial.autopilot' : 'serial.adapter')}
+                          {p.autopilot ? t('serial.autopilot') : p.kind === 'usb-serial' ? [t('serial.usbSerial'), p.adapter].filter(Boolean).join(' ') : t('serial.adapter')}
                           {taken ? ` · ${t('serial.inFleet')}` : ''}
                         </span>
                       </div>
@@ -185,7 +190,7 @@ export function SerialTab({ onDone }: { onDone(): void }) {
       {failure ? <TwinFailure failure={failure} /> : null}
       <div className="flex items-center justify-end gap-3">
         {busy ? <span className="text-hud-sub text-[var(--g400)]">{t('serial.connecting')}</span> : null}
-        <Button onClick={() => void connect()} disabled={!device || busy || Boolean(device && used.has(device))} className="h-8 min-w-24 gap-1.5 text-[12px]" data-serial-connect="">
+        <Button onClick={() => void connect()} disabled={!device || busy || data?.available === false || Boolean(device && (used.has(device) || ports.some((p) => p.device === device && p.vehicle !== null)))} className="h-8 min-w-24 gap-1.5 text-[12px]" data-serial-connect="">
           {busy ? <Spinner /> : <Icon icon="usb" className="size-4" />}
           {device ? t('serial.connect') : t('serial.select')}
         </Button>

@@ -123,7 +123,7 @@ export function appTools(relay) {
     defineTool(
       "relay_serial_ports",
       "Serial ports",
-      "Serial ports on this computer: device, name, description, manufacturer, USB VID/PID, serial number and autopilot (a known flight-controller USB interface; USB-serial adapters are not marked). Connect one with app_connect {serial}.",
+      "Serial ports on this computer: {available, reason, ports}; each port has device, name, description, manufacturer, USB VID/PID, serial number, autopilot (a known flight-controller USB interface), kind (autopilot | usb-serial | other), adapter (CP210x, FTDI, CH340) and vehicle (the aircraft already on it). available false: pyserial is missing. Connect one with app_connect {serial}; the aircraft id is usb-<port name>.",
       empty,
       () => call("GET", "/serial/ports"),
     ),
@@ -186,7 +186,7 @@ export function appTools(relay) {
     defineTool(
       "relay_hitl",
       "Hardware in the loop",
-      "PX4 hardware in the loop (11 §7) on a real PX4 aircraft connected over a USB serial link. status reads the session (state, steps, backup, changed parameters, mismatches). start backs up every parameter, sets SYS_HITL, reboots the board and feeds it Relay's physics while the firmware keeps the motors locked; it needs confirm HITL, a disarmed aircraft with the propellers removed and the operator's possession. stop writes the backup back, reboots and verifies it. ArduPilot has no HIL: recommend a firmware twin. start and stop always wait for the operator's approval, also with Allow all.",
+      "PX4 hardware in the loop (11 §7) on a real PX4 aircraft connected over a USB serial link. status reads the session (state, steps, backup, changed parameters, mismatches, volatile parameters not compared, and cause when start is not possible: sim, unidentified, ardupilot, other_firmware, not_serial, busy, pending, link, armed, possession). start backs up every parameter, sets SYS_HITL, reboots the board and feeds it Relay's physics while the firmware keeps the motors locked; it needs confirm HITL, a disarmed aircraft with the propellers removed and the operator's possession. stop writes the backup back, reboots and verifies it. ArduPilot has no HIL: recommend a firmware twin. start and stop always wait for the operator's approval, also with Allow all.",
       Type.Object({ vehicle: Type.String(), action: lit("status", "start", "stop"), confirm: opt(Type.Literal("HITL", { description: "required for start" })) }),
       (p) => {
         if (p.action === "status") return call("GET", `/vehicles/${enc(p.vehicle)}/hitl`);

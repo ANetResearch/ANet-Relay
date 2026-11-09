@@ -357,9 +357,11 @@ def build_tools() -> list[Tool]:
         ),
         http_tool(
             "relay_serial_ports",
-            "Serial ports on this computer: device, name, description, manufacturer, USB VID/PID, serial "
-            "number, and autopilot (a known flight-controller USB interface; USB-serial adapters are not "
-            "marked). Connect one with app_connect_address {serial}.",
+            "Serial ports on this computer: {available, reason, ports}; each port has device, name, "
+            "description, manufacturer, USB VID/PID, serial number, autopilot (a known flight-controller "
+            "USB interface), kind (autopilot | usb-serial | other), adapter (CP210x, FTDI, CH340) and "
+            "vehicle (the aircraft already on it). available false: pyserial is missing. Connect one with "
+            "app_connect_address {serial}; the aircraft id is usb-<port name>.",
             "GET",
             "/serial/ports",
             read_only=True,
@@ -474,7 +476,10 @@ def build_tools() -> list[Tool]:
             "and feeds it Relay's physics (the motors stay locked by the firmware); stop restores and "
             "verifies the parameters. start needs confirm 'HITL' (the propellers are removed), a disarmed "
             "aircraft and the operator's possession; ArduPilot has no HIL (use a firmware twin). Ask the "
-            "person before start and stop. Errors: hitl_unavailable (detail.reason), serial_unavailable.",
+            "person before start and stop. The status carries cause when start is not possible (sim, "
+            "unidentified, ardupilot, other_firmware, not_serial, busy, pending, link, armed, possession) "
+            "and volatile (self-changing parameters not compared after the restore). Errors: "
+            "hitl_unavailable (detail.reason, detail.cause), confirm_required, serial_unavailable.",
             {
                 "vehicle": VID,
                 "action": {"type": "string", "enum": ["status", "start", "stop"], "default": "status"},
