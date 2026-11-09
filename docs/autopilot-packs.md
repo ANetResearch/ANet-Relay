@@ -123,6 +123,13 @@ ArduPilot SITL's default `SERIAL0` server listens on every interface (`0.0.0.0:5
 twin on the loopback interface (11 §2), let Relay listen on 127.0.0.1 and have the firmware connect out, for
 example `--serial0 tcpclient:127.0.0.1:<port>` or `--serial0 udpclient:127.0.0.1:<port>`.
 
+The twin (`relay/twin/ardupilot.py`) uses `--serial0 tcpclient:127.0.0.1:<5760 + 10n>` and turns the other
+ports off with `--serial1 none --serial2 none --serial5 none` through `--serial8 none`. `--serial3` and
+`--serial4` stay at their defaults (SITL's internal GPS simulation; `none` there crashes the firmware), and so
+does `--serial9` (`none` crashes 4.7). The official binary still binds two UDP sockets on 0.0.0.0 that no
+option changes: the RC input `5501 + 10n` and the client socket of the JSON physics link. Only a pack built
+from patched source removes them (11 §2, §14).
+
 ### PX4
 
 `defaults` lists `relay-quadx.params`, PX4 shell lines (`param set-default NAME VALUE`, `#` comments): hover
