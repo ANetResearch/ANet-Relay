@@ -8,7 +8,7 @@ import path from "node:path";
 import { Backend, describeExit } from "./backend.mjs";
 import { configuredOpacity, createCopilotHost } from "./copilot/host.mjs";
 import { createCopilotWindow } from "./copilot/window.mjs";
-import { buildMenu, MENU_ACTIONS } from "./menu.mjs";
+import { buildMenu, installEditContextMenu, MENU_ACTIONS } from "./menu.mjs";
 import {
   backendLaunch,
   ensureDir,
@@ -416,6 +416,7 @@ function createWindow() {
 /** Navigation guards of the app's own windows: external links open in the browser; a crashed page reloads. */
 function guardWebContents(win, reload) {
   const wc = win.webContents;
+  installEditContextMenu(wc);
   wc.setWindowOpenHandler(({ url }) => {
     openExternal(url);
     return { action: "deny" };

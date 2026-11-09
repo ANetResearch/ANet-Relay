@@ -18,7 +18,7 @@
 2. 左栏 **程序** 中点 **+** 新建程序，或选中一个示例后用 **复制** 得到可编辑的副本（示例只读）。
 3. 在编辑器中修改源码。错误在行内标出（点状下划线和行号旁的方块），底部状态栏显示第一个问题，点击跳到该处。**⌘S / Ctrl+S** 保存，每次保存产生一个新版本。
 4. **测试** 页一键运行单元测试，每条显示通过与否、实际输出和不满足的期望。
-5. **运行** 页选择飞机（先用模拟机）与模式，点 **部署版本 N**。下方显示状态、状态名、帧率、故障数与日志尾部。
+5. **运行** 页选择飞机（先用模拟机）与模式，点 **部署版本 N**。**解锁并启动**（缺省开启）在程序就位后以 STABILIZE 解锁，程序立即开始飞行，真机须输入 ARM 确认；在地面停止程序时自动上锁。关闭时程序等待飞机被解锁。下方显示状态、状态名、帧率、故障数与日志尾部。飞行中保存并部署新版本会在空中直接接管，无需降落。
 6. **参数** 页：程序运行时拖动滑块即实时生效；未部署时修改的是随程序保存的参数值。
 7. **评测** 页把已保存的版本提交到题目；**对抗** 页让 2 至 8 个程序互相比赛。两处都能 **打开回放**，在飞行工作区的舞台上多机回放。
 
@@ -49,7 +49,7 @@ def step(obs, ctx):
 
 - `PARAMS`：数值、布尔或不超过 32 个字符的字符串。类型与范围按缺省值推断：布尔保持布尔，整数保持整数；范围取 `PARAM_RANGES[名称]`，未给出时为 `|值| ≤ max(10 × |缺省值|, 1)`（整数为 10）。
 - `Sticks(roll=0, pitch=0, yaw=0, throttle=0, fire=False)`：roll / pitch / yaw ∈ [−1, 1]，throttle ∈ [0, 1]，与手柄同一坐标系。超界截断，非有限值视为本帧失败。
-- `ctx`：`mem`（跨帧保留的字典）、`params`（只读，随实时调参更新）、`state`（当前状态名，≤ 32 个字符，显示在舞台标签与检查器中）、`log(*args)`（写入日志，每帧最多 4 行）、`t`（部署后的秒数）、`rng`（以部署种子初始化的确定性随机数）。`print()` 同样写入日志。
+- `ctx`：`mem`（跨帧保留的字典）、`params`（只读，随实时调参更新）、`state`（当前状态名，≤ 32 个字符，显示在舞台标签与检查器中）、`log(*args)`（写入日志，每帧最多 4 行）、`t`（部署后的秒数）、`rng`（以部署种子初始化的确定性随机数）、`disarm()`（请求在本帧后上锁，仅在飞机着地时执行，空中一律拒绝）。`print()` 同样写入日志。
 - 失败：`step` 返回 `None` 或抛出异常时，本帧输出安全杆量（姿态回中、油门保持上一帧）并记一次故障；连续 25 次（0.5 s）故障，程序进入 `faulted`，控制交还安全层。
 
 ## 3. 语言
@@ -110,6 +110,7 @@ Python 3 语法的子集，部署前由 AST 白名单校验：
 
 ## 7. 部署与安全
 
+- 解锁：部署时带 `arm` 会先切换到 STABILIZE 并解锁（真机须 `confirm: "ARM"`，并照常要求程序许可与预检）；由部署解锁的飞机在地面停止程序时自动上锁。程序可用 `ctx.disarm()` 在落地后上锁。
 - 模式：`pilot` 程序独占摇杆；`copilot` 人的手柄量作为 `obs.sticks_in` 输入，程序输出替代之。
 - 权限：操作员或该飞机的控制者。部署后程序以“程序控制者”持有摇杆，时间线显示为 `PROGRAM · <名称>`。
 - 人永远优先：人附身 → 程序立即暂停，释放后不会自动恢复，需要 **恢复**。急停、链路丢失、坠毁 → 程序停止。摇杆 0.8 s 超时规则不变。
@@ -122,6 +123,7 @@ Python 3 语法的子集，部署前由 AST 白名单校验：
 |---|---|
 | `hover_trim` | 带积分修正的悬停：积分项学习悬停油门，姿态保持水平 |
 | `liftoff` | 油门搜索起飞 |
+| `takeoff_hover_land` | 起飞到 `target_alt`，悬停 `hold_s` 秒，以 `descent` 米/秒降落并上锁；各油门值都是参数，可在飞行中调节 |
 | `patrol` | 无定位源的定时转向巡逻 |
 | `hunter_easy` / `hunter_medium` / `hunter_hard` | 三档对抗机器人状态机：搜索 → 接近 → 射击 → 规避；目标快速逼近时闪避（`dodge_s`、`threat_dist`、`threat_closing`） |
 | `figure8_evader` | 依靠位置源绕场地中心飞 8 字（Gerono 双纽线，速度前馈加位置修正），按气压计保持高度并缓慢起伏；躲避优先：另一队的接触在 `threat_dist` 内以超过 `threat_closing` 的速度逼近时，横向闪避（偏向场地中心）并改变高度；从不开火 |
@@ -168,7 +170,7 @@ Python 3 语法的子集，部署前由 AST 白名单校验：
 | `GET /programs/{id}/revisions` | 版本（最近 50 个）`[{rev, source, params, author, note, t}]` |
 | `POST /programs/{id}/validate` | 只做 AST 校验 `{source?}` → `{ok, errors: [{line, col, end_line, end_col, code, message_en, message_zh}], params, param_ranges}` |
 | `POST /programs/{id}/test` | 运行单元测试 `{source?, tests?, rev?, seed?}` |
-| `POST /vehicles/{id}/program` | 部署 `{program, rev?, params?, mode: pilot | copilot, team?}` |
+| `POST /vehicles/{id}/program` | 部署 `{program, rev?, params?, mode: pilot | copilot, team?, arm?, confirm?}`；`arm` 随部署以 STABILIZE 解锁 |
 | `POST /vehicles/{id}/program/stop` · `.../resume` | 停止 / 恢复 |
 | `PATCH /vehicles/{id}/program/params` | 实时调参 `{名称: 值}` |
 | `GET /vehicles/{id}/program/log?after=` | 日志（环 500 行）`{lines: [{seq, t, level, text}], last_seq}` |

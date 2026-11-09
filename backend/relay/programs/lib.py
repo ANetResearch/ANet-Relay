@@ -464,9 +464,9 @@ class Rng(metaclass=_Locked):
 class Ctx(metaclass=_Locked):
     """Per-program context: ``mem`` (kept across frames), ``params`` (read-only, live), ``state`` (name
     shown on the stage, at most 32 characters), ``log(*args)`` (at most 4 lines per frame), ``t`` (seconds
-    since deployment) and ``rng`` (seeded at deployment)."""
+    since deployment), ``rng`` (seeded at deployment) and ``disarm()`` (honoured on the ground only)."""
 
-    __slots__ = ("_dropped", "_lines", "_machine", "mem", "params", "rng", "state", "t")
+    __slots__ = ("_disarm", "_dropped", "_lines", "_machine", "mem", "params", "rng", "state", "t")
 
     def __init__(self, params: dict[str, Any], seed: int) -> None:
         self.mem: dict[str, Any] = {}
@@ -477,6 +477,15 @@ class Ctx(metaclass=_Locked):
         self._lines: list[str] = []
         self._dropped = 0
         self._machine: StateMachine | None = None
+        self._disarm = False
+
+    def disarm(self) -> None:
+        """Ask for a disarm after this frame; Relay does it only while the aircraft is on the ground."""
+        self._disarm = True
+
+    def take_disarm(self) -> bool:
+        asked, self._disarm = self._disarm, False
+        return asked
 
     def log(self, *args: Any) -> None:
         if len(self._lines) >= LOG_LINES_PER_FRAME:

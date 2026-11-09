@@ -160,7 +160,16 @@ def skill(request: Request, vid: str, name: str, body: schemas.SkillBody | None 
 def plan(request: Request, vid: str, body: schemas.PlanBody) -> dict[str, Any]:
     """Fly a sequence of skills: takeoff, hover, move, yaw, land, goto, rtl (03 §5.8)."""
     steps = [step.model_dump(exclude_none=True) for step in body.steps]
-    return service(request).run_plan(vid, actor(request, "control"), steps, body.name, body.confirm)
+    tuning = body.tuning.model_dump(exclude_none=True) if body.tuning else None
+    return service(request).run_plan(
+        vid, actor(request, "control"), steps, body.name, body.confirm, tuning=tuning
+    )
+
+
+@router.patch("/vehicles/{vid}/plan/tuning", tags=["control"], responses=ERRORS)
+def plan_tuning(request: Request, vid: str, body: schemas.PlanTuning) -> dict[str, Any]:
+    """Change the plan's throttle tuning while it flies; the step in flight takes it at once."""
+    return service(request).tune_plan(vid, actor(request, "control"), body.model_dump(exclude_none=True))
 
 
 @router.post("/vehicles/{vid}/refly", tags=["control"], responses=ERRORS)

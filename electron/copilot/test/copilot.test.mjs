@@ -67,14 +67,14 @@ const CATALOGUE = {
   ],
 };
 
-function offlineCopilot(routes, responses, scope = "all") {
+function offlineCopilot(routes, responses, scope = "all", autoApprove = () => false) {
   const faux = fauxProvider();
   const models = createModels();
   models.setProvider(faux.provider);
   faux.setResponses(responses);
   const relay = stubRelay(routes);
   const events = [];
-  const copilot = createCopilot({ relay, models, model: faux.getModel(), emit: (e) => events.push(e), scope: () => scope });
+  const copilot = createCopilot({ relay, models, model: faux.getModel(), emit: (e) => events.push(e), scope: () => scope, autoApprove });
   return { copilot, relay, events };
 }
 
@@ -306,6 +306,50 @@ test("approving runs the call; simulators and read tools never ask", async () =>
   assert.deepEqual(reboots.map((c) => c.path), ["/vehicles/sim-1/reboot", "/vehicles/real-1/reboot"]);
   assert.ok(reboots.every((c) => c.body.confirm === "REBOOT"));
   assert.ok(relay.calls.some((c) => c.path === "/vehicles/real-1/device"));
+});
+
+test("Allow all (09 §4) runs a real-aircraft command without asking and records it", async () => {
+  const routes = {
+    "GET /app/ui": { state: null },
+    "GET /vehicles/real-1": REAL,
+    "GET /commands": CATALOGUE,
+    "POST /vehicles/real-1/claim": {},
+    "POST /vehicles/real-1/reboot": { ok: true },
+  };
+  let allow = true;
+  const { copilot, relay, events } = offlineCopilot(
+    routes,
+    [fauxAssistantMessage(fauxToolCall("device_reboot", { vehicle: "real-1" }), { stopReason: "toolUse" }), fauxAssistantMessage("Rebooted.")],
+    "all",
+    () => allow,
+  );
+  await copilot.prompt("reboot it");
+  const approval = events.find((e) => e.type === "approval");
+  assert.equal(approval.auto, true);
+  assert.deepEqual(events.find((e) => e.type === "approval_closed"), { type: "approval_closed", id: approval.id, approved: true, reason: "auto" });
+  assert.ok(relay.calls.some((c) => c.path === "/vehicles/real-1/reboot"));
+  allow = false; // read at every call: turning it off asks again without a rebuild
+  assert.equal(typeof copilot.approve, "function");
+});
+
+test("sequence throttle tuning reaches the plan and the live tuning route", async () => {
+  const relay = stubRelay({
+    "GET /vehicles/sim-1": SIM,
+    "POST /vehicles/sim-1/claim": {},
+    "PATCH /vehicles/sim-1/plan/tuning": { id: "sim-1", plan: { tuning: { climb: 0.8 } } },
+  });
+  const tools = Object.fromEntries(toolsFor(relay, "all", undefined, "full").map((t) => [t.name, t]));
+  const out = await tools.relay_plan_tune.execute("1", { vehicle: "sim-1", tuning: { climb: 0.8 } });
+  assert.match(out.content[0].text, /"climb":0.8/);
+  assert.deepEqual(relay.calls.at(-1), { method: "PATCH", path: "/vehicles/sim-1/plan/tuning", body: { climb: 0.8 } });
+  assert.ok(!toolsFor(relay, "all", undefined, "sticks").some((t) => t.name === "relay_plan_tune"), "a plan tool: full flight level only");
+});
+
+test("program_deploy with arm sends the confirm word the approval stands for", async () => {
+  const relay = stubRelay({ "GET /vehicles/sim-1": SIM, "POST /vehicles/sim-1/claim": {}, "POST /vehicles/sim-1/program": { id: "sim-1", program: {}, arm: { ok: true } } });
+  const tools = Object.fromEntries(toolsFor(relay, "all").map((t) => [t.name, t]));
+  await tools.program_deploy.execute("1", { vehicle: "sim-1", program: "takeoff_hover_land", arm: true });
+  assert.deepEqual(relay.calls.at(-1).body, { program: "takeoff_hover_land", arm: true, confirm: "ARM" });
 });
 
 test("interface actions need no approval even with a real aircraft selected", async () => {

@@ -4,11 +4,11 @@ import * as React from 'react'
 import type { ProgramRunView, ProgramSummary, Vehicle } from '@/api'
 import { pickText, useLang } from '@/i18n'
 import { cn } from '@/lib/utils'
-import { notifyError } from '@/shell/notify'
+import { notify, notifyError } from '@/shell/notify'
 import { Button } from '@/ui/components/ui/button'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/ui/components/ui/select'
 import { Readout } from '@/ui/relay'
-import { labApi } from './api'
+import { labApi, type DeployArm } from './api'
 import { reasonKey, useTL, type LabKey } from './copy'
 
 export const STATUS_KEYS: Record<ProgramRunView['status'], LabKey> = {
@@ -149,4 +149,31 @@ export function ProgramSelect({ programs, value, onChange, label, className }: {
 /** Aircraft a program can be deployed to: connected, not crashed; real ones only once programs are allowed. */
 export function deployable(v: Vehicle): boolean {
   return v.link.state !== 'offline' && v.link.state !== 'lost' && (v.kind === 'sim' || v.programs_allowed)
+}
+
+// ---------------------------------------------------------------- arm and start (09 §2)
+
+const ARM_KEY = 'relay.lab.armStart'
+
+/** Whether a deployment also arms the aircraft (per viewer; on unless turned off). */
+export function loadArmStart(): boolean {
+  try {
+    return localStorage.getItem(ARM_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
+export function saveArmStart(on: boolean): void {
+  try {
+    localStorage.setItem(ARM_KEY, on ? '1' : '0')
+  } catch {
+    /* per-viewer convenience only */
+  }
+}
+
+/** The toast after a deployment: deployed, deployed and armed, or deployed with the autopilot's refusal. */
+export function reportDeploy(res: { arm?: DeployArm }, vehicle: string, tl: (k: LabKey, p?: Record<string, string | number>) => string): void {
+  if (res.arm && !res.arm.ok) notify(tl('lab.run.armFailed', { vehicle, reason: res.arm.reason ?? res.arm.code ?? '' }), { level: 'warn', timeoutMs: 8000 })
+  else notify(tl(res.arm?.ok && !res.arm.already ? 'lab.run.armed' : 'lab.run.deployed', { vehicle }))
 }

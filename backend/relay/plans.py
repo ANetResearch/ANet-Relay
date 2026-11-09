@@ -63,6 +63,36 @@ _REQUIRED = {
 
 DEFAULTS = {"takeoff": {"alt": 1.0}, "hover": {"seconds": 3.0}}
 
+# Throttle tuning of the stick skills (aircraft without a position estimate fly on the throttle stick in
+# altitude hold): ``climb`` is the stick that lifts the aircraft off and climbs, ``hover`` the stick that
+# holds its height (0.5 where the autopilot's altitude hold is trimmed). Adjustable while the plan flies.
+TUNING_RANGES = {"climb": (0.55, 1.0), "hover": (0.35, 0.65)}
+
+
+def normalise_tuning(raw: Any) -> dict[str, float]:
+    """Validate ``{climb?, hover?}``; missing keys are left out (the skill defaults apply)."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise err("invalid_request", reason="tuning must be an object")
+    extra = set(raw) - set(TUNING_RANGES)
+    if extra:
+        raise err("invalid_request", reason=f"tuning: unknown field {sorted(extra)[0]}")
+    out: dict[str, float] = {}
+    for key, (low, high) in TUNING_RANGES.items():
+        value = raw.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise err("invalid_request", reason=f"tuning: {key} must be a number")
+        if not low <= float(value) <= high:
+            raise err("invalid_request", reason=f"tuning: {key} must be {low:g} to {high:g}")
+        out[key] = float(value)
+    hover = out.get("hover", 0.5)
+    if "climb" in out and out["climb"] < hover + 0.05:
+        raise err("invalid_request", reason="tuning: climb must be at least 0.05 above hover")
+    return out
+
 
 def normalise_steps(steps: Any, max_steps: int = MAX_STEPS) -> list[dict[str, Any]]:
     """Validate a plan's steps and return them as ``{"action": ..., **params}`` dicts."""
@@ -126,6 +156,8 @@ class Plan:
     detail_zh: str | None = None
     finished: float | None = None
     results: list[str | None] = field(default_factory=list)
+    # shared with the plan's skills, so a change applies to the step that is flying (normalise_tuning)
+    tuning: dict[str, float] = field(default_factory=dict)
 
     @property
     def running(self) -> bool:
@@ -141,4 +173,5 @@ class Plan:
             "steps": self.steps,
             "results": self.results,
             "detail": self.detail,
+            "tuning": dict(self.tuning),
         }

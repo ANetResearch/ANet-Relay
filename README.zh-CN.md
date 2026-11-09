@@ -81,7 +81,7 @@ with RelayClient() as relay:                          # http://127.0.0.1:8765
 claude mcp add anet-relay-app -- python3 /path/to/ANet-Relay/mcp/anet_relay_app_mcp.py --name claude-code-app   # 或任意 MCP 客户端
 ```
 
-三个 MCP 服务器分别覆盖飞行（20 个工具）、直到单个电机的设备层（36 个）和整个应用（65 个）。详见 [MCP Servers](https://github.com/ANetResearch/ANet-Relay/wiki/MCP-Servers)。
+三个 MCP 服务器分别覆盖飞行（21 个工具）、直到单个电机的设备层（36 个）和整个应用（65 个）。详见 [MCP Servers](https://github.com/ANetResearch/ANet-Relay/wiki/MCP-Servers)。
 
 ## 包含什么
 

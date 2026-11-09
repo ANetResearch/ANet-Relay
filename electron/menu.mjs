@@ -112,3 +112,33 @@ export function buildMenu({ send, stopAll, openExternal, apiOrigin, revealLogs, 
   const template = [appMenu, editMenu, viewMenu, flyMenu, windowMenu, helpMenu];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
+
+/**
+ * Right-click menu of the app windows: Cut / Copy / Paste / Select All where they apply (Electron shows no menu of
+ * its own). Selected text in the Copilot transcript or a log can be copied; an input can be pasted into.
+ * @param {{ isEditable: boolean, selectionText: string, editFlags: { canCut: boolean, canCopy: boolean, canPaste: boolean, canSelectAll: boolean } }} params
+ * @returns {import("electron").MenuItemConstructorOptions[]} empty when there is nothing to offer
+ */
+export function editContextMenu(params) {
+  const s = strings();
+  const f = params.editFlags ?? {};
+  const selected = Boolean(params.selectionText && params.selectionText.trim());
+  if (params.isEditable) {
+    return [
+      { role: "cut", label: s.cut, enabled: Boolean(f.canCut) },
+      { role: "copy", label: s.copy, enabled: Boolean(f.canCopy) },
+      { role: "paste", label: s.paste, enabled: Boolean(f.canPaste) },
+      { type: "separator" },
+      { role: "selectAll", label: s.selectAll, enabled: f.canSelectAll !== false },
+    ];
+  }
+  return selected ? [{ role: "copy", label: s.copy }] : [];
+}
+
+/** Shows {@link editContextMenu} on a window's right click. */
+export function installEditContextMenu(webContents) {
+  webContents.on("context-menu", (_event, params) => {
+    const template = editContextMenu(params);
+    if (template.length) Menu.buildFromTemplate(template).popup();
+  });
+}

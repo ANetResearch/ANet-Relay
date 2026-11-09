@@ -208,7 +208,7 @@ export function programTools(relay) {
       "program_deploy",
       "Deploy program",
       "Run a program revision on an aircraft at 50 Hz; it then holds the sticks as PROGRAM until it is stopped. Claims the aircraft first. mode pilot (default: the program flies) or copilot (it transforms the person's sticks). " +
-        "Simulators: sensors {baro, position none|uwb|gps, contacts}, arena {radius, floor, ceiling}, seed, airframe. Arm the aircraft in a manual mode first. A real aircraft needs the operator's 'Allow programs' switch, passed preflight checks and the operator's approval in the chat.",
+        "Simulators: sensors {baro, position none|uwb|gps, contacts}, arena {radius, floor, ceiling}, seed, airframe. arm true (the usual way to test a program from the ground) sets STABILIZE and arms once the program is in place, so it flies at once; the answer's arm.ok says whether the autopilot armed, and stopping the program on the ground disarms again. Deploying a new revision while the program flies takes over in the air without landing. A real aircraft needs the operator's 'Allow programs' switch, passed preflight checks and the operator's approval in the chat.",
       Type.Object({
         vehicle: VID,
         program: PID,
@@ -220,8 +220,10 @@ export function programTools(relay) {
         seed: opt(Type.Integer({ minimum: 0 })),
         airframe: opt(AIRFRAME),
         team: opt(Type.String({ maxLength: 16, description: "Team of this aircraft in every contact list; filled into the program's team parameter. Aircraft on one team never target each other." })),
+        arm: opt(Type.Boolean({ description: "Arm in STABILIZE once the program is in place (09 §2)" })),
       }),
-      claimed((p) => call("POST", prog(p.vehicle), pick(p, ["program", "rev", "params", "mode", "sensors", "arena", "seed", "airframe", "team"]))),
+      // the approval in the chat is the confirmation: the word ARM goes with an arm request
+      claimed((p) => call("POST", prog(p.vehicle), { ...pick(p, ["program", "rev", "params", "mode", "sensors", "arena", "seed", "airframe", "team", "arm"]), ...(p.arm ? { confirm: "ARM" } : {}) })),
     ),
     defineTool("program_stop", "Stop program", "Stop the program on an aircraft; the sticks go back to the safety layer (an airborne simulator in a manual mode then descends: land it or stop it).", Type.Object({ vehicle: VID }), claimed((p) => call("POST", `${prog(p.vehicle)}/stop`))),
     defineTool(

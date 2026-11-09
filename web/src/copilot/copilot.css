@@ -30,25 +30,264 @@ html[data-window='copilot'] body {
   color: var(--g200);
 }
 
-.cp-rich p + p {
-  margin-top: 2px;
+/* Replies rendered from Markdown (markdown.tsx). The transcript is selectable ([data-selectable]); controls stay
+   unselectable so a drag across a reply copies text only. */
+.cp-transcript button {
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-.cp-rich strong {
+.cp-assistant-actions {
+  display: flex;
+  margin: 2px 0 -4px -4px;
+  opacity: 0.55;
+  transition: opacity var(--dur-quick, 160ms);
+}
+
+.cp-assistant:hover .cp-assistant-actions,
+.cp-assistant-actions:focus-within {
+  opacity: 1;
+}
+
+.cp-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: var(--g500);
+  transition: color var(--dur-quick, 160ms), opacity var(--dur-quick, 160ms);
+}
+
+.cp-copy:hover {
+  color: var(--g100);
+}
+
+.cp-md {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.cp-md p {
+  margin: 0;
+}
+
+.cp-md strong {
   font-weight: 600;
   color: var(--g50);
 }
 
-.cp-rich code,
+.cp-md em {
+  font-style: italic;
+}
+
+.cp-md del {
+  color: var(--g500);
+}
+
+.cp-md a {
+  color: var(--g50);
+  text-decoration: underline;
+  text-decoration-color: var(--g500);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.cp-md a:hover {
+  text-decoration-color: var(--g200);
+}
+
+.cp-md code,
 .cp-pre {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 11px;
 }
 
-.cp-rich code {
+.cp-md :not(pre) > code {
   border-radius: 3px;
   background: var(--g850);
   padding: 0 3px;
+  color: var(--g100);
+}
+
+.cp-md .cp-md-h {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--g100);
+}
+
+.cp-md .cp-md-h-major {
+  font-size: 13px;
+  color: var(--g50);
+}
+
+.cp-md ul,
+.cp-md ol {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding-left: 1.35em;
+}
+
+.cp-md ul {
+  list-style: disc;
+}
+
+.cp-md ul ul {
+  list-style: circle;
+}
+
+.cp-md ol {
+  list-style: decimal;
+}
+
+.cp-md li::marker {
+  color: var(--g500);
+}
+
+.cp-md li > .cp-md-box + p,
+.cp-md li > p:first-child {
+  display: inline;
+}
+
+.cp-md li > ul,
+.cp-md li > ol,
+.cp-md li > p + p,
+.cp-md li > .cp-md-code,
+.cp-md li > .cp-md-table {
+  margin-top: 2px;
+}
+
+.cp-md ul.cp-md-tasks {
+  list-style: none;
+  padding-left: 0.2em;
+}
+
+.cp-md-box {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border: 1px solid var(--g500);
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+
+.cp-md li[data-task="done"] > .cp-md-box {
+  border-color: var(--g200);
+  background: var(--g200);
+  box-shadow: inset 0 0 0 2px var(--g900);
+}
+
+.cp-md blockquote {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  border-left: 2px solid var(--g700);
+  padding-left: 8px;
+  color: var(--g300);
+}
+
+.cp-md hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.cp-md-code {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--g900);
+}
+
+.cp-md-code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 22px;
+  border-bottom: 1px solid var(--border);
+  padding: 0 2px 0 8px;
+  font-size: 10.5px;
+  color: var(--g500);
+}
+
+.cp-md-code pre {
+  max-height: 320px;
+  overflow: auto;
+  margin: 0;
+  padding: 6px 8px;
+  line-height: 1.45;
+  white-space: pre;
+  color: var(--g200);
+}
+
+.cp-md-table {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.cp-md-table-scroll {
+  overflow-x: auto;
+  border-radius: 6px;
+}
+
+.cp-md table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+.cp-md th,
+.cp-md td {
+  min-width: 3.5em;
+  border-bottom: 1px solid var(--border);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.cp-md th + th,
+.cp-md td + td {
+  border-left: 1px solid var(--border);
+}
+
+.cp-md th {
+  background: var(--g850);
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--g100);
+}
+
+.cp-md tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.cp-md tbody tr:hover td {
+  background: var(--g900);
+}
+
+.cp-md-table-copy {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  background: var(--g850);
+  opacity: 0;
+}
+
+.cp-md-table:hover .cp-md-table-copy,
+.cp-md-table-copy:focus-visible {
+  opacity: 1;
 }
 
 .cp-tool,
@@ -72,7 +311,8 @@ html[data-window='copilot'] body {
 }
 
 .cp-approval[data-state="declined"],
-.cp-approval[data-state="expired"] {
+.cp-approval[data-state="expired"],
+.cp-approval[data-state="auto"] {
   border-color: var(--border);
   background: transparent;
 }
@@ -246,4 +486,23 @@ html[data-window='copilot'] body {
   .cp-craft .cp-craft-b {
     animation: none;
   }
+}
+
+/* 09 §4: "Allow all" is on; red marks the standing exception to asking */
+.cp-auto-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  border: 1px solid var(--r500);
+  border-radius: 10px;
+  padding: 0 8px;
+  font-size: 10.5px;
+  font-weight: 560;
+  color: var(--g50);
+  transition: background-color var(--dur-quick, 160ms);
+}
+
+.cp-auto-badge:hover {
+  background: var(--g800);
 }

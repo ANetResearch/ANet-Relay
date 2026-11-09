@@ -27,8 +27,11 @@ default, see the [Agent API](agent-api.md)).
    revision.
 4. **Tests** runs the unit tests in one click: one row per test with the verdict, the actual output and each
    expectation missed.
-5. **Run** chooses an aircraft (start with a simulator) and a mode; **Deploy revision N** starts it. Status, state
-   name, frame rate, faults and the tail of the log follow below.
+5. **Run** chooses an aircraft (start with a simulator) and a mode; **Deploy revision N** starts it. **Arm and
+   start** (on by default) arms the aircraft in STABILIZE once the program is in place, so it flies at once (a real
+   aircraft asks for the word ARM); stopping the program on the ground disarms it again. Off, the program waits
+   until the aircraft is armed. Status, state name, frame rate, faults and the tail of the log follow below. Saving
+   and deploying a new revision while it flies takes over in the air, without landing.
 6. **Params**: while the program runs, the sliders tune it live; otherwise they edit the values saved with the
    program.
 7. **Judge** submits the saved revision to a challenge; **Duel** lets 2 to 8 programs play each other. Both offer
@@ -67,7 +70,8 @@ def step(obs, ctx):
   same axes as a gamepad. Values out of range are clipped; a non-finite value fails the frame.
 - `ctx`: `mem` (a dictionary kept across frames), `params` (read only, follows live tuning), `state` (the state name,
   at most 32 characters, shown on the stage label and in the inspector), `log(*args)` (at most 4 lines per frame),
-  `t` (seconds since deployment), `rng` (deterministic random numbers from the deployment seed). `print()` also
+  `t` (seconds since deployment), `rng` (deterministic random numbers from the deployment seed), `disarm()` (asks
+  for a disarm after the frame; done only while the aircraft is on the ground, refused in the air). `print()` also
   writes to the log.
 - Failures: when `step` returns `None` or raises, the frame outputs safe sticks (attitude centred, throttle held) and
   counts a fault; 25 faults in a row (0.5 s) put the program in `faulted` and hand control back to the safety layer.
@@ -144,6 +148,9 @@ Observation fields left out hover level at 1 m. Optional: `mem`, `state` (the st
 
 ## 7. Deployment and safety
 
+- Arming: a deployment with `arm` switches to STABILIZE and arms first (a real aircraft needs `confirm: "ARM"`
+  besides the program switch and preflight); a deployment that armed the aircraft disarms it when the program
+  stops on the ground. A program ends its own flight with `ctx.disarm()` after the landing.
 - Modes: `pilot` gives the program the sticks alone; `copilot` passes the person's sticks in as `obs.sticks_in`
   and replaces them with the program's output.
 - Who may deploy: the operator or the aircraft's controller. The program then holds the sticks as the program
@@ -162,6 +169,7 @@ Observation fields left out hover level at 1 m. Optional: `mem`, `state` (the st
 |---|---|
 | `hover_trim` | Hover with integral trim: an integrator learns the hover throttle, attitude stays level |
 | `liftoff` | Take-off by throttle search |
+| `takeoff_hover_land` | Take off to `target_alt`, hover `hold_s` seconds, land at `descent` m/s and disarm; every throttle value is a parameter to tune in flight |
 | `patrol` | Timed-turn patrol without a position source |
 | `hunter_easy` / `hunter_medium` / `hunter_hard` | Arena hunters at three levels: search → approach → fire → evade, with a dodge when a contact closes fast (`dodge_s`, `threat_dist`, `threat_closing`) |
 | `figure8_evader` | Fly a figure eight around the arena centre on a position source (lemniscate of Gerono, velocity feed-forward plus position correction), hold and weave the height on the barometer, and evade first: a contact of another team closing faster than `threat_closing` inside `threat_dist` triggers a sideways dodge toward the centre with a height change; never fires |
@@ -224,7 +232,7 @@ anonymous; changes need the operator or an agent session (revision authors are `
 | `GET /programs/{id}/revisions` | The last 50 revisions `[{rev, source, params, author, note, t}]` |
 | `POST /programs/{id}/validate` | AST check only `{source?}` → `{ok, errors: [{line, col, end_line, end_col, code, message_en, message_zh}], params, param_ranges}` |
 | `POST /programs/{id}/test` | Unit tests `{source?, tests?, rev?, seed?}` |
-| `POST /vehicles/{id}/program` | Deploy `{program, rev?, params?, mode: pilot | copilot, team?}` |
+| `POST /vehicles/{id}/program` | Deploy `{program, rev?, params?, mode: pilot | copilot, team?, arm?, confirm?}`; `arm` arms in STABILIZE with the deployment |
 | `POST /vehicles/{id}/program/stop` · `.../resume` | Stop / resume |
 | `PATCH /vehicles/{id}/program/params` | Live parameters `{name: value}` |
 | `GET /vehicles/{id}/program/log?after=` | Log (ring of 500) `{lines: [{seq, t, level, text}], last_seq}` |

@@ -49,6 +49,18 @@ export interface DeployBody {
   rev?: number
   params?: Record<string, unknown>
   mode: 'pilot' | 'copilot'
+  /** arm the aircraft (STABILIZE) once the program is in place; a real one needs confirm "ARM" */
+  arm?: boolean
+  confirm?: string
+}
+
+/** Whether the autopilot armed for the deployment; the program is in place either way. */
+export interface DeployArm {
+  ok: boolean
+  armed?: boolean | null
+  already?: boolean
+  code?: string
+  reason?: string
 }
 
 export interface SaveResult {
@@ -66,7 +78,7 @@ export const labApi = {
   validate: (id: string, source: string) => op<ProgramValidation & { id: string }>('POST', `/programs/${enc(id)}/validate`, { source }),
   test: (id: string, body: { source?: string; tests?: ProgramTestCase[]; rev?: number; seed?: number }) =>
     op<ProgramTestResults>('POST', `/programs/${enc(id)}/test`, body),
-  deploy: (vid: string, body: DeployBody) => op<{ id: string; program: ProgramRunView }>('POST', `/vehicles/${enc(vid)}/program`, body),
+  deploy: (vid: string, body: DeployBody) => op<{ id: string; program: ProgramRunView; arm?: DeployArm }>('POST', `/vehicles/${enc(vid)}/program`, body),
   stop: (vid: string) => op<{ id: string; program: ProgramRunView }>('POST', `/vehicles/${enc(vid)}/program/stop`),
   resume: (vid: string) => op<{ id: string; program: ProgramRunView }>('POST', `/vehicles/${enc(vid)}/program/resume`),
   params: (vid: string, patch: Record<string, unknown>) => op<{ id: string; params: Record<string, unknown> }>('PATCH', `/vehicles/${enc(vid)}/program/params`, patch),

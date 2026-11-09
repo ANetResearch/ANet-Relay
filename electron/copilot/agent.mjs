@@ -35,6 +35,7 @@ const MOTION_TOOLS = new Set([
   "relay_hover",
   "relay_land",
   "relay_plan",
+  "relay_plan_tune",
   "relay_sticks_for",
   "relay_refly",
 ]);
@@ -169,6 +170,14 @@ export class RelayHttp {
 // ---------------------------------------------------------------------------
 // Tools
 
+/** 09 §3: throttle sticks of the stick-flown sequence (backend plans.TUNING_RANGES). */
+const TUNING = Type.Object(
+  {
+    climb: Type.Optional(Type.Number({ minimum: 0.55, maximum: 1, description: "throttle stick for lift-off and climb" })),
+    hover: Type.Optional(Type.Number({ minimum: 0.35, maximum: 0.65, description: "throttle stick that holds the height" })),
+  },
+  { description: "climb must stay at least 0.05 above hover" },
+)
 const STEP = Type.Object(
   {
     action: Type.Union(["takeoff", "hover", "move", "yaw", "land"].map((a) => Type.Literal(a))),
@@ -293,8 +302,9 @@ export function relayTools(relay) {
       label: "Fly a sequence",
       description:
         "Fly a whole sequence and wait for it: takeoff {alt}, hover {seconds}, move {forward,right,up}, yaw {deg}, land. " +
-        "Prefer this for multi-step requests. A failed step stops the sequence and the aircraft holds.",
-      parameters: Type.Object({ vehicle: VID, steps: Type.Array(STEP, { minItems: 1, maxItems: 24 }) }),
+        "Prefer this for multi-step requests. A failed step stops the sequence and the aircraft holds. " +
+        "Aircraft without a position estimate fly it on the throttle stick in altitude hold: tuning {climb 0.55-1 (default 0.72), hover 0.35-0.65 (default 0.5)} sets the lift-off/climb stick and the stick that holds height; raise climb when it does not lift off, hover when it sinks.",
+      parameters: Type.Object({ vehicle: VID, steps: Type.Array(STEP, { minItems: 1, maxItems: 24 }), tuning: Type.Optional(TUNING) }),
       executionMode: "sequential",
       execute: async (_id, p, signal, onUpdate) => {
         await claimFor(p.vehicle);
@@ -302,8 +312,21 @@ export function relayTools(relay) {
           steps: p.steps,
           name: "copilot",
           confirm: "ARM",
+          ...(p.tuning ? { tuning: p.tuning } : {}),
         });
         return text(await waitPlan(p.vehicle, started.plan.id, signal, onUpdate));
+      },
+    },
+    {
+      name: "relay_plan_tune",
+      label: "Tune sequence throttle",
+      description:
+        "Change the throttle tuning {climb?, hover?} of the aircraft's sequence while it flies (also the hold it left behind); the step in flight takes it at once. " +
+        "Read relay_vehicle (altitude_m, climb_ms, throttle_pct) to judge: no lift-off means climb is too low, sinking in a hover means hover is too low.",
+      parameters: Type.Object({ vehicle: VID, tuning: TUNING }),
+      execute: async (_id, p) => {
+        await claimFor(p.vehicle);
+        return text(await relay.call("PATCH", `/vehicles/${enc(p.vehicle)}/plan/tuning`, p.tuning));
       },
     },
     {
@@ -656,7 +679,7 @@ export function createTracer(emit, { model = "", thinking = "auto", now = () => 
   };
 }
 
-export function createCopilot({ relay, models, model, emit, lang = () => "en", scope = () => "all", thinking = "auto" }) {
+export function createCopilot({ relay, models, model, emit, lang = () => "en", scope = () => "all", thinking = "auto", autoApprove = () => false }) {
   const approvals = new Map();
   let vehicleKinds = new Map();
   const danger = dangerResolver(relay);
@@ -719,6 +742,13 @@ export function createCopilot({ relay, models, model, emit, lang = () => "en", s
       // fail closed: an aircraft Copilot cannot identify is treated as real
       if (info && info.kind !== "real") return undefined;
       if (!info) return { block: true, reason: "Could not read this aircraft from Relay to check whether it is real. Check the id with relay_fleet and try again." };
+      if (autoApprove()) {
+        // 09 §4: "Allow all" is on; the chat still records what was approved on the operator's behalf
+        const id = `ap-${++approvalSeq}`;
+        emit({ type: "approval", id, toolCallId: toolCall.id, tool: toolCall.name, vehicle: args.vehicle, label: info.label, request: summarise(toolCall.name, args, level), auto: true });
+        emit({ type: "approval_closed", id, approved: true, reason: "auto" });
+        return undefined;
+      }
       const ok = await requestApproval(toolCall.id, toolCall.name, args, info, level);
       return ok ? undefined : { block: true, reason: "The operator declined this command. Do not retry it unless asked." };
     },

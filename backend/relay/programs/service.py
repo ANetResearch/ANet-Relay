@@ -54,7 +54,7 @@ from .. import preflight
 from ..authority import Actor
 from ..config import STICK_TIMEOUT_S
 from ..errors import RelayError, err
-from ..mav import decode
+from ..mav import decode, modes
 from ..model import StickInput
 from . import obs as obsmod
 from . import validator
@@ -172,6 +172,8 @@ class Run:
         self.restarting = False
         self.pending_params: dict[str, Any] = {}  # live changes sent with the next frame
         self.firing = False  # the program holds the trigger (Arena.fire)
+        self.armed_here = False  # this deployment armed the aircraft (deploy arm): it disarms on the ground
+        self.disarm_refused = False  # ctx.disarm() in the air was refused (logged once)
 
     @property
     def active(self) -> bool:
@@ -345,6 +347,13 @@ class ProgramService:
         rev = body.get("rev")
         if rev is not None and (isinstance(rev, bool) or not isinstance(rev, int)):
             raise err("invalid_request", reason="rev must be an integer")
+        arm = body.get("arm")
+        if arm is not None and not isinstance(arm, bool):
+            raise err("invalid_request", reason="arm must be a boolean")
+        confirm = body.get("confirm")
+        if arm:
+            # checked before anything changes: a real aircraft needs the word ARM and a passing preflight
+            self.fleet.call(lambda: self._arm_ready(vid, confirm))
         program, revision = self._resolve(program_id, rev)
         params = dict(body.get("params") or {})
         team = body.get("team")
@@ -371,7 +380,45 @@ class ProgramService:
         )
         if team is not None:
             self.teams[vid] = team
+        if arm:
+            deployed["arm"] = self._arm_for_run(vid, actor, confirm)
         return deployed
+
+    def _arm_ready(self, vid: str, confirm: Any) -> None:
+        v = self.fleet._vehicle(vid)
+        if not v.armed:
+            self.fleet._arm_checks(v, confirm if isinstance(confirm, str) else None)
+
+    def _arm_for_run(self, vid: str, actor: Actor, confirm: Any) -> dict[str, Any]:
+        """Arm the aircraft for the program just deployed (the program's sticks start once it is armed).
+
+        The deployment is in place either way; a refusal comes back as ``{ok: false, code, reason}`` and the
+        program waits on the ground, as it does when the aircraft is armed later by hand.
+        """
+        armed, mode, autopilot = self.fleet.call(
+            lambda: (lambda v: (v.armed, v.mode, v.autopilot))(self.fleet._vehicle(vid))
+        )
+        if armed:
+            return {"ok": True, "armed": True, "already": True}
+        try:
+            if modes.mode_class(autopilot, mode) != "manual":
+                # programs fly the throttle itself, as the MCP deploy does: STABILIZE (PX4 STABILIZED)
+                manual = "STABILIZED" if autopilot == modes.PX4 else "STABILIZE"
+                self.fleet.set_mode(vid, actor, manual, authorised=True)
+            # the deployment checked the actor; an operator does not have to possess the aircraft for it
+            word = confirm if isinstance(confirm, str) else None
+            result = self.fleet.arm(vid, actor, True, word, authorised=True)
+        except RelayError as exc:
+            return {"ok": False, "armed": False, "code": exc.code, "reason": exc.message_en}
+
+        def mark() -> None:
+            r = self.runs.get(vid)
+            if r is not None and r.active:
+                r.armed_here = True
+                r.add_log(self.fleet.wall(), "armed for this deployment", "event")
+
+        self.fleet.call(mark)
+        return {"ok": True, "armed": result.get("armed")}
 
     def deploy_source(
         self,
@@ -464,6 +511,7 @@ class ProgramService:
             now = self.fleet.clock()
             wall = self.fleet.wall()
             old = self.runs.get(vid)
+            inherited = bool(old is not None and old.active and old.armed_here and v.armed)
             if old is not None and old.active:
                 self._stop(old, "replaced", emit=True)
             if fit is not None:
@@ -492,6 +540,7 @@ class ProgramService:
                 wall,
             )
             r.host = host
+            r.armed_here = inherited  # a new revision on an aircraft the old one armed takes the duty over
             r.state = str(reply.get("state") or "")
             for line in reply.get("logs") or []:
                 r.add_log(wall, str(line))
@@ -694,6 +743,9 @@ class ProgramService:
         r.reason = reason
         self._release_sticks(v)
         self._release_trigger(r, v)
+        if r.armed_here and reason != "replaced" and v is not None and v.armed and v.landed == "ground":
+            v.driver.arm(False)  # armed for this deployment and still on the ground: leave it as it was
+            r.add_log(self.fleet.wall(), "disarmed on the ground", "event")
         host, r.host = r.host, None
         self._discard(host)  # the sticks are released first; the host goes without a round trip
         if v is not None:
@@ -922,6 +974,8 @@ class ProgramService:
     def _apply(self, r: Run, v: Vehicle, res: dict[str, Any], now: float, wall: float) -> None:
         for line in res.get("logs") or []:
             r.add_log(wall, str(line))
+        if res.get("disarm"):
+            self._program_disarm(r, v, wall)
         if res.get("dropped"):
             r.add_log(wall, f"{res['dropped']} log lines dropped (at most 4 per frame)", "event")
         r.state = str(res.get("state") or "")
@@ -962,6 +1016,20 @@ class ProgramService:
         self._safe(r, v, now)
         if r.consecutive >= FAULT_LIMIT:
             self._fault(r, "faults", error)
+
+    def _program_disarm(self, r: Run, v: Vehicle, wall: float) -> None:
+        """``ctx.disarm()``: honoured on the ground only (the landed state says so), never in the air."""
+        if not v.armed:
+            return
+        if v.landed != "ground":
+            if not r.disarm_refused:
+                r.disarm_refused = True
+                r.add_log(wall, f"disarm refused: the aircraft is not on the ground ({v.landed})", "event")
+            return
+        r.disarm_refused = False
+        self._release_sticks(v)
+        v.driver.arm(False)
+        r.add_log(wall, "disarmed on the ground", "event")
 
     # ====================================================================== views
 

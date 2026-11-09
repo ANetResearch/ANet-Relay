@@ -13,7 +13,7 @@ export type { AirframeBody } from './rest'
 // WP-1 / WP-3: onboard programs (06 §2, §3.1)
 export type { Program, ProgramSummary, ProgramRevision, Validation as ProgramValidation, ValidationProblem, TestResults as ProgramTestResults, TestResult as ProgramTestResult, ProgramLog, ProgramLogLine, ProgramRunView } from './types'
 export { api, request, setTransport, httpTransport, RelayApiError, toApiError } from './rest'
-export type { RestTransport, Method, Auth, StickFrame, PossessInput, Ok, SkillName, PlanAction, PlanStep } from './rest'
+export type { RestTransport, Method, Auth, StickFrame, PossessInput, Ok, SkillName, PlanAction, PlanStep, PlanTuning } from './rest'
 export { env, readEnv, setEnv, normalizeApiBase, streamUrlFor } from './env'
 export type { RelayEnv, RelayBridge, BackendState, BackendStateName, MenuAction, MenuEvent, FixtureName, CopilotApi, CopilotConfig, CopilotThinking, CopilotUsage, CopilotRunOutcome, CopilotConfigInput, CopilotEvent, CopilotKeyStorage, CopilotToolScope, CopilotWindowAction, CopilotWindowState, RelayCopilotBridge, RelayAppBridge, AppWindowAction, AppWindowState, AppScreenshot } from './env'
 export { RelayStream, parseMessage, backoffDelay, STICKS_MIN_INTERVAL_MS } from './ws'

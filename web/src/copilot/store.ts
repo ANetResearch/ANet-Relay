@@ -207,7 +207,7 @@ export function turnNotice(e: Extract<CopilotEvent, { type: 'assistant_end' }>):
   if (e.empty) return 'empty'
   return null
 }
-export type ApprovalState = 'pending' | 'approved' | 'declined' | 'expired'
+export type ApprovalState = 'pending' | 'approved' | 'declined' | 'expired' | 'auto'
 
 export type CopilotItem =
   | { kind: 'user'; key: number; text: string }
@@ -326,6 +326,11 @@ function applyItem(s: CopilotState, items: CopilotItem[], key: number, e: Copilo
       return { items }
     }
     case 'approval':
+      if (e.auto) {
+        // 09 §4: approved under "Allow all"; recorded, no flash
+        items.push({ kind: 'approval', key, id: e.id, tool: e.tool, vehicle: e.vehicle, label: e.label, request: e.request, state: 'auto' })
+        return { items, seq: key }
+      }
       items.push({ kind: 'approval', key, id: e.id, tool: e.tool, vehicle: e.vehicle, label: e.label, request: e.request, state: 'pending' })
       return { items, seq: key, flash: s.flash + 1 }
     case 'approval_closed':

@@ -14,6 +14,7 @@ import { runEnded, useCopilot, type CopilotItem } from './store'
 import { cpt, useCPT, type CopilotKey } from './strings'
 import { toolLabel } from './toolLabels'
 import { KeyMigrationNotice } from './KeyMigration'
+import { CopyIcon, Markdown } from './markdown'
 import { LiveRunBar, RunBlock } from './RunTrace'
 import { VoxelLoader } from '@/ui/voxel/VoxelLoader'
 import './copilot.css'
@@ -123,37 +124,6 @@ export async function sendToCopilot(text: string, vehicle: string | null = null)
   }
 }
 
-/** Minimal, injection-free rendering of the model's Markdown: paragraphs, list lines, **bold** and `code`. */
-function RichText({ text }: { text: string }) {
-  const lines = text.replace(/\r/g, '').split('\n')
-  return (
-    <div className="cp-rich">
-      {lines.map((line, i) => {
-        const list = /^\s*(?:[-*]|\d+\.)\s+/.exec(line)
-        const body = list ? line.slice(list[0].length) : line
-        if (!body.trim()) return <div key={i} className="h-1.5" />
-        const parts = body.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((p, j) =>
-          p.startsWith('**') && p.endsWith('**') ? (
-            <strong key={j}>{p.slice(2, -2)}</strong>
-          ) : p.startsWith('`') && p.endsWith('`') ? (
-            <code key={j}>{p.slice(1, -1)}</code>
-          ) : (
-            <React.Fragment key={j}>{p}</React.Fragment>
-          ),
-        )
-        return list ? (
-          <div key={i} className="flex gap-1.5 pl-1">
-            <span className="text-[var(--g500)]">{/\d/.test(list[0]) ? list[0].trim() : '·'}</span>
-            <span className="min-w-0">{parts}</span>
-          </div>
-        ) : (
-          <p key={i}>{parts}</p>
-        )
-      })}
-    </div>
-  )
-}
-
 function stepText(step: Record<string, unknown>, ct: (k: ControlKey) => string): string {
   const action = String(step.action)
   const m = ct('plan.unit.m')
@@ -229,6 +199,12 @@ function ApprovalCard({ item }: { item: Extract<CopilotItem, { kind: 'approval' 
     useCopilot.getState().setApproval(item.id, ok ? 'approved' : 'declined')
     void bridge()?.approve(item.id, ok)
   }
+  const allowAll = async () => {
+    // 09 §4: turn "Allow all" on first, so the commands after this one do not ask
+    const b = bridge()
+    if (b) useCopilot.getState().setConfig(await b.saveConfig({ autoApprove: true }))
+    decide(true)
+  }
   return (
     <div className="cp-approval" data-state={item.state} data-approval={item.id} data-danger={danger ?? undefined}>
       <div className="flex items-center gap-2">
@@ -265,6 +241,10 @@ function ApprovalCard({ item }: { item: Extract<CopilotItem, { kind: 'approval' 
             <Button variant="outline" size="sm" onClick={() => decide(false)} data-decline="">
               {t('cp.approval.decline')}
             </Button>
+            <span className="flex-1" />
+            <Button variant="ghost" size="sm" onClick={() => void allowAll()} title={t('cp.approval.allHint')} data-approve-all="">
+              {t('cp.approval.all')}
+            </Button>
           </div>
         </>
       ) : (
@@ -289,7 +269,7 @@ function Transcript() {
     if (openRun === null) end.current?.scrollIntoView({ block: 'end' })
   }, [items, busy, openRun])
   return (
-    <div className="flex flex-col gap-2.5 px-3 py-3">
+    <div className="cp-transcript flex flex-col gap-2.5 px-3 py-3" data-selectable="">
       {items.map((it) => {
         switch (it.kind) {
           case 'user': {
@@ -303,8 +283,13 @@ function Transcript() {
           }
           case 'assistant':
             return (
-              <div key={it.key} className="cp-assistant">
-                {it.text ? <RichText text={it.text} /> : null}
+              <div key={it.key} className="cp-assistant" data-assistant="">
+                {it.text ? <Markdown text={it.text} copyLabel={t('cp.copy')} /> : null}
+                {it.text && !it.streaming ? (
+                  <div className="cp-assistant-actions">
+                    <CopyIcon text={it.text} label={t('cp.copyReply')} />
+                  </div>
+                ) : null}
                 {it.aborted ? <p className="text-[var(--g500)]">{t('cp.aborted')}</p> : null}
                 {it.error ? <p className="text-[var(--g300)]">{t('cp.err.generic', { error: it.error })}</p> : null}
               </div>

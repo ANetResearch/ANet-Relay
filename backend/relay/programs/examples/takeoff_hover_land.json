@@ -1,0 +1,14 @@
+{
+  "name": "Take off, hover, land",
+  "name_zh": "起飞、悬停、降落",
+  "description": "Climbs to target_alt, holds it for hold_s seconds, descends at descent m/s and disarms on the ground. Every throttle value is a parameter to tune while it flies; with learn on it finds the hover throttle itself.",
+  "description_zh": "爬升到 target_alt，悬停 hold_s 秒，以 descent 米/秒下降，落地后上锁。各油门值都是参数，可在飞行中实时调节；learn 打开时会自行找到悬停油门。",
+  "tests": [
+    {"name": "Disarmed waits", "obs": {"armed": false, "airborne": false, "alt": 0.0, "vz": 0.0}, "expect": {"throttle": [0, 0], "state": "ground"}},
+    {"name": "Spools up from the ground", "obs": {"airborne": false, "alt": 0.0, "vz": 0.0}, "expect": {"throttle": [0.0, 0.62], "state": "spool"}},
+    {"name": "Climbs below the target", "state": "climb", "obs": {"alt": 1.0, "vz": 0.0}, "expect": {"throttle": [0.55, 0.65], "state": "climb"}},
+    {"name": "Holds at the target", "state": "climb", "obs": {"alt": 2.0, "vz": 0.0}, "expect": {"throttle": [0.45, 0.55], "state": "hold"}},
+    {"name": "Descends at the set rate", "state": "descend", "obs": {"alt": 1.0, "vz": 0.0}, "expect": {"throttle": [0.35, 0.45], "state": "descend"}},
+    {"name": "Lands and stops the motors", "state": "descend", "obs": {"alt": 0.02, "vz": 0.0, "airborne": false}, "expect": {"throttle": [0, 0], "state": "landed"}}
+  ]
+}

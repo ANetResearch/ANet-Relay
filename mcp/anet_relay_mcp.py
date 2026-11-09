@@ -15,7 +15,27 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from relay_mcp_common import VID, WAIT, McpServer, RelayClient, RelayError, Tool, log, run_main
+from relay_mcp_common import (
+    VID,
+    WAIT,
+    McpServer,
+    RelayClient,
+    RelayError,
+    Tool,
+    log,
+    run_main,
+)
+
+TUNING = {
+    "type": "object",
+    "description": "throttle sticks of the stick-flown steps: climb 0.55-1 (lift-off and climb, default 0.72), "
+    "hover 0.35-0.65 (holds the height, default 0.5); climb stays 0.05 above hover",
+    "properties": {
+        "climb": {"type": "number", "minimum": 0.55, "maximum": 1.0},
+        "hover": {"type": "number", "minimum": 0.35, "maximum": 0.65},
+    },
+    "additionalProperties": False,
+}
 
 SERVER_NAME = "anet-relay"
 
@@ -214,8 +234,17 @@ TOOLS = [
                 },
             },
             "confirm": {"type": "string", "enum": ["ARM"], "description": "real aircraft on the ground"},
+            "tuning": TUNING,
         },
         ["vehicle", "steps"],
+    ),
+    _tool(
+        "relay_plan_tune",
+        "Change the throttle tuning of the aircraft's sequence while it flies; the step in flight takes it at "
+        "once. Aircraft without a position estimate fly sequences on the throttle stick in altitude hold: raise "
+        "climb when it does not lift off, hover when it sinks while hovering.",
+        {"vehicle": VID, "tuning": TUNING},
+        ["vehicle", "tuning"],
     ),
     _tool(
         "relay_goto",
@@ -371,7 +400,12 @@ def _dispatch(r: RelayClient, name: str, a: dict) -> Any:
     if name == "relay_yaw":
         return {"skill": r.yaw(vid, float(a["deg"]), wait=wait)}
     if name == "relay_plan":
-        return {"plan": r.plan(vid, a["steps"], name=r.session_name, confirm=a.get("confirm"))}
+        return {
+            "plan": r.plan(vid, a["steps"], name=r.session_name, confirm=a.get("confirm"), tuning=a.get("tuning"))
+        }
+    if name == "relay_plan_tune":
+        t = a.get("tuning") or {}
+        return r.plan_tune(vid, climb=t.get("climb"), hover=t.get("hover"))
     if name == "relay_goto":
         return {
             "skill": r.goto(vid, float(a["x"]), float(a["y"]), float(a["z"]), yaw=a.get("yaw"), wait=wait)

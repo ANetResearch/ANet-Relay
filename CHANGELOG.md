@@ -5,6 +5,52 @@ All notable changes to ANet Relay are documented in this file. The format follow
 [Semantic Versioning](https://semver.org/). Each release section is published as the
 GitHub Release notes for its tag.
 
+## [0.5.2] - 2026-11-09
+
+Programs can be tried out in the Lab with one click, sequences get adjustable
+throttle, Copilot replies are formatted and copyable, and Copilot can be told to
+stop asking for approval.
+
+### Added
+
+- Lab: **Arm and start** on the Run tab (on by default). The deployment
+  switches to STABILIZE and arms once the program is in place, so it flies at
+  once; a real aircraft asks for the word ARM first. Stopping the program on the
+  ground disarms again. The Fly inspector's Program group follows the same
+  preference. `POST /vehicles/{id}/program` takes `arm` and `confirm`; the answer
+  reports `arm {ok, code?, reason?}`, and the operator no longer has to possess
+  the aircraft for it.
+- `ctx.disarm()`: a program disarms the aircraft after its landing; refused in
+  the air.
+- Built-in program `takeoff_hover_land`: take off to `target_alt`, hover for
+  `hold_s` seconds, land at `descent` m/s and disarm. Every throttle value is a
+  parameter to tune while it flies; with `learn` on it finds the hover throttle
+  itself.
+- Sequence throttle: the Control tab's sequence has a **Throttle** panel
+  (Climb, Hold) for aircraft without a position estimate, with the live height,
+  climb rate, throttle stick and motor output. Changes apply at once, also while
+  the sequence flies. API: `tuning {climb, hover}` on `POST /vehicles/{id}/plan`,
+  `PATCH /vehicles/{id}/plan/tuning`, event `plan_tuned`, `plan.tuning` in the
+  snapshot.
+- Copilot **Allow all**: from an approval card or Settings → Copilot. Commands
+  on real aircraft then run without asking and are still recorded in the chat; a
+  red badge in the Copilot title bar shows it is on and turns it off with a
+  click. Preflight, the Allow programs switch, possession and emergency stop are
+  unchanged.
+- Copilot formatting and copying: replies render Markdown (headings, nested and
+  task lists, tables with alignment, code blocks, quotes, links opened in the
+  system browser); the transcript is selectable, every Relay window has a
+  Cut / Copy / Paste / Select All context menu, replies, tables and code blocks
+  have copy buttons.
+- Copilot, the flight MCP server and the SDK: `tuning` on plans and
+  `relay_plan_tune` / `plan_tune()`; `program_deploy` takes `arm`.
+
+### Changed
+
+- Deploying a new revision while a program flies takes over in the air without
+  landing (now covered by tests and stated in the Lab).
+- README animations are animated WebP (3.4 MB instead of 14 MB of GIFs).
+
 ## [0.5.1] - 2026-11-08
 
 Copilot shows what it is doing, reasoning models such as DeepSeek V4 no longer
@@ -622,6 +668,7 @@ xattr -dr com.apple.quarantine "/Applications/ANet Relay.app"
 - Stick timing has been verified on simulators and fake aircraft; check stick
   directions with the propellers removed before the first flight of each aircraft.
 
+[0.5.2]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.5.2
 [0.5.1]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.5.1
 [0.5.0]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.5.0
 [0.4.1]: https://github.com/ANetResearch/ANet-Relay/releases/tag/v0.4.1

@@ -5,7 +5,7 @@
 import * as React from 'react'
 import { RelayApiError } from '@/api'
 import { useLang } from '@/i18n'
-import { notify, notifyError } from '@/shell/notify'
+import { notifyError } from '@/shell/notify'
 import { useVehicle } from '@/store/selectors'
 import { useUi } from '@/store/ui'
 import { Button } from '@/ui/components/ui/button'
@@ -13,7 +13,7 @@ import { Icon } from '@/ui/icons'
 import { Group, TypeToConfirm } from '@/ui/relay'
 import { labApi } from './api'
 import { useTL } from './copy'
-import { ProgramSelect, RunActions, RunReadout, STATUS_KEYS } from './parts'
+import { loadArmStart, ProgramSelect, reportDeploy, RunActions, RunReadout, STATUS_KEYS } from './parts'
 import { useLab } from './store'
 
 const ALLOW_WORD = 'PROGRAM'
@@ -76,6 +76,9 @@ export function ProgramGroup({ vehicleId }: { vehicleId: string }) {
   const selectedId = useLab((s) => s.selectedId)
   const [choice, setChoice] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState(false)
+  const [confirming, setConfirming] = React.useState(false)
+  const [confirmError, setConfirmError] = React.useState<string | null>(null)
+  const lang = useLang()
   React.useEffect(() => {
     if (useLab.getState().programs === null) void useLab.getState().refreshList()
   }, [])
@@ -84,16 +87,31 @@ export function ProgramGroup({ vehicleId }: { vehicleId: string }) {
   const active = run && (run.status === 'running' || run.status === 'paused')
   const pick = choice ?? run?.id ?? selectedId ?? programs?.find((p) => !p.builtin)?.id ?? programs?.[0]?.id ?? null
   const blocked = v.kind === 'real' && !v.programs_allowed
+  // the Lab's "Arm and start" preference applies here too; a real aircraft takes the word ARM first
+  const arming = loadArmStart() && !v.armed
   const deploy = async () => {
     if (!pick) return
+    if (arming && v.kind === 'real') {
+      setConfirmError(null)
+      setConfirming(true)
+      return
+    }
     setBusy(true)
     try {
-      await labApi.deploy(v.id, { program: pick, mode: 'pilot' })
-      notify(tl('lab.run.deployed', { vehicle: v.label }))
+      reportDeploy(await labApi.deploy(v.id, { program: pick, mode: 'pilot', ...(arming ? { arm: true } : {}) }), v.label, tl)
     } catch (e) {
       notifyError(e)
     } finally {
       setBusy(false)
+    }
+  }
+  const confirmDeploy = async () => {
+    if (!pick) return
+    try {
+      reportDeploy(await labApi.deploy(v.id, { program: pick, mode: 'pilot', arm: true, confirm: 'ARM' }), v.label, tl)
+      setConfirming(false)
+    } catch (e) {
+      setConfirmError(e instanceof RelayApiError ? e.text(lang) : String(e))
     }
   }
   const openLab = () => {
@@ -129,6 +147,16 @@ export function ProgramGroup({ vehicleId }: { vehicleId: string }) {
               {tl('lab.grp.deploy')}
             </Button>
           </div>
+        ) : null}
+        {confirming && !active ? (
+          <TypeToConfirm
+            word="ARM"
+            prompt={tl('lab.run.armConfirm', { aircraft: v.label })}
+            actionLabel={tl('lab.grp.deploy')}
+            onConfirm={confirmDeploy}
+            onCancel={() => setConfirming(false)}
+            error={confirmError}
+          />
         ) : null}
         <Button variant="ghost" size="sm" className="gap-1.5 self-start px-1.5 text-[var(--g300)]" onClick={openLab}>
           <Icon icon="ws.lab" />

@@ -2,18 +2,59 @@
 // a sequence is a plan the backend flies step by step. Both need possession, like every operator command; moving a
 // stick by more than the pilot-override threshold takes over and stops the running skill or sequence.
 import * as React from 'react'
-import { api, RelayApiError, type PlanAction, type PlanStep, type SkillName, type Vehicle } from '@/api'
+import { api, RelayApiError, type PlanAction, type PlanStep, type PlanTuning, type SkillName, type Vehicle } from '@/api'
 import { useLang } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { notifyError } from '@/shell/notify'
 import { Button } from '@/ui/components/ui/button'
 import { Input } from '@/ui/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/ui/components/ui/native-select'
+import { Slider } from '@/ui/components/ui/slider'
 import { Icon, type IconKey } from '@/ui/icons'
 import { Group, TypeToConfirm } from '@/ui/relay'
 import { useCT, type ControlKey } from './strings'
 
 const PLAN_KEY = 'relay.plan.steps'
+const TUNING_KEY = 'relay.plan.tuning'
+
+/** Throttle sticks of the stick steps (backend plans.TUNING_RANGES and the skills' defaults). */
+export const TUNING = {
+  climb: { min: 0.55, max: 1, def: 0.72 },
+  hover: { min: 0.35, max: 0.65, def: 0.5 },
+} as const
+type TuningKey = keyof typeof TUNING
+const TUNING_GAP = 0.05 // climb stays this far above hover
+
+/** Keeps climb above hover after one of them moved (the backend refuses a climb at or below the hold). */
+export function fitTuning(t: Required<PlanTuning>, moved: TuningKey): Required<PlanTuning> {
+  const clampTo = (k: TuningKey, x: number) => Math.min(TUNING[k].max, Math.max(TUNING[k].min, Math.round(x * 100) / 100))
+  let climb = clampTo('climb', t.climb)
+  let hover = clampTo('hover', t.hover)
+  if (climb < hover + TUNING_GAP) {
+    if (moved === 'hover') climb = clampTo('climb', hover + TUNING_GAP)
+    else hover = clampTo('hover', climb - TUNING_GAP)
+  }
+  return { climb, hover }
+}
+
+function loadTuning(): Required<PlanTuning> {
+  const def = { climb: TUNING.climb.def, hover: TUNING.hover.def }
+  try {
+    const raw = JSON.parse(localStorage.getItem(TUNING_KEY) ?? 'null') as PlanTuning | null
+    if (raw && typeof raw.climb === 'number' && typeof raw.hover === 'number') return fitTuning({ climb: raw.climb, hover: raw.hover }, 'climb')
+  } catch {
+    /* storage unavailable or malformed: the defaults */
+  }
+  return def
+}
+
+function saveTuning(t: Required<PlanTuning>): void {
+  try {
+    localStorage.setItem(TUNING_KEY, JSON.stringify(t))
+  } catch {
+    /* per-viewer convenience only */
+  }
+}
 
 /** The owner's bench routine: take off, hover, forward 1 m, back 1 m, turn 45°, land. */
 export const EXAMPLE_PLAN: PlanStep[] = [
@@ -266,6 +307,7 @@ export function PlanBlock({ v }: { v: Vehicle }) {
   const lang = useLang()
   const { busy, run } = useRun()
   const [steps, setSteps] = React.useState<PlanStep[]>(loadPlan)
+  const [tuning, setTuning] = React.useState<Required<PlanTuning>>(loadTuning)
   const [confirming, setConfirming] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const human = v.controller === 'human'
@@ -277,8 +319,16 @@ export function PlanBlock({ v }: { v: Vehicle }) {
     setSteps(next)
     savePlan(next)
   }
+  const sticksFlown = !v.capabilities.position // the tuning reaches the stick variants only
   const start = async (confirm?: string) => {
-    await api.plan(v.id, steps, { name: 'operator', ...(confirm ? { confirm } : {}) })
+    await api.plan(v.id, steps, { name: 'operator', ...(confirm ? { confirm } : {}), ...(sticksFlown ? { tuning } : {}) })
+  }
+  const tune = (next: Required<PlanTuning>, commit: boolean) => {
+    setTuning(next)
+    if (!commit) return
+    saveTuning(next)
+    // the plan in flight, or the hold it left behind (last step, cancel), takes the change at once
+    if (plan && v.armed && human) void run('tune', () => api.tunePlan(v.id, next))
   }
   const onRun = () => {
     if (v.kind === 'real' && !v.armed && steps[0]?.action === 'takeoff') {
@@ -347,6 +397,7 @@ export function PlanBlock({ v }: { v: Vehicle }) {
             )
           })}
         </ol>
+        {sticksFlown && v.capabilities.althold ? <TuningPanel v={v} tuning={tuning} onChange={tune} disabled={!human} /> : null}
         {confirming && !v.armed && human && !running ? (
           <TypeToConfirm
             word="ARM"
@@ -390,6 +441,73 @@ export function PlanBlock({ v }: { v: Vehicle }) {
         <p className="text-hud-sub text-[var(--g500)]">{ct('plan.overrideHint')}</p>
       </div>
     </Group>
+  )
+}
+
+const pct = (x: number | null | undefined) => (x == null || !Number.isFinite(x) ? '—' : `${Math.round(x * 100)} %`)
+const signed = (x: number) => `${x > 0 ? '+' : x < 0 ? '−' : ''}${Math.abs(x).toFixed(2)}`
+
+function TuningRow({ k, value, onChange, disabled }: { k: TuningKey; value: number; onChange: (x: number, commit: boolean) => void; disabled: boolean }) {
+  const ct = useCT()
+  const r = TUNING[k]
+  return (
+    <div className="grid grid-cols-[72px_1fr_40px] items-center gap-2 text-hud-sub" data-plan-tune={k}>
+      <span className="text-[var(--g400)]">{ct(k === 'climb' ? 'plan.tune.climb' : 'plan.tune.hover')}</span>
+      <Slider
+        value={[value]}
+        min={r.min}
+        max={r.max}
+        step={0.01}
+        disabled={disabled}
+        onValueChange={(x) => onChange(Array.isArray(x) ? x[0] : (x as number), false)}
+        onValueCommitted={(x) => onChange(Array.isArray(x) ? x[0] : (x as number), true)}
+        aria-label={ct(k === 'climb' ? 'plan.tune.climb' : 'plan.tune.hover')}
+      />
+      <span className="num text-right text-[var(--g100)]">{pct(value)}</span>
+    </div>
+  )
+}
+
+/** Throttle tuning of the sequence (stick variants) with the live height, climb rate, stick and motor output. */
+function TuningPanel({ v, tuning, onChange, disabled }: {
+  v: Vehicle
+  tuning: Required<PlanTuning>
+  onChange: (t: Required<PlanTuning>, commit: boolean) => void
+  disabled: boolean
+}) {
+  const ct = useCT()
+  const set = (k: TuningKey) => (x: number, commit: boolean) => onChange(fitTuning({ ...tuning, [k]: x }, k), commit)
+  const defaults = tuning.climb === TUNING.climb.def && tuning.hover === TUNING.hover.def
+  const stick = v.sticks && v.sticks.source !== 'human' ? v.sticks.throttle : null
+  return (
+    <div className="flex flex-col gap-1.5 rounded-md border border-[var(--border)] px-2.5 py-2" data-plan-tuning="">
+      <div className="flex items-center gap-2">
+        <span className="cap text-[10px] text-[var(--g400)]">{ct('plan.tune.title')}</span>
+        <span className="flex-1" />
+        <Button
+          variant="ghost"
+          size="xs"
+          disabled={disabled || defaults}
+          onClick={() => onChange({ climb: TUNING.climb.def, hover: TUNING.hover.def }, true)}
+          data-plan-tune-reset=""
+        >
+          {ct('plan.tune.reset')}
+        </Button>
+      </div>
+      <TuningRow k="climb" value={tuning.climb} onChange={set('climb')} disabled={disabled} />
+      <TuningRow k="hover" value={tuning.hover} onChange={set('hover')} disabled={disabled} />
+      {v.armed ? (
+        <p className="num text-hud-sub text-[var(--g300)]" data-plan-live="">
+          {ct('plan.live', {
+            alt: v.altitude_m == null ? '—' : `${v.altitude_m.toFixed(2)} m`,
+            vz: v.climb_ms == null ? '—' : `${signed(v.climb_ms)} m/s`,
+            stick: pct(stick),
+            motor: v.throttle_pct == null ? '—' : `${Math.round(v.throttle_pct)} %`,
+          })}
+        </p>
+      ) : null}
+      <p className="text-hud-sub text-[var(--g500)]">{ct('plan.tune.hint')}</p>
+    </div>
   )
 }
 

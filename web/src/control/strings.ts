@@ -154,6 +154,12 @@ const en = {
   'plan.field.forward': 'Fwd',
   'plan.field.right': 'Right',
   'plan.field.up': 'Up',
+  'plan.tune.title': 'Throttle',
+  'plan.tune.climb': 'Climb',
+  'plan.tune.hover': 'Hold',
+  'plan.tune.reset': 'Defaults',
+  'plan.tune.hint': 'Throttle stick for take-off and for holding height in altitude hold. Raise Climb when the aircraft does not lift off, raise Hold when it sinks while hovering. Changes apply at once, also while the sequence runs.',
+  'plan.live': 'Height {alt} · climb {vz} · throttle stick {stick} · motors {motor}',
 
   // WP-C: control feel, transmitters, mapping setup, driving HUD (05 §6)
   'feel.title': 'Control feel',
@@ -429,6 +435,12 @@ const zh: Record<ControlKey, string> = {
   'plan.field.forward': '前',
   'plan.field.right': '右',
   'plan.field.up': '上',
+  'plan.tune.title': '油门',
+  'plan.tune.climb': '起飞爬升',
+  'plan.tune.hover': '悬停保持',
+  'plan.tune.reset': '恢复默认',
+  'plan.tune.hint': '定高模式下起飞与保持高度所用的油门杆量。飞不起来时调高“起飞爬升”，悬停时下沉则调高“悬停保持”。修改立即生效，序列运行中同样适用。',
+  'plan.live': '高度 {alt} · 爬升 {vz} · 油门杆 {stick} · 电机输出 {motor}',
 
   // WP-C
   'feel.title': '操控手感',

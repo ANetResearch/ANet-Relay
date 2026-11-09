@@ -34,7 +34,9 @@ def step(obs, ctx):             # every 20 ms; must return Sticks
   the program runs (type and range follow the default and `PARAM_RANGES`).
 - `ctx`: `mem` (a dict kept across frames), `params` (read-only, live), `state` (a name of at most 32
   characters shown on the stage), `log(*args)` and `print` (at most 4 lines per frame), `t` (seconds since
-  deployment), `rng` (seeded random numbers: `random()`, `uniform`, `gauss`, `randint`, `choice`).
+  deployment), `rng` (seeded random numbers: `random()`, `uniform`, `gauss`, `randint`, `choice`),
+  `disarm()` (asks for a disarm after the frame; Relay does it only while the aircraft is on the ground, never in
+  the air, so a program can end its own flight after the landing).
 - Returning `None` or raising counts as a fault: that frame flies safe sticks (level, throttle held). 25 faults
   in a row (0.5 s) end the program as `faulted` and the aircraft goes back to the safety layer.
 
@@ -118,9 +120,10 @@ takes `roll`, `pitch`, `yaw`, `throttle` as `[low, high]`, `fire` as a boolean a
 
 ## Workflow with the tools
 
-1. `program_list` / `program_get`: start from a built-in (`hover_trim`, `liftoff`, `patrol`, `hunter_easy`,
-   `hunter_medium`, `hunter_hard`, `rammer`, `figure8_evader`; read-only, copy with `program_create {copy_of}`) or
-   write a new one.
+1. `program_list` / `program_get`: start from a built-in (`hover_trim`, `liftoff`, `takeoff_hover_land`,
+   `patrol`, `hunter_easy`, `hunter_medium`, `hunter_hard`, `rammer`, `figure8_evader`; read-only, copy with
+   `program_create {copy_of}`) or write a new one. `takeoff_hover_land` is the plain "take off to N m, hover,
+   land" flight with every throttle value a parameter: the starting point for a test flight.
 2. `program_create` / `program_update`: every change is a new revision with a `note`. `program_update` takes
    a whole `source` or a line `patch` `[{start, end, text}]` (1-based, inclusive; all numbers refer to the
    current revision; `end = start - 1` inserts before `start`). Both return the validation result.
@@ -128,10 +131,13 @@ takes `roll`, `pitch`, `yaw`, `throttle` as `[low, high]`, `fire` as a boolean a
 4. `program_test`: run the unit tests.
 5. `challenge_list` / `challenge_submit` / `job_status`: judge the program on a fixed scenario faster than real
    time; `duel_run` / `ladder` pit programs against each other.
-6. `program_deploy` on a simulator: the aircraft must be claimed, in a manual mode (STABILIZE) and armed
-   (`relay_mode`, `relay_arm`); `airframe_set` or the deploy `airframe` chooses its defects; switch hover
-   assist off for physical flight. Then `program_status` and `program_log` show the state, frame rate, faults
-   and log; `program_params` tunes it live; `program_stop` ends it.
+6. `program_deploy {arm: true}` on a simulator: Relay sets STABILIZE and arms once the program is in place, so
+   it flies at once (without `arm` the program waits until the aircraft is armed, for example with `relay_mode`
+   and `relay_arm`). `airframe_set` or the deploy `airframe` chooses its defects; switch hover assist off for
+   physical flight. Then `program_status` and `program_log` show the state, frame rate, faults and log, and
+   `relay_vehicle` the height, climb rate and motor output; `program_params` tunes it live; a new revision
+   deployed while it flies takes over in the air; `program_stop` ends it (and disarms on the ground when the
+   deployment armed the aircraft).
 
 Rules that always hold: a person who takes over the aircraft pauses the program (it does not resume by itself;
 use `program_resume`), an emergency stop, a lost link or a crash stops it, and releasing your claim or pushing

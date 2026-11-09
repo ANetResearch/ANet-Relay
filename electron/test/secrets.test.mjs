@@ -221,3 +221,13 @@ test("thinking and max output tokens (08 §2): defaults, validation and clamping
   assert.equal(store.save({ maxTokens: 32000.4 }).cfg.maxTokens, 32000);
   assert.equal(store.view().maxTokens, 32000);
 });
+
+test("Allow all (09 §4): off by default, only a boolean changes it, other saves keep it", () => {
+  const { store } = setup();
+  assert.equal(store.view().autoApprove, false);
+  assert.equal(store.save({ autoApprove: "yes" }).cfg.autoApprove, false);
+  assert.equal(store.save({ autoApprove: true }).cfg.autoApprove, true);
+  assert.equal(store.save({ opacity: 80 }).cfg.autoApprove, true);
+  assert.equal(store.view().autoApprove, true);
+  assert.equal(store.save({ autoApprove: false }).cfg.autoApprove, false);
+});

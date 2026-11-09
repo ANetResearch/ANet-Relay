@@ -54,6 +54,7 @@ TEMPLATES: dict[str, tuple[str, str]] = {
         "{vehicle} 的动作序列在第 {step} 步中止：{detail}。",
     ),
     "plan_cancelled": ("{vehicle} plan cancelled.", "{vehicle} 的动作序列已取消。"),
+    "plan_tuned": ("{vehicle} plan throttle changed.", "{vehicle} 的动作序列油门已调整。"),
     "stop": ("Stop on {vehicle}: throttle cut and disarm requested.", "{vehicle} 急停：油门归零并申请上锁。"),
     "stop_all": ("Stop on all aircraft.", "全部飞机急停。"),
     "battery_warn": ("{vehicle} battery low: {voltage} V.", "{vehicle} 电压偏低：{voltage} V。"),

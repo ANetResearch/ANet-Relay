@@ -31,9 +31,10 @@ SETPOINT_PERIOD_S = 0.1
 GOTO_TOLERANCE_M = 0.15
 OFFBOARD_PRIME_S = 1.0
 
-# Altitude-hold stick values (throttle 0.5 holds altitude in ALT_HOLD / ALTCTL).
+# Altitude-hold stick values (throttle 0.5 holds altitude in ALT_HOLD / ALTCTL). A plan's tuning moves the
+# climb stick and the hold centre; the approach, descent and flare sticks keep their distance to the centre.
 CLIMB_STICK = 0.72
-APPROACH_STICK = 0.62
+APPROACH_SHARE = 0.55  # approach = centre + share x (climb - centre): 0.62 with the defaults
 DESCEND_STICK = 0.3
 FLARE_STICK = 0.36
 ALT_TOLERANCE_M = 0.06
@@ -68,6 +69,10 @@ REQUIREMENTS = {
 SKILL_NAMES = tuple(REQUIREMENTS)
 # Skills only the fleet starts itself; not part of the public catalogue (04 §4).
 INTERNAL_REQUIREMENTS = {"replay": "manual"}
+
+
+def clamp01(x: float) -> float:
+    return min(1.0, max(0.0, x))
 
 
 def requirement(name: str) -> str:
@@ -126,6 +131,8 @@ class Skill:
     est_t: float | None = None  # open-loop move: dead-reckoned speed and distance along the move
     est_v: float = 0.0
     est_d: float = 0.0
+    # throttle tuning of the stick variants: {climb?, hover?} (plans.normalise_tuning); a plan shares its dict
+    tuning: dict[str, float] = field(default_factory=dict)
 
     @property
     def active(self) -> bool:
@@ -205,7 +212,7 @@ class Skill:
         if self.state == "done" and self.expect_mode and host.mode and host.mode != self.expect_mode:
             self.holding = False
             return None
-        return self.out or NEUTRAL
+        return self.out or self._neutral()
 
     def _ensure_mode(self, host: Host, name: str, now: float) -> bool:
         """Request ``name`` until the heartbeat confirms it. Returns True once confirmed."""
@@ -330,16 +337,29 @@ class Skill:
             return "POSCTL" if position else "ALTCTL"
         return "LOITER" if position else "ALT_HOLD"
 
+    def _centre(self) -> float:
+        """The throttle stick that holds the height: 0.5, or the plan's ``hover`` tuning."""
+        return float(self.tuning.get("hover", 0.5))
+
+    def _climb(self) -> float:
+        return float(self.tuning.get("climb", CLIMB_STICK))
+
+    def _neutral(self) -> StickInput:
+        if "hover" not in self.tuning:
+            return NEUTRAL
+        return StickInput(0.0, 0.0, 0.0, self._centre(), source="agent")
+
     def _hold_altitude(self, host: Host) -> float:
         """Throttle stick that drives the altitude towards ``alt_target`` in altitude hold."""
+        centre = self._centre()
         altitude = host.altitude()
         if self.alt_target is None or altitude is None:
-            return 0.5
+            return centre
         error = self.alt_target - altitude
         if abs(error) <= ALT_TOLERANCE_M:
-            return 0.5
+            return centre
         # Outside the autopilot's centre dead zone (PX4 MPC_HOLD_DZ, ArduPilot THR_DZ).
-        return 0.5 + math.copysign(min(0.22, 0.08 + 0.35 * abs(error)), error)
+        return clamp01(centre + math.copysign(min(0.22, 0.08 + 0.35 * abs(error)), error))
 
     def _tick_takeoff_sticks(self, host: Host, now: float) -> None:
         """Takeoff without a position estimate: climb on the throttle stick in altitude hold."""
@@ -378,11 +398,12 @@ class Skill:
         altitude = host.altitude()
         assert self.alt_target is not None
         remaining = self.alt_target - (altitude if altitude is not None else -1e9)
+        centre, climb = self._centre(), self._climb()
         if remaining <= ALT_TOLERANCE_M:
             self.finish()
-            self.out = StickInput(0.0, 0.0, 0.0, 0.5, source="agent")
+            self.out = StickInput(0.0, 0.0, 0.0, centre, source="agent")
             return
-        stick = CLIMB_STICK if remaining > 0.3 else APPROACH_STICK
+        stick = climb if remaining > 0.3 else centre + APPROACH_SHARE * (climb - centre)
         self.out = StickInput(0.0, 0.0, 0.0, stick, source="agent")
 
     def _tick_land(self, host: Host, now: float) -> None:
@@ -416,7 +437,7 @@ class Skill:
             self.expect_mode = self._hold_mode(host)
             self._phase("mode", now)
         if self.phase == "mode":
-            self.out = StickInput(0.0, 0.0, 0.0, 0.5, source="agent")
+            self.out = StickInput(0.0, 0.0, 0.0, self._centre(), source="agent")
             if self._ensure_mode(host, self.expect_mode or "ALTCTL", now):
                 self._phase("descend", now)
             return
@@ -429,7 +450,9 @@ class Skill:
             altitude = host.altitude()
             ground = self.params.get("_ground")
             low = altitude is not None and ground is not None and altitude - float(ground) < 0.4
-            self.out = StickInput(0.0, 0.0, 0.0, FLARE_STICK if low else DESCEND_STICK, source="agent")
+            shift = self._centre() - 0.5
+            stick = (FLARE_STICK if low else DESCEND_STICK) + shift
+            self.out = StickInput(0.0, 0.0, 0.0, stick, source="agent")
             if host.landed == "ground":
                 self._phase("disarm", now)
             return
@@ -542,7 +565,7 @@ class Skill:
             return
         if not self._check_running_mode(host):
             return
-        throttle = self._hold_altitude(host) if self.alt_target is not None else 0.5
+        throttle = self._hold_altitude(host) if self.alt_target is not None else self._centre()
         heading = host.heading()
         if self.state == "done" or heading is None or self.heading_target is None:
             self.out = StickInput(0.0, 0.0, 0.0, throttle, source="agent")
@@ -566,7 +589,7 @@ class Skill:
             0.0,
             0.0,
             0.0,
-            0.5 if host.mode in modes.HOLD_STICK_MODES else float(p["throttle"]),
+            self._centre() if host.mode in modes.HOLD_STICK_MODES else float(p["throttle"]),
             source="agent",
         )
         if self.state == "done":

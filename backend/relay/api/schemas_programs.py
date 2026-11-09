@@ -102,6 +102,10 @@ class DeployBody(_Body):
     team: str | None = Field(
         default=None, max_length=16, description="team name; filled into a declared team parameter"
     )
+    arm: bool = Field(
+        default=False, description="arm the aircraft once the program is in place (the program flies at once)"
+    )
+    confirm: str | None = Field(default=None, description='"ARM" when arm is set on a real aircraft')
 
 
 class AllowBody(_Body):

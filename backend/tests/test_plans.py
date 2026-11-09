@@ -169,3 +169,43 @@ def test_px4_takes_off_again_after_landing(svc, stepper):
         assert v.plan.state == "done", v.plan.detail
         assert stepper.until(lambda: not v.armed, 5, [session])
         assert v.mode == "LAND"
+
+
+def test_tuning_validation():
+    assert plans.normalise_tuning(None) == {}
+    assert plans.normalise_tuning({"climb": 0.8}) == {"climb": 0.8}
+    assert plans.normalise_tuning({"climb": 0.8, "hover": 0.55}) == {"climb": 0.8, "hover": 0.55}
+    bad_inputs = ({"climb": 0.5}, {"hover": 0.7}, {"climb": True}, {"gain": 1}, {"climb": 0.6, "hover": 0.58})
+    for bad in (*bad_inputs, []):
+        with pytest.raises(RelayError):
+            plans.normalise_tuning(bad)
+
+
+def test_tuning_reaches_the_flying_step(svc, stepper):
+    """The climb and hold throttle of a plan change while it flies (the stick variants, no position)."""
+    vid, v = boot(svc, stepper, "ardupilot", False)
+    session, agent = open_agent(svc)
+    svc.claim(vid, agent)
+    with pytest.raises(RelayError) as exc:
+        svc.tune_plan(vid, agent, {"climb": 0.8})
+    assert exc.value.code == "no_plan"
+    steps = [{"action": "takeoff", "alt": 2.0}, {"action": "hover", "seconds": 30}]
+    view = svc.run_plan(vid, agent, steps, tuning={"climb": 0.9})["plan"]
+    assert view["tuning"] == {"climb": 0.9}
+    assert stepper.until(lambda: v.armed and v.skill.phase == "climb", 10, [session])
+    stepper.run(0.1, [session])
+    assert v.skill.out.throttle == pytest.approx(0.9)
+    svc.tune_plan(vid, agent, {"climb": 0.8})
+    stepper.run(0.1, [session])
+    assert v.skill.out.throttle == pytest.approx(0.8)
+    assert stepper.until(lambda: v.plan.index >= 1, 20, [session])
+    svc.tune_plan(vid, agent, {"hover": 0.54})
+    stepper.run(0.5, [session])
+    assert v.skill.name == "hold" and v.skill.tuning == {"climb": 0.8, "hover": 0.54}
+    assert v.plan.view()["tuning"] == {"climb": 0.8, "hover": 0.54}
+    with pytest.raises(RelayError):
+        svc.tune_plan(vid, agent, {"hover": 0.78})  # outside the range: nothing changes
+    with pytest.raises(RelayError):
+        svc.tune_plan(vid, agent, {"climb": 0.56})  # not above the hover throttle
+    assert v.plan.tuning == {"climb": 0.8, "hover": 0.54}
+    assert "plan_tuned" in [e["kind"] for e in svc.events.after(0, 2000)]

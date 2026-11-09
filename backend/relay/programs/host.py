@@ -431,6 +431,8 @@ class Engine:
             result["error"] = _error_text(exc)
         ms = (time.perf_counter() - started) * 1000.0
         lines, dropped = ctx.take_lines()
+        if ctx.take_disarm():
+            result["disarm"] = True
         result.update(
             ms=round(ms, 3),
             over=ms > SOFT_BUDGET_MS,

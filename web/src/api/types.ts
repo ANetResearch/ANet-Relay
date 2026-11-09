@@ -341,6 +341,12 @@ export interface PlanView {
   steps: {}[]
   results: (string | null)[]
   detail: string | null
+  /**
+   * throttle tuning of the stick steps: climb, hover (PlanTuning)
+   */
+  tuning: {
+    [k: string]: number | undefined
+  }
 }
 /**
  * Rolling diagnostics over the last few seconds (03 §5.9). Flight items need the aircraft airborne.
@@ -638,6 +644,7 @@ export interface Event {
     | 'plan_finished'
     | 'plan_failed'
     | 'plan_cancelled'
+    | 'plan_tuned'
     | 'device_command'
     | 'motor_test'
     | 'motor_test_stopped'

@@ -43,6 +43,7 @@ function useFlash(ref: React.RefObject<HTMLDivElement | null>): void {
 export function CopilotWindow() {
   const t = useCPT()
   const model = useCopilot((s) => s.config?.model)
+  const autoApprove = useCopilot((s) => s.config?.autoApprove === true)
   const busy = useCopilot((s) => s.busy)
   const frame = React.useRef<HTMLDivElement>(null)
   useFlash(frame)
@@ -66,6 +67,21 @@ export function CopilotWindow() {
         <span className="text-[13px] font-[560] text-[var(--g50)]">{t('cp.title')}</span>
         {model ? <span className="num truncate text-[11px] text-[var(--g500)]">{model}</span> : null}
         <span className="flex-1" />
+        {autoApprove ? (
+          <button
+            type="button"
+            className="cp-auto-badge no-drag"
+            title={t('cp.auto.off')}
+            onClick={async () => {
+              const b = window.relay?.copilot
+              if (b) useCopilot.getState().setConfig(await b.saveConfig({ autoApprove: false }))
+            }}
+            data-copilot-auto=""
+          >
+            {t('cp.auto.badge')}
+            <Icon icon="close" className="size-3" />
+          </button>
+        ) : null}
         <Button
           variant="ghost"
           size="icon-sm"

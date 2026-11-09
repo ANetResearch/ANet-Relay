@@ -78,7 +78,16 @@ export function createCopilotHost({ copilotWindow, mainWindow, relayBase, langua
     const mod = await loadModule();
     const { models, model, thinking } = mod.buildModels({ ...cfg, thinking: view.thinking, maxTokens: view.maxTokens }, store.apiKey(cfg));
     relay = new mod.RelayHttp(base);
-    copilot = mod.createCopilot({ relay, models, model, emit, lang: language, scope: () => store.view().toolScope, thinking });
+    copilot = mod.createCopilot({
+      relay,
+      models,
+      model,
+      emit,
+      lang: language,
+      scope: () => store.view().toolScope,
+      thinking,
+      autoApprove: () => store.view().autoApprove, // read at every gated call: no rebuild when it changes
+    });
     builtFor = stamp;
     return copilot;
   };

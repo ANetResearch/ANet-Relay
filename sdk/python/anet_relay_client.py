@@ -29,7 +29,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 __all__ = ["DEFAULT_BASE", "RelayClient", "RelayError"]
-__version__ = "0.5.1"
+__version__ = "0.5.2"
 
 DEFAULT_BASE = os.environ.get("RELAY_API", "http://127.0.0.1:8765")
 API = "/api/v1"
@@ -360,20 +360,29 @@ class RelayClient:
         confirm: str | None = None,
         wait: bool = True,
         timeout: float = 180.0,
+        tuning: dict | None = None,
     ) -> dict:
         """Fly a sequence, e.g. [{"action": "takeoff", "alt": 1}, {"action": "move", "forward": 1}, ...].
 
-        With ``wait`` it returns the finished plan and raises ``plan_failed`` when a step fails.
+        With ``wait`` it returns the finished plan and raises ``plan_failed`` when a step fails. ``tuning``
+        ``{climb?, hover?}`` sets the throttle sticks of the stick-flown steps (no position estimate).
         """
         body: dict[str, Any] = {"steps": steps}
         if name:
             body["name"] = name
         if confirm:
             body["confirm"] = confirm
+        if tuning:
+            body["tuning"] = tuning
         plan = self._post(f"/vehicles/{vehicle_id}/plan", body)["plan"]
         if not wait:
             return plan
         return self.wait_plan(vehicle_id, plan["id"], timeout)
+
+    def plan_tune(self, vehicle_id: str, climb: float | None = None, hover: float | None = None) -> dict:
+        """Change the throttle tuning of the aircraft's sequence while it flies (09 §3)."""
+        body = _drop_none(climb=climb, hover=hover)
+        return self.request("PATCH", f"/vehicles/{vehicle_id}/plan/tuning", body, auth="session")
 
     def wait_plan(self, vehicle_id: str, plan_id: int, timeout: float = 180.0) -> dict:
         """Wait until plan ``plan_id`` finishes; raises RelayError('plan_failed') unless it ends done."""
@@ -952,6 +961,8 @@ class RelayClient:
         seed: int | None = None,
         airframe: dict | None = None,
         team: str | None = None,
+        arm: bool | None = None,
+        confirm: str | None = None,
     ) -> dict:
         """Run a revision on an aircraft at 50 Hz (06 §2.6); returns ``{id, program}`` (the run view).
 
@@ -959,6 +970,8 @@ class RelayClient:
         ``arena`` ``{radius, floor, ceiling}``, ``seed`` and ``airframe`` ``{preset | params, seed?}``. A real
         aircraft needs the operator's ``Allow programs`` switch (``programs_not_allowed``) and preflight.
         ``team`` sets the aircraft's team in every contact list (and a declared ``team`` parameter).
+        ``arm`` arms the aircraft (in STABILIZE) once the program is in place, ``confirm="ARM"`` on a real one;
+        the answer's ``arm`` says whether the autopilot armed.
         """
         body = _drop_none(
             program=program_id,
@@ -970,6 +983,8 @@ class RelayClient:
             seed=seed,
             airframe=airframe,
             team=team,
+            arm=arm,
+            confirm=confirm,
         )
         return self._either("POST", f"/vehicles/{vehicle_id}/program", body)
 

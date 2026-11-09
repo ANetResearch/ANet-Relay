@@ -4,19 +4,21 @@
 // aircraft in the inspector; taking the sticks pauses the program and only Resume continues it.
 import * as React from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import type { ProgramLogLine, Vehicle } from '@/api'
+import { RelayApiError, type ProgramLogLine, type Vehicle } from '@/api'
+import { useLang } from '@/i18n'
 import { addSim } from '@/shell/actions'
-import { notify, notifyError } from '@/shell/notify'
+import { notifyError } from '@/shell/notify'
 import { useRelay } from '@/store/relay'
 import { cn } from '@/lib/utils'
 import { Button } from '@/ui/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/components/ui/select'
+import { Switch } from '@/ui/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/ui/components/ui/toggle-group'
 import { Icon } from '@/ui/icons'
-import { SimTag } from '@/ui/relay'
-import { labApi } from './api'
+import { SimTag, TypeToConfirm } from '@/ui/relay'
+import { labApi, type DeployArm } from './api'
 import { useTL } from './copy'
-import { deployable, RunActions, RunReadout } from './parts'
+import { deployable, loadArmStart, reportDeploy, RunActions, RunReadout, saveArmStart } from './parts'
 import { isDirty, useLab } from './store'
 
 const LOG_KEEP = 200
@@ -120,11 +122,16 @@ export function RunTab() {
   const dirty = useLab((s) => isDirty(s))
   const chosen = useLab((s) => s.runVehicle)
   const aircraft = useAircraft()
+  const lang = useLang()
   const [mode, setMode] = React.useState<'pilot' | 'copilot'>('pilot')
+  const [armStart, setArmStart] = React.useState(loadArmStart)
+  const [confirming, setConfirming] = React.useState(false)
+  const [confirmError, setConfirmError] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState(false)
   const vid = chosen && aircraft.some((a) => a.id === chosen) ? chosen : (aircraft.find((a) => a.kind === 'sim')?.id ?? aircraft[0]?.id ?? null)
   const target = aircraft.find((a) => a.id === vid) ?? null
   const run = useRelay((s) => (vid ? (s.fleet?.vehicles.find((v) => v.id === vid)?.program ?? null) : null))
+  const armed = useRelay((s) => (vid ? Boolean(s.fleet?.vehicles.find((v) => v.id === vid)?.armed) : false))
   const lines = useProgramLog(vid, run ? `${run.id}\u0000${run.rev}\u0000${run.started_at}` : null)
   if (!program) return null
   if (!aircraft.length) {
@@ -141,17 +148,36 @@ export function RunTab() {
   const mine = run && run.id === program.id
   const active = run && (run.status === 'running' || run.status === 'paused')
   const blocked = target ? target.kind === 'real' && !target.programs_allowed : true
+  const arming = armStart && mode === 'pilot' && !armed
+  const report = (res: { arm?: DeployArm }) => reportDeploy(res, target?.label ?? vid ?? '', tl)
   const deploy = async () => {
     if (!vid || !target) return
+    if (arming && target.kind === 'real') {
+      setConfirmError(null)
+      setConfirming(true)
+      return
+    }
     setBusy(true)
     try {
-      await labApi.deploy(vid, { program: program.id, rev: program.rev, mode })
-      notify(tl('lab.run.deployed', { vehicle: target.label }))
+      report(await labApi.deploy(vid, { program: program.id, rev: program.rev, mode, ...(arming ? { arm: true } : {}) }))
     } catch (e) {
       notifyError(e)
     } finally {
       setBusy(false)
     }
+  }
+  const confirmDeploy = async () => {
+    if (!vid) return
+    try {
+      report(await labApi.deploy(vid, { program: program.id, rev: program.rev, mode, arm: true, confirm: 'ARM' }))
+      setConfirming(false)
+    } catch (e) {
+      setConfirmError(e instanceof RelayApiError ? e.text(lang) : String(e))
+    }
+  }
+  const toggleArm = (on: boolean) => {
+    setArmStart(on)
+    saveArmStart(on)
   }
   const items = aircraft.map((a) => ({ value: a.id, label: a.label }))
   return (
@@ -185,6 +211,15 @@ export function RunTab() {
         </ToggleGroup>
         <span className="text-hud-sub text-[var(--g500)]">{tl(mode === 'pilot' ? 'lab.run.pilotHint' : 'lab.run.copilotHint')}</span>
       </div>
+      {mode === 'pilot' ? (
+        <div className="flex flex-col gap-1 px-3">
+          <label className="flex items-center justify-between gap-2">
+            <span className="cap">{tl('lab.run.arm')}</span>
+            <Switch checked={armStart} onCheckedChange={(c) => toggleArm(Boolean(c))} aria-label={tl('lab.run.arm')} data-lab-arm="" />
+          </label>
+          <span className="text-hud-sub text-[var(--g500)]">{tl('lab.run.armHint')}</span>
+        </div>
+      ) : null}
       <div className="flex flex-col gap-1.5 px-3">
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="gap-1.5" disabled={busy || dirty || blocked} onClick={() => void deploy()} data-lab-deploy="">
@@ -194,6 +229,16 @@ export function RunTab() {
           <span className="flex-1" />
           {run && vid ? <RunActions vehicleId={vid} run={run} /> : null}
         </div>
+        {confirming && target ? (
+          <TypeToConfirm
+            word="ARM"
+            prompt={tl('lab.run.armConfirm', { aircraft: target.label })}
+            actionLabel={tl('lab.run.deploy', { rev: program.rev })}
+            onConfirm={confirmDeploy}
+            onCancel={() => setConfirming(false)}
+            error={confirmError}
+          />
+        ) : null}
         {dirty ? <p className="text-hud-sub text-[var(--g400)]">{tl('lab.run.saveFirst')}</p> : null}
         {blocked && target ? <p className="text-hud-sub text-[var(--g400)]">{tl('lab.run.realBlocked')}</p> : null}
       </div>
@@ -203,6 +248,7 @@ export function RunTab() {
             {!mine && active ? <p className="text-hud-sub text-[var(--g300)]">{tl('lab.run.other', { name: run.name })}</p> : null}
             <RunReadout run={run} />
             {active ? <p className="text-hud-sub text-[var(--g500)]">{tl('lab.run.possessHint')}</p> : null}
+            {active && mine ? <p className="text-hud-sub text-[var(--g500)]">{tl('lab.run.liveEdit')}</p> : null}
           </>
         ) : (
           <p className="text-hud-sub text-[var(--g500)]">{tl('lab.run.idle')}</p>

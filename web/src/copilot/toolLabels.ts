@@ -12,6 +12,7 @@ export const TOOL_LABELS: Record<string, readonly [en: string, zh: string]> = {
   relay_yaw: ['Turn', '转向'],
   relay_land: ['Land', '降落'],
   relay_plan: ['Fly a sequence', '执行动作序列'],
+  relay_plan_tune: ['Tune sequence throttle', '调整序列油门'],
   relay_cancel: ['Cancel sequence', '取消动作序列'],
   relay_release: ['Release aircraft', '释放飞机'],
   relay_stop: ['Emergency stop', '急停'],

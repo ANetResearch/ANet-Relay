@@ -76,7 +76,7 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | `sticks`（缺省） | 推杆（WebSocket 流、`POST /vehicles/{id}/sticks`、`sticks` 技能）、解锁与上锁、切换到手动类模式（ArduPilot STABILIZE / ACRO，PX4 MANUAL / STABILIZED / ACRO；DRIFT 带速度阻尼辅助，不属于此类）、关闭模拟机的悬停辅助（不能开启）、射击、部署并运行机载程序，以及安全动作：急停与 `land`（其事件标注 `safety`） |
 | `full` | 本文的全部接口，与 0.3 相同 |
 
-在 `sticks` 等级下，技能 `takeoff`、`hold`、`move`、`yaw`、`goto`、`rtl`、`velocity`、`attitude`，包含这些动作的动作序列，以动作序列或轨迹方式再飞，定高、定点与自动类模式，设备级接口中的飞行类命令，以及 4 通道以上的 RC 覆盖，均返回 403 `sticks_only`（`detail.level = "sticks"`，`detail.action` 指明被拒绝的操作）。飞行 MCP 服务只列出仍可用的工具（20 个中的 13 个；每次 `tools/list` 都重新读取设置），Copilot 同样去掉这些工具，并提示模型编写程序。在这一等级下，稳定飞行由机载程序完成：智能体按自己的节奏修改程序、调整参数、查看结果，程序负责 50 Hz 的闭环。
+在 `sticks` 等级下，技能 `takeoff`、`hold`、`move`、`yaw`、`goto`、`rtl`、`velocity`、`attitude`，包含这些动作的动作序列，以动作序列或轨迹方式再飞，定高、定点与自动类模式，设备级接口中的飞行类命令，以及 4 通道以上的 RC 覆盖，均返回 403 `sticks_only`（`detail.level = "sticks"`，`detail.action` 指明被拒绝的操作）。飞行 MCP 服务只列出仍可用的工具（21 个中的 13 个；每次 `tools/list` 都重新读取设置），Copilot 同样去掉这些工具，并提示模型编写程序。在这一等级下，稳定飞行由机载程序完成：智能体按自己的节奏修改程序、调整参数、查看结果，程序负责 50 Hz 的闭环。
 
 ## 3. 坐标系与单位
 
@@ -129,7 +129,8 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | `POST /vehicles/{id}/arm` | 控制者 | `{arm: true}`（真机：`{arm: true, confirm: "ARM"}`）或 `{arm: false}` |
 | `POST /vehicles/{id}/mode` | 控制者 | `{name}`，例如 `LOITER`、`ALT_HOLD`、`POSCTL` |
 | `POST /vehicles/{id}/skills/{name}` | 控制者 | `takeoff {alt}`、`land`、`hold {seconds?}`、`move {forward?, right?, up?}`、`yaw {deg}`、`rtl`、`goto {x, y, z, yaw?}` |
-| `POST /vehicles/{id}/plan` | 控制者 | `{steps, name?, confirm?}`：执行动作序列（见下文） |
+| `POST /vehicles/{id}/plan` | 控制者 | `{steps, name?, confirm?, tuning?}`：执行动作序列（见下文） |
+| `PATCH /vehicles/{id}/plan/tuning` | 控制者 | `{climb?, hover?}`：飞行中修改序列的油门参数 |
 | `POST /vehicles/{id}/plan/cancel` | 控制者 | 取消正在执行的序列；空中的飞机原地悬停 |
 | `GET /history/sessions/{sid}/refly` | – | 某次飞行记录可用于再飞的来源：`plan`、`path`、`sticks` 与 `recommended` |
 | `POST /vehicles/{id}/refly` | 控制者 | `{session_id, mode?, speed?, confirm?}`：按记录再飞一次（见下文） |
@@ -177,7 +178,9 @@ POST /api/v1/vehicles/sim-1/plan
 
 可用动作：`takeoff {alt}`（缺省 1 m）、`hover {seconds}` / `hold {seconds}`（缺省 3 s）、`move {forward, right, up}`、`yaw {deg}`、`land`、`goto {x, y, z, yaw?}`、`rtl`，以及 `sticks`、`attitude`、`velocity`（参数同上表）。序列开始前会校验每一步（`invalid_request` 指出出错的步骤与字段；缺少能力的步骤返回 `capability_missing`）。不以 `takeoff` 开头的序列要求飞机已在空中（`not_airborne`）。真机从地面开始的序列需要 `confirm: "ARM"`。
 
-飞机的 `plan` 字段报告 `{id, name, state, index, count, steps, results, detail}`，`state` 为 `running`、`done`、`failed` 或 `cancelled`；事件 `plan_started`、`plan_step`、`plan_finished`、`plan_failed`、`plan_cancelled` 标记进度。任一步失败、新的技能、控制者发送杆量、操作员拨杆或接管、急停，都会结束序列。`POST /plan/cancel` 主动结束序列（没有序列时返回 `no_plan`），空中的飞机原地悬停。
+飞机的 `plan` 字段报告 `{id, name, state, index, count, steps, results, detail, tuning}`，`state` 为 `running`、`done`、`failed` 或 `cancelled`；事件 `plan_started`、`plan_step`、`plan_finished`、`plan_failed`、`plan_cancelled` 标记进度，`plan_tuned` 标记油门参数的修改。任一步失败、新的技能、控制者发送杆量、操作员拨杆或接管、急停，都会结束序列。`POST /plan/cancel` 主动结束序列（没有序列时返回 `no_plan`），空中的飞机原地悬停。
+
+**油门参数（0.5.2）。** 没有定位估计的飞机在定高模式下用油门杆执行 `takeoff`、`hover`、`move`、`yaw` 以及 PX4 的 `land`。`tuning: {climb, hover}` 设置这些杆量：`climb`（0.55–1，缺省 0.72）用于离地与爬升，`hover`（0.35–0.65，缺省 0.5）用于保持高度；接近、下降与落地缓冲的杆量随 `hover` 平移，`climb` 须比 `hover` 至少高 0.05。飞机飞不起来时调高 `climb`，悬停时下沉则调高 `hover`。`PATCH /vehicles/{id}/plan/tuning` 可在序列飞行中修改任一值，最后一步或取消后留下的悬停期间同样有效；正在执行的步骤立即采用（没有序列时返回 `no_plan`）。有定位估计时起飞与悬停由飞控完成，不应用油门参数。
 
 `sdk/python/examples/bench_routine.py` 执行上面的序列：`python3 sdk/python/examples/bench_routine.py --vehicle sim-1`；真机加 `--arm-real`。
 
@@ -315,13 +318,13 @@ POST /api/v1/vehicles/sim-1/plan
 | `DELETE /programs/{pid}` | 会话或操作员 | 删除已保存的程序 |
 | `POST /programs/{pid}/validate` | 会话或操作员 | `{source?}`：只做语言校验，返回 `{ok, errors: [{line, col, code, message_en, message_zh}], params, param_ranges}` |
 | `POST /programs/{pid}/test` | 会话或操作员 | `{rev?, source?, tests?, seed?}`：运行单元测试，返回 `{results, passed, total}` |
-| `POST /vehicles/{id}/program` | 控制者或操作员 | `{program, rev?, params?, mode: pilot \| copilot, sensors?, arena?, seed?, airframe?, team?}`：部署；`team`（1–16 字符）为该机在所有接触表中的队伍，程序声明了 `team` 参数时一并填入；程序以 `PROGRAM · <名称>` 的身份持有摇杆 |
+| `POST /vehicles/{id}/program` | 控制者或操作员 | `{program, rev?, params?, mode: pilot \| copilot, sensors?, arena?, seed?, airframe?, team?, arm?, confirm?}`：部署；`arm: true` 在程序就位后切换到 STABILIZE（PX4 为 STABILIZED）并解锁，程序立即开始飞行（真机须 `confirm: "ARM"`，在任何改动之前检查），应答中的 `arm {ok, code?, reason?}` 说明飞控是否已解锁；被拒绝时程序仍然就位，在地面等待。由部署解锁的飞机在地面停止程序时自动上锁；`team`（1–16 字符）为该机在所有接触表中的队伍，程序声明了 `team` 参数时一并填入；程序以 `PROGRAM · <名称>` 的身份持有摇杆 |
 | `POST /vehicles/{id}/program/stop` · `.../resume` | 控制者或操作员 | 停止；恢复已暂停的程序 |
 | `PATCH /vehicles/{id}/program/params` | 控制者或操作员 | `{name: value}`：实时调参，类型与范围取自 `PARAMS` 与 `PARAM_RANGES` |
 | `GET /vehicles/{id}/program/log?after=&limit=` | – | 日志环（500 行）：`{lines: [{seq, t, level, text}], last_seq}` |
 | `POST /vehicles/{id}/program/allow` | 操作员 | `{allow, confirm: "PROGRAM"}`：允许真机运行程序（链路断开后重置） |
 
-快照携带 `vehicle.program`（`{id, name, rev, state, status: running | paused | faulted | stopped, fps, faults, last_error, mode, ...}`）与 `programs_allowed`。始终成立的规则：人附身会暂停 `pilot` 模式的程序，释放后不会自动恢复；急停、链路丢失与坠毁会停止程序；认领结束、会话自己推杆以及任何技能或动作序列都会取代程序；杆量 0.8 s 超时规则不变。真机只有在操作员打开 **允许这架飞机运行程序** 且起飞前检查通过时才接受程序，其 `fire` 输出被忽略。
+快照携带 `vehicle.program`（`{id, name, rev, state, status: running | paused | faulted | stopped, fps, faults, last_error, mode, ...}`）与 `programs_allowed`。`ctx.disarm()` 请求在本帧后上锁，仅当着陆状态表明飞机在地面时执行（否则拒绝并记录一行日志）。程序飞行中部署新版本会在空中无缝接管。始终成立的规则：人附身会暂停 `pilot` 模式的程序，释放后不会自动恢复；急停、链路丢失与坠毁会停止程序；认领结束、会话自己推杆以及任何技能或动作序列都会取代程序；杆量 0.8 s 超时规则不变。真机只有在操作员打开 **允许这架飞机运行程序** 且起飞前检查通过时才接受程序，其 `fire` 输出被忽略。
 
 ### 题目与对抗
 
@@ -442,6 +445,7 @@ SDK：`dogfight_start(...)`、`dogfight_stop()`、`dogfight_status()`、`leaderb
 | `agent_session_expired` | 租约到期 |
 | `skill_started` / `skill_finished` / `skill_failed` | 技能进度，含 `data.skill_id` |
 | `plan_started` / `plan_step` / `plan_finished` / `plan_failed` / `plan_cancelled` | 动作序列进度，含 `data.plan_id` |
+| `plan_tuned` | 动作序列的油门参数已修改，含 `data.tuning` |
 | `armed` / `disarmed` / `mode_changed` | 飞控状态 |
 | `link_delayed` / `link_lost` / `link_restored` | 链路质量；进入 `lost` 时 Relay 停止杆量与技能 |
 | `battery_warn` / `battery_critical` / `crashed` | 风险 |
@@ -484,7 +488,7 @@ Relay 提供三套基于 stdio 的 Model Context Protocol 服务（JSON-RPC 2.0�
 
 | 服务 | 文件 | 工具 | 面向 |
 |---|---|---|---|
-| `anet-relay` | `mcp/anet_relay_mcp.py` | 20 个 `relay_*`（`sticks` 等级下 13 个） | 飞行：机群、认领、解锁、模式、技能、动作序列、短时杆量、再飞、穿环航线、急停 |
+| `anet-relay` | `mcp/anet_relay_mcp.py` | 21 个 `relay_*`（`sticks` 等级下 13 个） | 飞行：机群、认领、解锁、模式、技能、动作序列及其油门参数、短时杆量、再飞、穿环航线、急停 |
 | `anet-relay-device` | `mcp/anet_relay_device_mcp.py` | 36 个 `device_*` | 设备级：设备总览、MAVLink 消息、参数读写、原始指令、单电机测试、执行器、遥控覆盖、消息频率、重启、校准、home、姿态与速度控制、飞行终止、标定流程与报告 |
 | `anet-relay-app` | `mcp/anet_relay_app_mcp.py` | 42 个 `app_*`、19 个程序工具与 4 个狗斗工具 | 应用控制：应用与窗口状态、手柄、语言、工作区、选择飞机、检查器、对话框、截图、扫描网络、连接与移除飞机、模拟机、设置、告警、记录与导出、再飞来源、附身、Copilot 窗口、全部急停；机载程序：`program_guide`、`program_*`、`challenge_list`、`challenge_submit`、`job_status`、`duel_run`、`ladder`、`airframe_set`；狗斗：`dogfight_start`、`dogfight_stop`、`dogfight_status`、`leaderboard` |
 
@@ -587,7 +591,9 @@ Relay 不在 8765 端口运行时，追加 `"--base", "http://127.0.0.1:<port>"`
 - **浮动窗口：** Copilot 是一个独立的浮动窗口，始终位于其他应用之上，但不是模态窗口：显示期间仍可点击 Relay 主窗口和其他应用。拖动标题栏可放到屏幕任意位置（包括主窗口左侧），拖动边缘调整大小；位置与大小会被记住。顶栏的 Copilot 按钮、Ctrl/Cmd + J 或窗口自身的隐藏按钮可显示或隐藏它。每条消息会附带主窗口中当前选中的飞机。
 - **配置：** 设置 → Copilot：接口类型（OpenAI 兼容端点选 `openai-completions`，另有 `anthropic-messages`、`openai-responses`）、Base URL、模型 ID、API Key、工具范围与窗口不透明度（60%–100%）。**测试连接** 会发送一次简短请求。Key 保存在应用数据目录（`copilot-secrets.json`，以每次安装随机生成、存于 `copilot-secrets.key` 的密钥做 AES-256-GCM 加密，两个文件均仅当前系统用户可读），不会回传到界面；端点只会收到对话内容和工具结果。开启 **使用系统钥匙串保存密钥**（缺省关闭）后改存于 macOS 钥匙串、Windows 凭据加密或 Linux Secret Service，只有此时 Relay 才调用 Electron `safeStorage`。Relay 不读取、也不需要系统登录密码：钥匙串对话框来自操作系统，只有在选择用钥匙串保存密钥时才会出现。0.3 及更早版本保存的密钥留在钥匙串中、不会被自动解密，直到在 Copilot 窗口中重新输入或选择 **继续使用钥匙串**。
 - **思考与输出上限：** **思考**（`auto` 为缺省，交给端点决定；`off`、`low`、`high` 为 DeepSeek V4 等推理模型设定）与 **最大输出 tokens**（1024–131072，缺省 16384，单次模型调用、含思考）。推理模型默认开启思考，思考与回答共用输出上限：输出耗尽的调用以 `length` 结束，对话中会给出说明，而不是没有任何反应。
+- **复制与排版（0.5.2）：** 回复按 Markdown 渲染：标题、嵌套列表与任务列表、带列对齐的表格（过宽时可横向滚动）、代码块、引用与链接（在系统浏览器中打开）。对话内容可以选择复制；所有 Relay 窗口的右键菜单提供复制、粘贴与全选；每条回复有复制按钮（复制 Markdown 原文），表格复制为制表符分隔的文本，代码块复制其代码。
 - **运行轨迹：** 每条消息下方有一架小小的红色像素飞机，Copilot 工作时它在飞，旁边是阶段（等待模型、思考中及已思考字数、撰写回复、准备调用工具及参数字数、工具执行中、等待批准）与计时；该条目滚出视野时，输入框上方显示同样的条目。点击打开本次运行的轨迹：每次模型调用的耗时、输入 / 输出 / 思考 tokens 与结束原因，可展开查看完整思考、回复与请求的工具调用；每个工具的参数与完整结果。
 - **工具范围：** `flight`（飞行：状态、技能、动作序列、短时杆量、再飞、急停）、`flight+device`（另加设备级工具）、`all`（缺省，另加应用控制工具：语言、工作区、选择飞机、扫描网络、模拟机、设置、手柄、记录、窗口与截图）。工具与第 5 节的接口一一对应。
 - **安全：** 对真机的每个运动指令与设备级写入（起飞、平移、转向、悬停、降落、动作序列、再飞、电机测试、执行器、重启、校准、终止等），聊天中都会出现审批卡片，操作员批准前不会发送任何指令（120 秒未处理视为拒绝）；需要审批时浮动窗口会自动显示并提示。确认词由审批代替，Copilot 不会自行填写。接管和急停对 Copilot 与其他智能体同样有效。
-- **程序与控制等级：** Copilot 在每条消息前读取 `agent_flight_level`。在 `sticks`（缺省）等级下，它没有起飞、平移、转向、悬停、动作序列与再飞工具，系统提示会说明高层飞行不可用、稳定飞行需要编写程序；在 `full` 等级下这些工具恢复。在任何工具范围内它都具备程序工具（`program_list`、`program_get`、`program_create`、`program_update`、`program_validate`、`program_test`、`program_deploy`、`program_stop`、`program_resume`、`program_params`、`program_status`、`program_log`、`challenge_list`、`challenge_submit`、`job_status`、`duel_run`、`ladder`、`airframe_set`）以及 `relay_arm`、`relay_disarm`、`relay_mode`，系统提示末尾附有 [`programs-guide.md`](programs-guide.md)。编写与修改程序无需审批；在真机上部署或恢复程序、解锁与切换模式，与其他运动指令一样需要操作员批准。
+- **全部允许（0.5.2）：** 审批卡片上的**全部允许**按钮（或 设置 → Copilot → **全部允许**）批准当前命令，之后真机上的命令都不再询问。每条命令仍在对话中记录为“已自动批准”；开启期间 Copilot 标题栏始终显示红框的**全部允许**标记，点击即可关闭。Relay 自身的保护不变：预检、操作员的**允许在这架飞机上运行程序**开关、附身与急停。
+- **程序与控制等级：** Copilot 在每条消息前读取 `agent_flight_level`。在 `sticks`（缺省）等级下，它没有起飞、平移、转向、悬停、动作序列与再飞工具，系统提示会说明高层飞行不可用、稳定飞行需要编写程序；在 `full` 等级下这些工具恢复。在任何工具范围内它都具备程序工具（`program_list`、`program_get`、`program_create`、`program_update`、`program_validate`、`program_test`、`program_deploy`、`program_stop`、`program_resume`、`program_params`、`program_status`、`program_log`、`challenge_list`、`challenge_submit`、`job_status`、`duel_run`、`ladder`、`airframe_set`）以及 `relay_arm`、`relay_disarm`、`relay_mode`，系统提示末尾附有 [`programs-guide.md`](programs-guide.md)。编写与修改程序无需审批；在真机上部署或恢复程序、解锁与切换模式，与其他运动指令一样需要操作员批准。`program_deploy {arm: true}` 随部署一并解锁；在 `full` 等级下，动作序列工具接受 `tuning`，`relay_plan_tune` 可在飞行中调整序列油门，Copilot 因此能完成编写、测试、试飞与调参的完整流程。

@@ -147,6 +147,9 @@ export function CopilotSettings({ Row }: { Row: RowComponent }) {
           ))}
         </NativeSelect>
       </Row>
+      <Row label={t('cps.autoApprove')} hint={t('cps.autoApproveHint')} wide>
+        <Switch checked={cfg?.autoApprove === true} onCheckedChange={(c) => void save({ autoApprove: Boolean(c) })} aria-label={t('cps.autoApprove')} data-copilot-auto-approve="" />
+      </Row>
       <Row label={t('cps.opacity')} hint={t('cps.opacityHint')}>
         <Slider
           min={OPACITY_RANGE[0]}

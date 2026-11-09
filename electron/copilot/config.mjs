@@ -20,7 +20,7 @@ export const KEY_STORAGES = ["file", "keychain"];
 export const OPACITY_RANGE = [60, 100];
 export const THINKING = ["auto", "off", "low", "high"]; // 08 §2
 export const MAX_TOKENS_RANGE = [1024, 131072];
-export const DEFAULTS = { api: "openai-completions", baseUrl: "", model: "", toolScope: "all", opacity: 100, thinking: "auto", maxTokens: 16384 };
+export const DEFAULTS = { api: "openai-completions", baseUrl: "", model: "", toolScope: "all", opacity: 100, thinking: "auto", maxTokens: 16384, autoApprove: false };
 
 export function clampMaxTokens(v) {
   const n = Number(v);
@@ -232,6 +232,7 @@ export function createCopilotConfig({ dir, keychain, platform = process.platform
       opacity: clampOpacity(cfg.opacity),
       thinking: THINKING.includes(cfg.thinking) ? cfg.thinking : DEFAULTS.thinking,
       maxTokens: clampMaxTokens(cfg.maxTokens),
+      autoApprove: cfg.autoApprove === true,
     };
   };
 
@@ -245,7 +246,9 @@ export function createCopilotConfig({ dir, keychain, platform = process.platform
     const opacity = input?.opacity === undefined ? clampOpacity(current.opacity) : clampOpacity(input.opacity);
     const thinking = THINKING.includes(input?.thinking) ? input.thinking : THINKING.includes(current.thinking) ? current.thinking : DEFAULTS.thinking;
     const maxTokens = input?.maxTokens === undefined ? clampMaxTokens(current.maxTokens) : clampMaxTokens(input.maxTokens);
-    return { api, baseUrl, model, toolScope, opacity, thinking, maxTokens };
+    // 09 §4: "Allow all" approves every real-aircraft command without asking (the operator's explicit choice)
+    const autoApprove = typeof input?.autoApprove === "boolean" ? input.autoApprove : current.autoApprove === true;
+    return { api, baseUrl, model, toolScope, opacity, thinking, maxTokens, autoApprove };
   };
 
   /**

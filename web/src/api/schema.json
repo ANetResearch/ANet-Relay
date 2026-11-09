@@ -1780,6 +1780,7 @@
             "plan_finished",
             "plan_failed",
             "plan_cancelled",
+            "plan_tuned",
             "device_command",
             "motor_test",
             "motor_test_stopped",
@@ -2815,6 +2816,13 @@
               "type": "null"
             }
           ]
+        },
+        "tuning": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "throttle tuning of the stick steps: climb, hover (PlanTuning)",
+          "type": "object"
         }
       },
       "required": [
@@ -2825,7 +2833,8 @@
         "count",
         "steps",
         "results",
-        "detail"
+        "detail",
+        "tuning"
       ],
       "title": "PlanView",
       "type": "object"

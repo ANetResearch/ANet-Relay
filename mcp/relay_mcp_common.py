@@ -42,7 +42,7 @@ __all__ = [
     "schema_tool",
 ]
 
-SERVER_VERSION = "0.5.1"
+SERVER_VERSION = "0.5.2"
 PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 SESSION_ERRORS = ("session_expired", "session_required", "auth_required")
 

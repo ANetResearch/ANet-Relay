@@ -1655,12 +1655,14 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps, WorldOps):
         confirm: str | None = None,
         wait: bool = True,
         force: bool = False,
+        authorised: bool = False,
     ) -> dict[str, Any]:
+        """``authorised``: the caller already checked the actor (a program deployment that arms, 09 §2)."""
         t0 = self.clock()
 
         def start() -> None:
             v = self._vehicle(vid)
-            if on or actor.kind == "session":
+            if (on or actor.kind == "session") and not authorised:
                 self._check_control(v, actor)
             self._require_link(v)
             if on and force:
@@ -1707,13 +1709,16 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps, WorldOps):
                     "preflight_blocked", items=", ".join(summary["blocking"]), blocking=summary["blocking"]
                 )
 
-    def set_mode(self, vid: str, actor: Actor, name: str, wait: bool = True) -> dict[str, Any]:
+    def set_mode(
+        self, vid: str, actor: Actor, name: str, wait: bool = True, authorised: bool = False
+    ) -> dict[str, Any]:
         t0 = self.clock()
         name = str(name or "").upper()
 
         def start() -> None:
             v = self._vehicle(vid)
-            self._check_control(v, actor)
+            if not authorised:
+                self._check_control(v, actor)
             self._require_link(v)
             if name not in modes.available_modes(v.autopilot):
                 raise err("unknown_mode", mode=name, modes=modes.available_modes(v.autopilot))
@@ -1874,6 +1879,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps, WorldOps):
         params: dict[str, Any],
         target_local: tuple[float, float, float] | None,
         safety: bool = False,
+        tuning: dict[str, float] | None = None,
     ) -> skills.Skill:
         now = self.clock()
         self.programs.on_superseded(v)  # WP-1: a skill, plan or re-fly replaces the program
@@ -1884,6 +1890,10 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps, WorldOps):
         skill = skills.make(name, {k: x for k, x in params.items() if k != "confirm"}, now, target_local)
         self._skill_seq += 1
         skill.id = self._skill_seq
+        if tuning is not None and not v.has_capability("position"):
+            # the plan's dict itself, so tune_plan reaches the flying step; with a position estimate the
+            # autopilot flies take-off and holds, and a moved stick centre would only make POSCTL drift
+            skill.tuning = tuning
         v.skill = skill
         data = {"skill": name, "skill_id": skill.id, "params": _public(skill.params)}
         if safety:
@@ -1901,8 +1911,10 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps, WorldOps):
         name: str | None = None,
         confirm: str | None = None,
         max_steps: int = plans.MAX_STEPS,
+        tuning: Any = None,
     ) -> dict[str, Any]:
         normalised = plans.normalise_steps(steps, max_steps)
+        tuned = plans.normalise_tuning(tuning)
         flight_level.check_plan(self.settings, actor, normalised)  # WP-1 (06 §5)
 
         def run() -> dict[str, Any]:
@@ -1921,7 +1933,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps, WorldOps):
             prepared, target_local = self._prepare_skill(v, first, params)
             self._cancel_plan(v, "superseded by a new plan", "被新的动作序列取代")
             self._plan_seq += 1
-            plan = plans.Plan(self._plan_seq, normalised, actor, self.clock(), name=name)
+            plan = plans.Plan(self._plan_seq, normalised, actor, self.clock(), name=name, tuning=tuned)
             v.plan = plan
             self.events.emit(
                 "plan_started",
@@ -1929,8 +1941,32 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps, WorldOps):
                 data={"plan_id": plan.id, "steps": normalised, "name": name},
                 labels={"vehicle": v.label, "count": str(len(normalised))},
             )
-            skill = self._start_skill(v, first, prepared, target_local)
+            skill = self._start_skill(v, first, prepared, target_local, tuning=plan.tuning)
             plan.skill_id = skill.id
+            return {"id": vid, "plan": plan.view()}
+
+        return self.call(run)
+
+    def tune_plan(self, vid: str, actor: Actor, patch: Any) -> dict[str, Any]:
+        """Change the throttle tuning of the aircraft's plan while it flies (and while its last step holds
+        or the hold a cancel left behind flies)."""
+        update = plans.normalise_tuning(patch)
+
+        def run() -> dict[str, Any]:
+            v = self._vehicle(vid)
+            self._check_control(v, actor)
+            plan = v.plan
+            if plan is None:
+                raise err("no_plan")
+            merged = {**plan.tuning, **update}
+            plans.normalise_tuning(merged)  # climb stays above hover after the change
+            plan.tuning.update(update)
+            self.events.emit(
+                "plan_tuned",
+                v.id,
+                data={"plan_id": plan.id, "tuning": dict(plan.tuning)},
+                labels={"vehicle": v.label},
+            )
             return {"id": vid, "plan": plan.view()}
 
         return self.call(run)
@@ -1948,7 +1984,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps, WorldOps):
             held = not flight_level.limited(self.settings, actor)
             if held and v.armed and v.airborne() and v.capabilities.althold:
                 prepared, _ = self._prepare_skill(v, "hold", {})
-                self._start_skill(v, "hold", prepared, None)
+                self._start_skill(v, "hold", prepared, None, tuning=plan.tuning)
             return {"id": vid, "plan": plan.view()}
 
         return self.call(run)
@@ -2004,7 +2040,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, ProcedureOps, WorldOps):
         except RelayError as exc:
             self._fail_plan(v, exc.message_en, exc.message_zh)
             return
-        plan.skill_id = self._start_skill(v, name, prepared, target_local).id
+        plan.skill_id = self._start_skill(v, name, prepared, target_local, tuning=plan.tuning).id
 
     def _fail_plan(self, v: Vehicle, en: str, zh: str) -> None:
         plan = v.plan

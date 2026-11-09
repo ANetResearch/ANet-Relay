@@ -435,3 +435,93 @@ def test_step_time_is_bounded(svc, stepper):
     run = svc.programs.runs[vid]
     assert run.status == "running" and "limit" in run.last_error and run.overruns >= 1
     assert svc.programs.hosts[vid].alive and math.isfinite(run.faults)
+
+
+def test_deploy_with_arm_flies_takeoff_hover_land_and_disarms(svc, stepper):
+    """The Lab's Arm and start: the program arms in STABILIZE, climbs, holds, lands and disarms itself."""
+    (vid,), session, agent = boot(svc, stepper)
+    v = svc.vehicles[vid]
+    assert not v.armed
+    params = {"target_alt": 1.5, "hold_s": 3.0}
+    out = svc.programs.deploy(vid, agent, {"program": "takeoff_hover_land", "arm": True, "params": params})
+    assert out["arm"]["ok"] is True
+    stepper.run(0.3, renew=[session])
+    assert v.armed and v.mode == "STABILIZE" and svc.programs.runs[vid].armed_here
+    assert stepper.until(lambda: svc.programs.runs[vid].state == "hold", 25, [session])
+    assert abs(z(svc, vid) - 1.5) < 0.35
+    assert stepper.until(lambda: svc.programs.runs[vid].state == "landed", 40, [session])
+    assert stepper.until(lambda: not v.armed, 3, [session])
+    assert not v.state["crashed"]
+    lines = [entry["text"] for entry in svc.programs.runs[vid].logs]
+    assert "armed for this deployment" in lines and "disarmed on the ground" in lines
+
+
+def test_deploy_with_arm_checks_first_and_stop_disarms_on_the_ground(svc, stepper, monkeypatch):
+    (vid,), session, agent = boot(svc, stepper)
+    v = svc.vehicles[vid]
+    pid = custom(svc, "def step(obs, ctx):\n    return Sticks(throttle=0.0)\n")
+    v.kind = "real"
+    svc.programs.allow(vid, True, "PROGRAM")
+    monkeypatch.setattr(servicemod.preflight, "summary", lambda items: {"ok": True, "blocking": []})
+    monkeypatch.setattr(svc, "_preflight_items", lambda vv: [])
+    with pytest.raises(RelayError) as exc:  # a real aircraft needs the word, before anything changes
+        svc.programs.deploy(vid, agent, {"program": pid, "arm": True})
+    assert exc.value.code == "confirm_required" and vid not in svc.programs.runs
+    v.kind = "sim"
+    svc.programs.deploy(vid, agent, {"program": pid, "arm": True})
+    stepper.run(0.3, renew=[session])
+    assert v.armed
+    svc.programs.stop(vid, agent)  # on the ground: the deployment that armed it disarms it
+    stepper.run(0.3, renew=[session])
+    assert not v.armed
+
+
+def test_disarm_is_refused_in_the_air(svc, stepper):
+    (vid,), session, agent = boot(svc, stepper)
+    v = svc.vehicles[vid]
+    arm(svc, stepper, vid, agent, session)
+    source = textwrap.dedent(
+        """
+        def step(obs, ctx):
+            if obs.airborne:
+                ctx.disarm()
+            return Sticks(throttle=0.75 if ctx.t < 1.5 else 0.55)
+        """
+    )
+    svc.programs.deploy_source(vid, agent, {"id": "d", "name": "disarm"}, 1, source, {})
+    assert stepper.until(lambda: v.landed == "air", 5, [session])
+    stepper.run(0.5, renew=[session])
+    assert v.armed
+    refused = [e["text"] for e in svc.programs.runs[vid].logs if e["text"].startswith("disarm refused")]
+    assert len(refused) == 1
+
+
+def test_a_new_revision_takes_over_in_the_air(svc, stepper):
+    """Re-deploying while flying swaps the program without dropping the aircraft (the Lab's live edit)."""
+    (vid,), session, agent = boot(svc, stepper)
+    v = svc.vehicles[vid]
+    first = {"program": "takeoff_hover_land", "arm": True, "params": {"hold_s": 60.0}}
+    svc.programs.deploy(vid, agent, first)
+    assert stepper.until(lambda: svc.programs.runs[vid].state == "hold", 25, [session])
+    second = {"program": "takeoff_hover_land", "params": {"hold_s": 60.0, "target_alt": 1.0}}
+    svc.programs.deploy(vid, agent, second)
+    run = svc.programs.runs[vid]
+    assert run.armed_here and run.status == "running"
+    heights = []
+    for _ in range(60):
+        stepper.run(0.1, renew=[session])
+        heights.append(z(svc, vid))
+    assert v.armed and not v.state["crashed"] and min(heights) > 0.6
+    assert stepper.until(lambda: abs(z(svc, vid) - 1.0) < 0.2, 15, [session])
+
+
+def test_the_operator_arms_with_a_deployment_without_possessing(svc, stepper):
+    """The Lab deploys as the operator: the deployment arms the aircraft without a possession first."""
+    (vid,) = svc.add_sims(1, hover_assist=False)
+    stepper.run(2.5)
+    v = svc.vehicles[vid]
+    pid = custom(svc, "def step(obs, ctx):\n    return Sticks(throttle=0.0)\n")
+    out = svc.programs.deploy(vid, OP, {"program": pid, "arm": True})
+    assert out["arm"]["ok"] is True, out["arm"]
+    stepper.run(0.3)
+    assert v.armed and v.auth.possession is None and svc.programs.runs[vid].status == "running"

@@ -198,6 +198,9 @@ class PlanView(_Model):
     steps: list[dict[str, Any]]
     results: list[str | None]
     detail: str | None
+    tuning: dict[str, float] = Field(
+        default_factory=dict, description="throttle tuning of the stick steps: climb, hover (PlanTuning)"
+    )
 
 
 class Signs(_Model):
@@ -458,6 +461,7 @@ EventKind = Literal[
     "plan_finished",
     "plan_failed",
     "plan_cancelled",
+    "plan_tuned",
     "device_command",
     "motor_test",
     "motor_test_stopped",
@@ -764,10 +768,22 @@ class SkillBody(_Body):
     confirm: str | None = None
 
 
+class PlanTuning(_Body):
+    """Throttle sticks of the stick skills (aircraft without a position estimate, in altitude hold)."""
+
+    climb: float | None = Field(
+        default=None, ge=0.55, le=1.0, description="throttle stick for lift-off and climb (default 0.72)"
+    )
+    hover: float | None = Field(
+        default=None, ge=0.35, le=0.65, description="throttle stick that holds the height (default 0.5)"
+    )
+
+
 class PlanBody(_Body):
     steps: list[PlanStep] = Field(min_length=1, max_length=24)
     name: str | None = Field(default=None, max_length=80)
     confirm: str | None = Field(default=None, description='"ARM" when the plan arms a real aircraft')
+    tuning: PlanTuning | None = Field(default=None, description="throttle tuning, adjustable while flying")
 
 
 class ReflyBody(_Body):

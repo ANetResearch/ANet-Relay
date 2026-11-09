@@ -167,7 +167,7 @@ def test_prefixes_and_counts(stub):
         device_mcp: [t.name for t in device_mcp.build_tools()],
         app_mcp: [t.name for t in app_mcp.build_tools()],
     }
-    assert len(names[flight_mcp]) == 20 and {"relay_sticks_for", "relay_refly"} <= set(names[flight_mcp])
+    assert len(names[flight_mcp]) == 21 and {"relay_sticks_for", "relay_refly"} <= set(names[flight_mcp])
     assert all(n.startswith("relay_") for n in names[flight_mcp])
     assert all(n.startswith("device_") for n in names[device_mcp])
     # WP-4b: the program tools keep the names of the 06 §6 table

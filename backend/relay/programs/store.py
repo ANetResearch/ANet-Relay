@@ -38,6 +38,7 @@ EXAMPLES_DIR = Path(__file__).resolve().parent / "examples"
 BUILTIN_IDS = (
     "hover_trim",
     "liftoff",
+    "takeoff_hover_land",
     "patrol",
     "hunter_easy",
     "hunter_medium",

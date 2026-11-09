@@ -54,6 +54,8 @@ export interface CopilotConfig {
   thinking: CopilotThinking
   /** 08 §2: output tokens per model call, thinking included, 1024..131072 */
   maxTokens: number
+  /** 09 §4: "Allow all": real-aircraft commands run without asking; each one is still recorded in the chat */
+  autoApprove: boolean
 }
 
 export type CopilotThinking = 'auto' | 'off' | 'low' | 'high'
@@ -62,7 +64,7 @@ export type CopilotToolScope = 'flight' | 'flight+device' | 'all'
 
 export type CopilotKeyStorage = 'file' | 'keychain'
 
-export type CopilotConfigInput = Partial<Pick<CopilotConfig, 'api' | 'baseUrl' | 'model' | 'toolScope' | 'opacity' | 'keyStorage' | 'thinking' | 'maxTokens'>> & { apiKey?: string | null }
+export type CopilotConfigInput = Partial<Pick<CopilotConfig, 'api' | 'baseUrl' | 'model' | 'toolScope' | 'opacity' | 'keyStorage' | 'thinking' | 'maxTokens' | 'autoApprove'>> & { apiKey?: string | null }
 
 /** Token usage of a model call or a whole run (08 §3); reasoning is null when the endpoint does not report it. */
 export interface CopilotUsage {
@@ -101,7 +103,7 @@ export type CopilotEvent =
   | { type: 'tool_update'; id: string; text: string }
   | { type: 'tool_end'; id: string; tool: string; error: boolean; text: string; full?: string; ms?: number | null }
   | { type: 'run_end'; run: number; at: number; ms: number; turns: number; tools: number; usage: CopilotUsage; outcome: CopilotRunOutcome }
-  | { type: 'approval'; id: string; toolCallId: string; tool: string; vehicle: string; label: string; request: Record<string, unknown> }
+  | { type: 'approval'; id: string; toolCallId: string; tool: string; vehicle: string; label: string; request: Record<string, unknown>; auto?: boolean }
   | { type: 'approval_closed'; id: string; approved: boolean; reason?: string }
   | { type: 'error'; error: string }
   | { type: 'config' }
