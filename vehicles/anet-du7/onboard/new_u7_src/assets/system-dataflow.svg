@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1120" viewBox="0 0 1800 1120" role="img" aria-labelledby="title desc">
+  <title id="title">汤圆 U7 系统数据流</title>
+  <desc id="desc">MID360S data flows through Livox Driver 2 and FAST-LIO2. Odometry reaches PX4 through MAVROS, while filtered point clouds and configured odometry feed EGO-Planner. The planner trajectory is sent through the flight FSM to PX4.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M1 1L7 4L1 7Z" fill="#737a7c"/>
+    </marker>
+    <marker id="arrow-red" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M1 1L7 4L1 7Z" fill="#e82127"/>
+    </marker>
+    <style>
+      text { font-family: "Arial Rounded MT Bold", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", "Segoe UI", sans-serif; }
+      .title { fill: #171a1b; font-size: 60px; font-weight: 800; }
+      .subtitle { fill: #555e61; font-size: 30px; font-weight: 650; }
+      .section { fill: #202729; font-size: 27px; font-weight: 800; }
+      .index { fill: #e82127; font-size: 22px; font-weight: 800; }
+      .card { fill: #ffffff; stroke: #d5d9d8; stroke-width: 2; }
+      .accent { fill: #e82127; }
+      .heading { fill: #171a1b; font-size: 30px; font-weight: 800; }
+      .body { fill: #4d5659; font-size: 24px; font-weight: 650; }
+      .topic { fill: #30383a; font-size: 22px; font-family: Consolas, "Cascadia Code", monospace; font-weight: 600; }
+      .note { fill: #535d60; font-size: 22px; font-weight: 650; }
+      .line { fill: none; stroke: #737a7c; stroke-width: 2.5; marker-end: url(#arrow); }
+      .flow { fill: none; stroke: #e82127; stroke-width: 2.8; marker-end: url(#arrow-red); }
+      .return { fill: none; stroke: #737a7c; stroke-width: 2; stroke-dasharray: 9 8; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1120" fill="#ffffff"/>
+  <text x="70" y="91" class="title">汤圆 U7</text>
+  <text x="72" y="139" class="subtitle">室内无人机自主飞行系统　/　ROS 2 · PX4 · FAST-LIO2 · EGO-Planner</text>
+  <path d="M72 177H1728" stroke="#e4e7e6" stroke-width="2"/>
+
+  <text x="72" y="232" class="index">01</text>
+  <text x="112" y="232" class="section">感知与定位</text>
+
+  <rect x="55" y="270" width="260" height="230" rx="10" class="card"/>
+  <rect x="55" y="270" width="7" height="230" rx="3" class="accent"/>
+  <text x="82" y="335" class="heading">Livox MID360S</text>
+  <text x="82" y="379" class="body">激光雷达 + IMU</text>
+  <text x="82" y="430" class="topic">点云输入</text>
+  <text x="82" y="464" class="topic">IMU 输入</text>
+
+  <rect x="400" y="270" width="260" height="230" rx="10" class="card"/>
+  <rect x="400" y="270" width="7" height="230" rx="3" class="accent"/>
+  <text x="427" y="335" class="heading">Livox Driver 2</text>
+  <text x="427" y="379" class="body">设备连接 / 数据发布</text>
+  <text x="427" y="430" class="topic">/livox/lidar</text>
+  <text x="427" y="464" class="topic">/livox/imu</text>
+
+  <rect x="745" y="270" width="260" height="230" rx="10" class="card"/>
+  <rect x="745" y="270" width="7" height="230" rx="3" class="accent"/>
+  <text x="772" y="335" class="heading">FAST-LIO2</text>
+  <text x="772" y="379" class="body">激光惯性里程计</text>
+  <text x="772" y="430" class="topic">/Odom_high_freq</text>
+  <text x="772" y="464" class="topic">/cloud_registered</text>
+
+  <rect x="1090" y="270" width="260" height="230" rx="10" class="card"/>
+  <rect x="1090" y="270" width="7" height="230" rx="3" fill="#667b91"/>
+  <text x="1117" y="335" class="heading">定位桥接</text>
+  <text x="1117" y="379" class="body">fastlio_locate</text>
+  <text x="1117" y="414" class="topic">/mavros</text>
+  <text x="1117" y="443" class="topic">/vision_pose/</text>
+  <text x="1117" y="472" class="topic">pose</text>
+
+  <rect x="1435" y="270" width="310" height="230" rx="10" class="card"/>
+  <rect x="1435" y="270" width="7" height="230" rx="3" fill="#667b91"/>
+  <text x="1462" y="335" class="heading">MAVROS + PX4</text>
+  <text x="1462" y="379" class="body">状态与位置反馈</text>
+  <text x="1462" y="414" class="topic">/mavros/state</text>
+  <text x="1462" y="443" class="topic">/mavros/local_</text>
+  <text x="1462" y="472" class="topic">position/odom</text>
+
+  <path d="M325 385H388" class="line"/>
+  <path d="M670 385H733" class="line"/>
+  <path d="M1015 385H1078" class="line"/>
+  <path d="M1360 385H1423" class="line"/>
+
+  <text x="72" y="680" class="index">02</text>
+  <text x="112" y="680" class="section">建图与轨迹控制</text>
+
+  <rect x="85" y="730" width="325" height="220" rx="10" class="card"/>
+  <rect x="85" y="730" width="7" height="220" rx="3" fill="#667b91"/>
+  <text x="112" y="795" class="heading">地面点云滤波</text>
+  <text x="112" y="839" class="body">ground_filter</text>
+  <text x="112" y="882" class="topic">/cloud_registered_</text>
+  <text x="112" y="913" class="topic">filter</text>
+
+  <rect x="520" y="730" width="325" height="220" rx="10" class="card"/>
+  <rect x="520" y="730" width="7" height="220" rx="3" fill="#71883e"/>
+  <text x="547" y="795" class="heading">EGO-Planner</text>
+  <text x="547" y="839" class="body">局部建图 / 轨迹规划</text>
+  <text x="547" y="895" class="body">点云 + 配置后的里程计</text>
+
+  <rect x="955" y="730" width="325" height="220" rx="10" class="card"/>
+  <rect x="955" y="730" width="7" height="220" rx="3" fill="#71883e"/>
+  <text x="982" y="795" class="heading">轨迹服务器</text>
+  <text x="982" y="839" class="body">traj_server</text>
+  <text x="982" y="882" class="topic">/drone_0_planning/</text>
+  <text x="982" y="913" class="topic">pos_cmd</text>
+
+  <rect x="1390" y="730" width="325" height="220" rx="10" class="card"/>
+  <rect x="1390" y="730" width="7" height="220" rx="3" fill="#e82127"/>
+  <text x="1417" y="795" class="heading">自主飞行 FSM</text>
+  <text x="1417" y="839" class="body">状态管理 / OFFBOARD</text>
+  <text x="1417" y="882" class="topic">/mavros/setpoint_</text>
+  <text x="1417" y="913" class="topic">raw/local</text>
+
+  <path d="M875 500V565H247V718" class="line"/>
+  <text x="553" y="557" class="note">配准点云</text>
+  <path d="M410 840H508" class="line"/>
+  <path d="M845 840H943" class="line"/>
+  <path d="M1280 840H1378" class="flow"/>
+  <path d="M1680 730V535H1600V500" class="flow"/>
+
+  <path d="M1585 500V632H682V718" class="return"/>
+  <rect x="930" y="606" width="620" height="48" fill="#ffffff"/>
+  <text x="948" y="638" class="note">里程计输入需与 odometry_topic 匹配实际里程计话题</text>
+
+  <path d="M72 1010H1728" stroke="#e4e7e6" stroke-width="2"/>
+  <text x="72" y="1060" class="note">实机启动前，请核对 MID360S 网络、雷达外参、坐标系与 PX4 EKF 配置。</text>
+  <text x="72" y="1095" class="note">FSM 会尝试进入 OFFBOARD、解锁并起飞；首次验证请在仿真或拆桨条件下进行。</text>
+</svg>

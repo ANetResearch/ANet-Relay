@@ -1,0 +1,47 @@
+# FAST-LIO2 配置文件 — Livox MID360
+# 参数从旧版 fast_lio 的 fastlio_livox_params.yaml 迁移
+
+imu_topic: /livox/imu
+lidar_topic: /livox/lidar
+body_frame: livox_frame
+world_frame: odom
+print_time_cost: false
+
+# ── LiDAR 预处理 ──────────────────────────────────
+lidar_filter_num: 3          # 对应旧版 point_filter_num: 3, 每3个点取1个
+lidar_min_range: 0.5         # 对应旧版 blind: 0.5, 盲区
+lidar_max_range: 100.0       # 对应旧版 det_range: 100.0
+scan_resolution: 0.5         # 对应旧版 filter_size_surf: 0.5
+map_resolution: 0.5          # 对应旧版 filter_size_map: 0.5
+
+# ── 局部地图 ─────────────────────────────────────
+cube_len: 1000.0             # 对应旧版 cube_side_length: 1000.0
+det_range: 100.0             # 对应旧版 det_range: 100.0
+move_thresh: 1.5
+
+# ── IMU 噪声参数（FAST-LIO2 使用标准差，旧版用协方差，保留默认值） ──
+na: 0.01                     # 加速度计噪声标准差
+ng: 0.01                     # 陀螺仪噪声标准差
+nba: 0.0001                  # 加速度计偏置噪声
+nbg: 0.0001                  # 陀螺仪偏置噪声
+
+# ── IESKF ────────────────────────────────────────
+imu_init_num: 20
+near_search_num: 5
+ieskf_max_iter: 6            # 对应旧版 max_iteration: 6
+
+# ── 初始化 ───────────────────────────────────────
+gravity_align: true
+
+# ── IMU-LiDAR 外参（从旧版 fastlio_livox_params.yaml 迁移） ──
+# 旧版 extrinsic_R: [0.7071, 0, 0.7071,  0, 1, 0,  -0.7071, 0, 0.7071]
+# 这是绕 Y 轴旋转 45° 的旋转矩阵（LiDAR 倾斜 45° 安装）
+esti_il: true                # 对应旧版 extrinsic_est_en: true, 在线标定
+
+r_il: [0.7071067811865476, 0.0, 0.7071067811865476,
+        0.0, 1.0, 0.0,
+       -0.7071067811865476, 0.0, 0.7071067811865476]
+
+t_il: [0.03, -0.03, 0.03]   # 对应旧版 extrinsic_T
+
+lidar_cov_inv: 1000.0
