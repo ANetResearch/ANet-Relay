@@ -1,7 +1,9 @@
-// One aircraft on the stage (02 §6.2-§6.4): the GoFilm 20 at real size with attitude, spinning propellers and a
-// motion disc, the nose marker, ground rings for selection / possession, the screen-space label, the altitude line,
-// the 20 s trail and, for simulators, the dashed base. Discrete facts (selection, controller, armed, link) come from
-// narrow selectors; everything that moves is written by the shared frame loop in Fleet.tsx.
+// One aircraft on the stage (02 §6.2-§6.4, 12 §5.5): its model's airframe at real size with attitude, spinning
+// propellers and a motion disc, the gimbal joints of a pod, the nose marker, ground rings for selection /
+// possession, the screen-space label, the altitude line, the 20 s trail, for simulators the dashed base, and for the
+// selected aircraft with its laser on a thin line of sight to the measured point. Every size comes from the model's
+// metrics (stage/models.ts). Discrete facts (selection, controller, armed, link) come from narrow selectors;
+// everything that moves is written by the shared frame loop in Fleet.tsx.
 import * as React from 'react'
 import * as THREE from 'three'
 import { Html } from '@react-three/drei'
@@ -18,14 +20,27 @@ import { useHold } from '@/fleet/holds'
 import { useReplay } from '@/records/replayState'
 import { useTL } from '@/lab/copy' // WP-3
 import { HoldProgress, usePillSpec } from '@/ui/relay'
+import { metrics, type ModelMetrics } from '../models'
 import { useStage } from '../store'
 import { token } from '../tokens'
-import { instantiate, type AirframeTemplate } from './model'
+import { instantiate, type AirframeTemplate, type Instance } from './model'
+import { markLayer } from './rigState'
 import { CrashedReset } from '@/twin/CrashedReset' // v0.5.4
 
 export const TRAIL_SECONDS = 20
 export const TRAIL_HZ = 10
 export const TRAIL_POINTS = TRAIL_SECONDS * TRAIL_HZ
+
+/** Gimbal joints of an aircraft with a pod and their smoothed angles (radians, node rotations). */
+export interface GimbalHandles {
+  yaw: THREE.Object3D
+  pitch: THREE.Object3D
+  camera: THREE.Object3D
+  /** smoothed node angles: yaw about the yaw node's Y, pitch about the pitch node's X */
+  y: number
+  x: number
+  ready: boolean
+}
 
 /** Imperative handles the frame loop drives. */
 export interface AircraftHandles {
@@ -46,6 +61,13 @@ export interface AircraftHandles {
   trailLastAt: number
   /** smoothed throttle for the spin */
   throttle: number
+  /** the model's sizes (rings, label height, camera distances) */
+  metrics: ModelMetrics
+  /** the attitude pivot height above the feet */
+  lift: number
+  gimbal: GimbalHandles | null
+  /** line of sight from the gimbal camera to the laser range point (selected aircraft, laser on) */
+  sight: THREE.LineSegments
 }
 
 export const handles = new Map<string, AircraftHandles>()
@@ -73,26 +95,38 @@ export function dashedSquare(size: number, color: THREE.Color, dash = 0.03, gap 
   const l = new THREE.LineLoop(geo, mat)
   l.computeLineDistances()
   l.raycast = () => {}
-  return l
+  return markLayer(l)
 }
 
-function noseMarker(color: THREE.Color, ahead: number, height: number): THREE.Mesh {
-  // a 2 x 2 cm triangle lying flat, its apex pointing along the nose (-Z), 3 cm ahead of the nose tip
+function noseMarker(color: THREE.Color, ahead: number, height: number, m: ModelMetrics): THREE.Mesh {
+  // a triangle lying flat (2 x 2 cm on the micro), its apex pointing along the nose (-Z), a gap ahead of the nose tip
+  const r = m.nose.size / 2
   const s = new THREE.Shape()
-  s.moveTo(0, 0.01)
-  s.lineTo(-0.01, -0.01)
-  s.lineTo(0.01, -0.01)
+  s.moveTo(0, r)
+  s.lineTo(-r, -r)
+  s.lineTo(r, -r)
   s.closePath()
   const geo = new THREE.ShapeGeometry(s)
   geo.rotateX(-Math.PI / 2)
   const mat = new THREE.MeshBasicMaterial({ color, toneMapped: false, side: THREE.DoubleSide })
-  const m = new THREE.Mesh(geo, mat)
-  m.position.set(0, height, -(ahead + 0.03 + 0.01))
-  m.raycast = () => {}
-  return m
+  const mesh = new THREE.Mesh(geo, mat)
+  mesh.position.set(0, height, -(ahead + m.nose.gap + r))
+  mesh.raycast = () => {}
+  return markLayer(mesh)
+}
+
+function sightLine(): THREE.LineSegments {
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3))
+  const line = new THREE.LineSegments(geo, new THREE.LineDashedMaterial({ color: token('g300').color, dashSize: 0.06, gapSize: 0.05, transparent: true, opacity: 0.7, depthWrite: false, toneMapped: false }))
+  line.frustumCulled = false
+  line.visible = false
+  line.raycast = () => {}
+  return markLayer(line)
 }
 
 function build(template: AirframeTemplate, sim: boolean): AircraftHandles {
+  const m = metrics(template.model)
   const root = new THREE.Group()
   const yaw = new THREE.Group()
   // 11 §8.5: the attitude group pivots at the body centre (lift above the feet), so a rolled, inverted or
@@ -104,45 +138,48 @@ function build(template: AirframeTemplate, sim: boolean): AircraftHandles {
   const body = new THREE.Group()
   body.position.y = -template.lift
   att.add(body)
-  const inst = instantiate(template)
+  const inst: Instance = instantiate(template)
   body.add(inst.root)
-  const nose = noseMarker(token('g50').color, template.noseAhead, template.lift)
+  const nose = noseMarker(token('g50').color, template.noseAhead, template.lift, m)
   body.add(nose)
 
   const discMat = new THREE.MeshBasicMaterial({ color: token('g300').color, transparent: true, opacity: 0, depthWrite: false, toneMapped: false, side: THREE.DoubleSide })
-  const discGeo = new THREE.CircleGeometry(0.0245, 32)
+  const discGeo = new THREE.CircleGeometry(m.disc.r, 32)
   discGeo.rotateX(-Math.PI / 2)
   const discs: THREE.Mesh[] = []
   for (const p of inst.props) {
     const d = new THREE.Mesh(discGeo, discMat)
-    d.position.y = -0.0047
+    d.position.y = m.disc.y
     d.raycast = () => {}
     p.add(d)
     discs.push(d)
   }
 
   if (sim) {
-    const base = dashedSquare(0.18, token('g500').color, 0.02, 0.014)
+    const k = m.base / 0.18
+    const base = dashedSquare(m.base, token('g500').color, 0.02 * k, 0.014 * k)
     base.position.y = 0.001
     yaw.add(base)
   }
 
   const ground = new THREE.Group()
-  const sel = circle(0.24, token('g50').color)
+  const sel = circle(m.ring, token('g50').color)
   sel.name = 'sel'
   sel.position.y = 0.002
-  const outer = circle(0.3, token('g50').color)
+  const outer = circle(m.possess, token('g50').color)
   outer.name = 'possess'
   outer.position.y = 0.002
-  const pulse = circle(0.24, token('g50').color)
+  const pulse = circle(m.ring, token('g50').color)
   pulse.position.y = 0.002
   pulse.visible = false
   ground.add(sel, outer, pulse)
+  markLayer(ground)
 
   const altGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 1, 0)])
   const altLine = new THREE.Line(altGeo, new THREE.LineBasicMaterial({ color: token('g600').color, toneMapped: false }))
   altLine.raycast = () => {}
   altLine.frustumCulled = false
+  markLayer(altLine)
 
   const trailGeo = new THREE.BufferGeometry()
   trailGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL_POINTS * 3), 3))
@@ -150,10 +187,14 @@ function build(template: AirframeTemplate, sim: boolean): AircraftHandles {
   const trail = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({ color: token('trail-default').color, toneMapped: false, transparent: true, opacity: 0.8 }))
   trail.frustumCulled = false
   trail.raycast = () => {}
+  markLayer(trail)
 
   return {
     root, yaw, att, nose, props: inst.props, discs, ground, pulse, altLine,
     altLabel: { current: null }, label: { current: null, lift: 0 }, trail, trailCount: 0, trailLastAt: 0, throttle: 0,
+    metrics: m, lift: template.lift,
+    gimbal: inst.gimbal ? { ...inst.gimbal, y: 0, x: 0, ready: false } : null,
+    sight: sightLine(),
   }
 }
 
@@ -183,6 +224,7 @@ function bindLabel(h: AircraftHandles, el: HTMLDivElement | null): void {
 function disposeHandles(h: AircraftHandles): void {
   h.trail.geometry.dispose()
   h.altLine.geometry.dispose()
+  h.sight.geometry.dispose()
 }
 
 interface Facts {
@@ -330,24 +372,25 @@ export const Aircraft = React.memo(function Aircraft({ id, template, fallbackLab
     <>
       <primitive object={h.root}>
         <mesh onClick={onClick} onDoubleClick={onDouble} onPointerOver={over} onPointerOut={out} position={[0, template.lift, 0]}>
-          <sphereGeometry args={[0.11, 12, 8]} />
+          <sphereGeometry args={[h.metrics.hit, 12, 8]} />
           <meshBasicMaterial visible={false} />
         </mesh>
         {labels ? (
-          <Html position={[0, 0.12, 0]} zIndexRange={[12, 0]} style={{ pointerEvents: 'none' }}>
+          <Html position={[0, h.metrics.label, 0]} zIndexRange={[12, 0]} style={{ pointerEvents: 'none' }}>
             <Label id={id} facts={facts} fallback={fallbackLabel ?? id} bind={(el) => bindLabel(h, el)} />
           </Html>
         ) : null}
       </primitive>
       <primitive object={h.ground}>
         {labels ? (
-          <Html position={[0.3, 0, 0]} zIndexRange={[11, 0]} style={{ pointerEvents: 'none' }}>
+          <Html position={[h.metrics.altLabel, 0, 0]} zIndexRange={[11, 0]} style={{ pointerEvents: 'none' }}>
             <span className="stage-alt" ref={(el: HTMLSpanElement | null) => bindAltLabel(h, el)} />
           </Html>
         ) : null}
       </primitive>
       <primitive object={h.altLine} />
       <primitive object={h.trail} />
+      <primitive object={h.sight} />
     </>
   )
 })

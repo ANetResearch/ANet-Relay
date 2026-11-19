@@ -15,6 +15,9 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from relay_mcp_common import (
     VID,
+    CONTROL_FRAME,
+    CONVENTION,
+    REFERENCE,
     WAIT,
     McpServer,
     RelayClient,
@@ -29,7 +32,10 @@ SERVER_NAME = "anet-relay-device"
 INSTRUCTIONS = (
     "ANet Relay device-level control: individual motors, servo and actuator outputs, RC channels, "
     "parameters, raw MAVLink commands and low level flight skills, for real and simulated aircraft. "
-    "Positions are metres East-North-Up; angles in degrees. Every write needs this session to hold the "
+    "Distances are metres, angles degrees. device_velocity reads its numbers in a control frame (its `frame`, "
+    "omitted: the server's control_frame setting, flu by default: body forward / left / up, local east / north / "
+    "up, counter-clockwise yaw rates positive); device_attitude and device_sticks are not affected by it. "
+    "Every write needs this session to hold the "
     "aircraft: call device_claim first (claims belong to a session, so a claim made through another "
     "Relay MCP server does not carry over). A person who possesses the aircraft always wins and control "
     "calls then fail with possessed_by_human. Dangerous operations need a confirm word on real aircraft: "
@@ -578,7 +584,8 @@ def build_tools() -> list[Tool]:
         _skill_tool(
             "device_attitude",
             "attitude",
-            "Command a roll / pitch attitude, yaw rate and thrust for `seconds` while airborne "
+            "Command a roll (right +) / pitch (nose up +) attitude, a clockwise-positive yaw rate and thrust for "
+            "`seconds` while airborne, independent of the control frame "
             "(SET_ATTITUDE_TARGET at 20 Hz; ArduPilot GUIDED_NOGPS, PX4 OFFBOARD), then return to the "
             "altitude-hold mode. Needs an armed aircraft in the air. Motion: real aircraft need operator "
             "approval.",
@@ -599,15 +606,40 @@ def build_tools() -> list[Tool]:
         _skill_tool(
             "device_velocity",
             "velocity",
-            "Command a velocity in the East-North-Up frame for `seconds` (SET_POSITION_TARGET_LOCAL_NED at "
-            "10 Hz). Needs a position estimate in a position mode. It stops and fails with "
+            "Command a velocity for `seconds` (SET_POSITION_TARGET_LOCAL_NED at 10 Hz; body-frame velocities are "
+            "sent in MAV_FRAME_BODY_NED). `reference` body (default; the direction follows the nose) reads "
+            "vx, vy, vz along the aircraft's axes, local along the local axes. " + CONVENTION + " Needs a "
+            "position estimate in a position mode. It stops and fails with "
             "outside_safety_volume before leaving the safety volume. Motion: real aircraft need operator "
             "approval.",
             {
-                "vx": {"type": "number", "minimum": -2, "maximum": 2, "description": "east, m/s"},
-                "vy": {"type": "number", "minimum": -2, "maximum": 2, "description": "north, m/s"},
-                "vz": {"type": "number", "minimum": -2, "maximum": 2, "description": "up, m/s"},
-                "yaw_rate_dps": {"type": "number", "minimum": -90, "maximum": 90},
+                "vx": {
+                    "type": "number",
+                    "minimum": -2,
+                    "maximum": 2,
+                    "description": "m/s along x: body forward, or local east (flu) / north (frd)",
+                },
+                "vy": {
+                    "type": "number",
+                    "minimum": -2,
+                    "maximum": 2,
+                    "description": "m/s along y: body LEFT in flu (right in frd and relay); local north (flu) "
+                    "/ east (frd)",
+                },
+                "vz": {
+                    "type": "number",
+                    "minimum": -2,
+                    "maximum": 2,
+                    "description": "m/s along z: up in flu and relay, DOWN in frd",
+                },
+                "yaw_rate_dps": {
+                    "type": "number",
+                    "minimum": -90,
+                    "maximum": 90,
+                    "description": "deg/s: counter-clockwise positive in flu, clockwise in frd and relay",
+                },
+                "reference": REFERENCE,
+                "frame": CONTROL_FRAME,
                 "seconds": SECONDS10,
             },
             ["seconds"],

@@ -135,8 +135,13 @@ export function importBlock(path: string, sha256: string, operator: boolean): Be
 
 // ---------------------------------------------------------------- frames (11 §8.1)
 
-export type FramePreset = 'micro-120' | 'small-250' | 'large-450'
-export const FRAME_PRESETS: readonly FramePreset[] = ['micro-120', 'small-250', 'large-450']
+export type FramePreset = 'anet-du7' | 'micro-120' | 'small-250' | 'large-450'
+export const FRAME_PRESETS: readonly FramePreset[] = ['anet-du7', 'micro-120', 'small-250', 'large-450']
+/** The small quads (v0.5 presets); 12 §2: the ANetDU7 is the default aircraft, these stay available. */
+export const SMALL_PRESETS: readonly FramePreset[] = ['micro-120', 'small-250', 'large-450']
+/** The aircraft of the add-simulator dialog (12 §2.2, §5.5): the ANetDU7 or one of the small quads. */
+export type Aircraft = 'anet-du7' | 'small'
+export const aircraftOf = (preset: string | null | undefined): Aircraft => (preset === 'anet-du7' ? 'anet-du7' : 'small')
 export interface FrameValues {
   mass_kg: number
   wheelbase_m: number
@@ -146,6 +151,7 @@ export interface FrameValues {
 }
 /** Initial values of the presets (backend sim/frame.py PRESETS). */
 export const PRESET_VALUES: Record<FramePreset, FrameValues> = {
+  'anet-du7': { mass_kg: 2.5, wheelbase_m: 0.5, prop_in: 10, cells: 4, capacity_mah: 5300 },
   'micro-120': { mass_kg: 0.12, wheelbase_m: 0.25, prop_in: 5.1, cells: 3, capacity_mah: 850 },
   'small-250': { mass_kg: 0.42, wheelbase_m: 0.25, prop_in: 5, cells: 3, capacity_mah: 850 },
   'large-450': { mass_kg: 1.5, wheelbase_m: 0.45, prop_in: 10, cells: 4, capacity_mah: 5000 },
@@ -212,6 +218,8 @@ export interface SimForm {
   count: string
   /** fast simulator only */
   autopilot: Family
+  /** the user chose the autopilot; otherwise it follows the aircraft (ANetDU7: PX4, small quads: ArduPilot) */
+  autopilotSet?: boolean
   /** twin source: "profile:<pid>" or "pack:<id>" */
   source: string
   /** "profile": the profile's own frame (twin with a profile only) */
@@ -226,22 +234,33 @@ export interface SimForm {
 
 export type SimField = 'count' | 'source' | 'mass' | 'wheelbase' | 'home'
 
-export function defaultSimForm(engine: Engine = 'relay'): SimForm {
-  const p = PRESET_VALUES['micro-120']
-  return { engine, count: '1', autopilot: 'ardupilot', source: '', frame: 'micro-120', mass: String(p.mass_kg), wheelbase: String(p.wheelbase_m), homeOn: false, lat: '', lon: '', alt: '0' }
+/** The autopilot an aircraft flies unless the user picks one (12 §2.2: an ANetDU7 flies the PX4 flavour). */
+export const defaultAutopilot = (preset: string): Family => (preset === 'anet-du7' ? 'px4' : 'ardupilot')
+
+/** A fresh form: the ANetDU7 unless the settings' sim_frame_default names another preset (12 §2.2). */
+export function defaultSimForm(engine: Engine = 'relay', preset: FramePreset = 'anet-du7'): SimForm {
+  const p = PRESET_VALUES[preset]
+  return { engine, count: '1', autopilot: defaultAutopilot(preset), source: '', frame: preset, mass: String(p.mass_kg), wheelbase: String(p.wheelbase_m), homeOn: false, lat: '', lon: '', alt: '0' }
 }
 
-/** Choosing a preset starts from its values (11 §5). */
+/** Choosing a preset starts from its values (11 §5); an untouched autopilot follows the aircraft. */
 export function withFrame(f: SimForm, frame: SimForm['frame']): SimForm {
   if (frame === 'profile') return { ...f, frame }
   const p = PRESET_VALUES[frame]
-  return { ...f, frame, mass: String(p.mass_kg), wheelbase: String(p.wheelbase_m) }
+  return { ...f, frame, mass: String(p.mass_kg), wheelbase: String(p.wheelbase_m), autopilot: f.autopilotSet ? f.autopilot : defaultAutopilot(frame) }
 }
 
-/** A new source: a profile brings its own frame; a pack falls back to a preset. */
-export function withSource(f: SimForm, source: string): SimForm {
+/** Choosing the aircraft: the ANetDU7, or the small quad preset in use (Micro 120 when there is none). */
+export function withAircraft(f: SimForm, a: Aircraft, lastSmall: FramePreset = 'micro-120'): SimForm {
+  if (a === 'anet-du7') return f.frame === 'anet-du7' ? f : withFrame(f, 'anet-du7')
+  if (f.frame !== 'anet-du7' && f.frame !== 'profile') return f
+  return withFrame(f, SMALL_PRESETS.includes(lastSmall) ? lastSmall : 'micro-120')
+}
+
+/** A new source: a profile brings its own frame; a pack falls back to the aircraft chosen before. */
+export function withSource(f: SimForm, source: string, fallback: FramePreset = 'anet-du7'): SimForm {
   if (source.startsWith('profile:')) return { ...f, source, frame: 'profile' }
-  return f.frame === 'profile' ? withFrame({ ...f, source }, 'micro-120') : { ...f, source }
+  return f.frame === 'profile' ? withFrame({ ...f, source }, fallback) : { ...f, source }
 }
 
 const inRange = (raw: string, lo: number, hi: number) => {
@@ -262,15 +281,17 @@ export function validateSimForm(f: SimForm): Partial<Record<SimField, Because>> 
   return out
 }
 
-/** The POST /sims body (11 §10). A fast simulator on the default frame sends what v0.5.3 sent. */
+/**
+ * The POST /sims body (11 §10). The dialog names its aircraft and autopilot explicitly (12 §2.2: an omitted frame
+ * means the sim_frame_default setting, which the quick Add sim affordances use).
+ */
 export function simBody(f: SimForm): Record<string, unknown> {
   const count = Number(f.count)
   const body: Record<string, unknown> = { count }
   const frame = f.frame === 'profile' ? null : frameBody({ preset: f.frame, mass_kg: f.mass, wheelbase_m: f.wheelbase })
-  const plain = frame && Object.keys(frame).length === 1 && frame.preset === 'micro-120'
   if (f.engine === 'relay') {
     body.autopilot = f.autopilot
-    if (frame && !plain) body.frame = frame
+    if (frame) body.frame = frame
     return body
   }
   body.engine = 'sitl'

@@ -16,8 +16,12 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from relay_mcp_common import (
+    CONTROL_FRAME,
+    CONVENTION,
     FRAME,
     HOME,
+    SETTLE_S,
+    SPEED,
     VID,
     WAIT,
     McpServer,
@@ -87,14 +91,28 @@ ARS = {
     "required": ["format", "version", "mode", "tracks"],
 }
 
+GIMBAL_ACTIONS = (
+    "rate", "stop", "angle", "center", "follow", "lock", "motors", "zoom", "zoom_rate", "digital_zoom", "lens",
+    "palette", "photo", "record", "track", "track_stop", "laser", "focus", "enhance", "osd", "low_light", "scan",
+    "scan_stop", "geo_track", "look_at",
+)  # fmt: skip
+GIMBAL_LENSES = ("visible1", "visible2", "ir1", "ir2")
+GIMBAL_PARAMS = (
+    "yaw_dps", "pitch_dps", "yaw_deg", "pitch_deg", "space", "on", "level", "rate", "lens", "pip", "palette", "x",
+    "y", "z", "frame", "algorithm", "mode", "position", "speed_dps", "lat", "lon", "alt",
+)  # fmt: skip
+
 PROFILE_ID = {"type": "string", "description": "twin profile id from relay_twin_profiles_list, e.g. tp-1a2b3c4d"}
 PACK_ID = {"type": "string", "description": "runtime pack id from relay_autopilots_list, e.g. ardupilot-copter-4.7.2"}
 
 SERVER_NAME = "anet-relay"
 
 INSTRUCTIONS = (
-    "ANet Relay controls small quadcopters (real and simulated) on the local network. "
-    "Positions are metres in an East-North-Up frame (x east, y north, z up); headings are compass degrees. "
+    "ANet Relay controls quadcopters (real and simulated) on the local network: the ANetDU7 (2.5 kg, with a "
+    "gimbal pod) and small aircraft. "
+    "Numbers are metres and degrees in a control frame: " + CONVENTION + " relay_vehicle and relay_fleet report "
+    "`nav`, the pose in the control_frame. Prefer the named directions (forward, right, left, up, down) in "
+    "relay_move. goto and the pose use the local frame of the aircraft (east-north-up in flu). "
     "Workflow: relay_fleet to see aircraft, relay_claim one, then relay_takeoff, relay_hold, relay_move, "
     "relay_yaw and relay_land, or relay_plan for a whole sequence. relay_move and relay_yaw work without a "
     "position estimate (moves are then open-loop estimates); relay_goto needs one. "
@@ -103,7 +121,12 @@ INSTRUCTIONS = (
     "Real aircraft need confirm='ARM' to arm and must pass preflight checks. goto targets must stay inside "
     "the safety volume reported by relay_fleet. Use relay_stop only in an emergency: it cuts the motors. "
     "relay_sticks_for pushes the sticks for a few seconds (a language model cannot fly a 50 Hz loop); "
-    "relay_refly repeats an earlier recorded flight. "
+    "relay_refly repeats an earlier recorded flight; relay_plan with builtin du7_box flies the ANetDU7 box test "
+    "(relay_plans_builtin lists the ready-made plans). The ANetDU7 flies relay_takeoff, relay_move and "
+    "relay_goto on speed-limited body velocity at 0.5 m/s by default; pass speed to change it. "
+    "relay_gimbal_status, relay_gimbal_control and relay_gimbal_captures drive the gimbal pod of the aircraft "
+    "you claimed (angle, zoom, lens, photo, record, look_at); pod angles are the pod's own (yaw right +, "
+    "pitch up +, looking down is negative) and do not follow the control frame. "
     "Firmware twins run the official PX4 or ArduPilot firmware (the real aircraft's version and parameters) "
     "against Relay's physics: relay_firmware_identify a real aircraft, relay_twin_profile_capture its "
     "parameters, relay_twin_start a twin and fly it like any simulator. Capturing a profile and starting a "
@@ -143,6 +166,10 @@ STICKS_TOOL_NAMES = frozenset(
         "relay_twin_start",
         "relay_twin_status",
         "relay_sim_frame",
+        # 12 §5.2: the pod is not a flight action; the session that controls the aircraft may use it at any level
+        "relay_gimbal_status",
+        "relay_gimbal_control",
+        "relay_gimbal_captures",
     }
 )
 STICKS_INSTRUCTIONS = (
@@ -152,6 +179,8 @@ STICKS_INSTRUCTIONS = (
     "PX4 MANUAL, STABILIZED), relay_arm, then relay_sticks_for to push the sticks for a few seconds. "
     "Takeoff, hold, move, yaw, goto, plans and re-fly are refused with sticks_only at this level; "
     "relay_land stays available as a safety action and relay_stop cuts the motors in an emergency. "
+    "The gimbal tools (relay_gimbal_status, relay_gimbal_control, relay_gimbal_captures) work at every level "
+    "for the aircraft you claimed; their angles are the pod's own (yaw right +, pitch up +). "
     "For closed-loop flight, write and deploy an onboard program with the anet-relay-app server's program "
     "tools (program_guide, program_create, program_test, program_deploy). "
     "A person can take over (possess) any aircraft at any time; control calls then fail with "
@@ -186,13 +215,15 @@ def _tool(
 TOOLS = [
     _tool(
         "relay_fleet",
-        "List every aircraft with link, mode, position, battery, controller and claim, plus the "
-        "safety volume and open agent sessions.",
+        "List every aircraft with link, mode, position, `nav` (pose in the control frame), model (anet-du7 or "
+        "micro), a gimbal summary, battery, controller and claim, plus the safety volume and open agent sessions.",
         read_only=True,
     ),
     _tool(
         "relay_vehicle",
-        "Full state of one aircraft, including preflight results and course progress.",
+        "Full state of one aircraft, including preflight results, course progress, `model`, `nav` (position, "
+        "velocity, body velocity, yaw and yaw rate in the control frame) and `gimbal` (the pod's view: null "
+        "without one).",
         {"vehicle": VID},
         ["vehicle"],
         read_only=True,
@@ -243,10 +274,15 @@ TOOLS = [
     ),
     _tool(
         "relay_takeoff",
-        "Take off to `alt` metres above the ground (arms simulators automatically) and hold.",
+        "Take off to `alt` metres above the ground (arms simulators automatically) and hold. The ANetDU7 (PX4 with "
+        "a position estimate) arms in POSCTL, switches to OFFBOARD and climbs on speed-limited body velocity, "
+        "0.5 m/s unless `speed` says otherwise; its monitors (tilt over 20 degrees, position jump or loss, "
+        "overspeed, mode taken by the pilot) fail the skill and request a landing.",
         {
             "vehicle": VID,
             "alt": {"type": "number", "minimum": 0.2, "maximum": 10, "default": 1.0},
+            "speed": SPEED,
+            "settle_s": SETTLE_S,
             "confirm": {
                 "type": "string",
                 "enum": ["ARM"],
@@ -265,29 +301,63 @@ TOOLS = [
     ),
     _tool(
         "relay_move",
-        "Move relative to the aircraft's nose: forward (negative: back), right (negative: left), up "
-        "(negative: down), in metres. Closed loop with a position estimate; otherwise a timed tilt whose "
-        "horizontal distance is an estimate (at most 2 m).",
+        "Move relative to the aircraft's nose, in metres. Name the direction: forward (negative: back), right "
+        "(negative: left), left, up (negative: down), down; these mean the same in every frame and are the "
+        "safe way to say it. Or give x, y, z, body offsets in `frame` (flu: forward, LEFT, up; frd: forward, "
+        "RIGHT, down; relay: forward, right, up); not both. " + CONVENTION + " Closed loop with a position "
+        "estimate; otherwise a timed tilt whose horizontal distance is an estimate (at most 2 m). With a "
+        "position estimate and `speed` (the ANetDU7 default is 0.5 m/s) it flies on speed-limited body "
+        "velocity and finishes after `settle_s` within 0.2 m.",
         {
             "vehicle": VID,
-            "forward": {"type": "number", "minimum": -5, "maximum": 5, "default": 0},
-            "right": {"type": "number", "minimum": -5, "maximum": 5, "default": 0},
-            "up": {"type": "number", "minimum": -2, "maximum": 2, "default": 0},
+            "forward": {"type": "number", "minimum": -5, "maximum": 5},
+            "right": {"type": "number", "minimum": -5, "maximum": 5},
+            "left": {"type": "number", "minimum": -5, "maximum": 5},
+            "up": {"type": "number", "minimum": -2, "maximum": 2},
+            "down": {"type": "number", "minimum": -2, "maximum": 2},
+            "x": {"type": "number", "minimum": -5, "maximum": 5, "description": "body x (forward) in `frame`"},
+            "y": {
+                "type": "number",
+                "minimum": -5,
+                "maximum": 5,
+                "description": "body y in `frame`: flu LEFT, frd and relay right",
+            },
+            "z": {
+                "type": "number",
+                "minimum": -2,
+                "maximum": 2,
+                "description": "body z in `frame`: flu and relay up, frd DOWN",
+            },
+            "frame": CONTROL_FRAME,
+            "speed": SPEED,
+            "settle_s": SETTLE_S,
             "wait": WAIT,
         },
         ["vehicle"],
     ),
     _tool(
         "relay_yaw",
-        "Turn in place by `deg` degrees relative to the current heading, positive clockwise (right).",
-        {"vehicle": VID, "deg": {"type": "number", "minimum": -360, "maximum": 360}, "wait": WAIT},
+        "Turn in place by `deg` degrees relative to the current heading. The sign follows `frame`: flu "
+        "(default) positive is counter-clockwise (left), frd and relay positive is clockwise (right). "
+        + CONVENTION,
+        {
+            "vehicle": VID,
+            "deg": {"type": "number", "minimum": -360, "maximum": 360},
+            "frame": CONTROL_FRAME,
+            "wait": WAIT,
+        },
         ["vehicle", "deg"],
     ),
     _tool(
         "relay_plan",
-        "Fly a sequence of steps and wait for it to finish. Actions: takeoff {alt}, hover {seconds}, "
-        "move {forward, right, up}, yaw {deg}, land. Example: takeoff 1 m, hover 3 s, move forward 1, "
-        "move forward -1, yaw 45, land. A failed step stops the sequence and the aircraft holds.",
+        "Fly a sequence of steps and wait for it to finish, or a ready-made plan with `builtin` (du7_box: take "
+        "off to 2 m, 1 m forward and back, 1 m left and back, land, at 0.5 m/s; list them with "
+        "relay_plans_builtin). Give steps or builtin, not both. Actions: takeoff {alt, speed?}, hover "
+        "{seconds}, move {forward, right, left, up, down | x, y, z; speed?, frame?}, yaw {deg, frame?}, goto "
+        "{x, y, z, yaw?; speed?, frame?}, land. Example: takeoff 1 m, hover 3 s, move forward 1, move forward "
+        "-1, yaw 45, land. A step's numbers follow its own `frame`, omitted: the server's control_frame "
+        "(flu by default: left and counter-clockwise are positive; frd and relay: right and clockwise). "
+        "Prefer the named directions in move. A failed step stops the sequence and the aircraft holds.",
         {
             "vehicle": VID,
             "steps": {
@@ -297,22 +367,45 @@ TOOLS = [
                 "items": {
                     "type": "object",
                     "properties": {
-                        "action": {"type": "string", "enum": ["takeoff", "hover", "move", "yaw", "land"]},
+                        "action": {
+                            "type": "string",
+                            "enum": ["takeoff", "hover", "move", "yaw", "goto", "land"],
+                        },
                         "alt": {"type": "number"},
                         "seconds": {"type": "number"},
                         "forward": {"type": "number"},
                         "right": {"type": "number"},
+                        "left": {"type": "number"},
                         "up": {"type": "number"},
-                        "deg": {"type": "number"},
+                        "down": {"type": "number"},
+                        "x": {"type": "number", "description": "move: body x; goto: local x, in `frame`"},
+                        "y": {"type": "number", "description": "move: body y; goto: local y, in `frame`"},
+                        "z": {"type": "number", "description": "move: body z; goto: local z, in `frame`"},
+                        "deg": {"type": "number", "description": "yaw: degrees; flu counter-clockwise +"},
+                        "yaw": {"type": "number", "description": "goto: heading in `frame`"},
+                        "frame": CONTROL_FRAME,
+                        "speed": SPEED,
+                        "settle_s": SETTLE_S,
                     },
                     "required": ["action"],
                     "additionalProperties": False,
                 },
             },
+            "builtin": {
+                "type": "string",
+                "enum": ["du7_box"],
+                "description": "a ready-made plan instead of steps (relay_plans_builtin)",
+            },
             "confirm": {"type": "string", "enum": ["ARM"], "description": "real aircraft on the ground"},
             "tuning": TUNING,
         },
-        ["vehicle", "steps"],
+        ["vehicle"],
+    ),
+    _tool(
+        "relay_plans_builtin",
+        "The ready-made plans relay_plan can fly with `builtin`: id, title, description and steps (du7_box is "
+        "the ANetDU7 box test of its onboard test node).",
+        read_only=True,
     ),
     _tool(
         "relay_plan_tune",
@@ -370,14 +463,25 @@ TOOLS = [
     ),
     _tool(
         "relay_goto",
-        "Fly to x (east), y (north), z (up) metres in the aircraft's position frame. The target "
-        "must be inside the safety volume around the aircraft's origin.",
+        "Fly to the local point x, y, z (metres) in the aircraft's position frame, optionally turning to the "
+        "heading `yaw` first. " + CONVENTION + " In flu: x east, y north, z up, yaw degrees counter-clockwise "
+        "from east; in frd: x north, y east, z DOWN, yaw a compass heading; ring courses report east-north-up "
+        "centres and compass headings, so pass frame relay when you follow them. The target must be inside "
+        "the safety volume around the aircraft's origin. `speed` (the ANetDU7 default is 0.5 m/s) flies on "
+        "speed-limited body velocity; `settle_s` is how long it must stay within 0.2 m.",
         {
             "vehicle": VID,
             "x": {"type": "number"},
             "y": {"type": "number"},
             "z": {"type": "number"},
-            "yaw": {"type": "number", "description": "heading in degrees, 0 north, clockwise"},
+            "yaw": {
+                "type": "number",
+                "description": "heading in degrees in `frame`: flu 0 along +x (east), counter-clockwise; "
+                "frd and relay: compass, 0 north, clockwise",
+            },
+            "frame": CONTROL_FRAME,
+            "speed": SPEED,
+            "settle_s": SETTLE_S,
             "wait": WAIT,
         },
         ["vehicle", "x", "y", "z"],
@@ -392,8 +496,8 @@ TOOLS = [
     _tool(
         "relay_course_start",
         "Start a training course (ring gates) on an aircraft. Returns the rings placed in "
-        "the aircraft's frame (centre c, compass heading yaw_deg of the ring normal, radius r); fly through "
-        "them in order with relay_goto.",
+        "the aircraft's frame (centre c east-north-up, compass heading yaw_deg of the ring normal, radius r); "
+        "fly through them in order with relay_goto and frame relay, which reads those numbers as they are.",
         {
             "vehicle": VID,
             "course_id": {
@@ -508,10 +612,74 @@ TOOLS = [
     _tool(
         "relay_sim_frame",
         "Change the physics frame of a disarmed simulator or firmware twin on the ground: a preset "
-        "(micro-120, small-250, large-450) and any of mass, wheelbase, propeller, cells, capacity. A twin "
+        "(anet-du7, micro-120, small-250, large-450) and any of mass, wheelbase, propeller, cells, capacity. A twin "
         "recomputes the motor thrust from its parameters. Fails with armed while armed or airborne.",
         {"vehicle": VID, **FRAME["properties"]},
         ["vehicle"],
+    ),
+    # 12 §5: the gimbal pod; the session that controls the aircraft may use it at every flight level
+    _tool(
+        "relay_gimbal_status",
+        "The gimbal pod of an aircraft: kind (sim | dyt), link, yaw_deg (right +), pitch_deg (up +, looking down "
+        "is negative), roll_deg, mode, lens (visible1 zoom, visible2 wide, ir1, ir2), pip, zoom and zoom_range, "
+        "fov_deg [horizontal, vertical], palette, tracking, laser range, recording, photos, motors and age_s. "
+        "gimbal_missing (404) when the aircraft has none. Angles are the pod's own and do not follow the "
+        "control frame.",
+        {"vehicle": VID},
+        ["vehicle"],
+        read_only=True,
+    ),
+    _tool(
+        "relay_gimbal_control",
+        "Run one gimbal pod action on an aircraft you claimed (or the operator possesses); works at every flight "
+        "level. Angles are the pod's own: yaw right +, pitch up + (looking down is negative), independent of "
+        "the control frame. Actions and their parameters: rate {yaw_dps, pitch_dps: +-100, until stop}; stop; "
+        "angle {yaw_deg +-180, pitch_deg -120..90, space: frame (default, relative to the nose) | earth "
+        "(compass azimuth, elevation)}; center; follow {on}; lock {on}; motors {on}; zoom {level} on the "
+        "current lens (visible1 1-30, ir1 1-8, the other two fixed: gimbal_unsupported); zoom_rate {rate "
+        "-100..100, 0 stops}; digital_zoom {on}; lens {lens, pip? the small picture}; palette {palette: "
+        "white_hot | black_hot | pseudo}; photo; record {on}; track {x, y pixels from the centre of the "
+        "1280 x 720 picture, algorithm?}; track_stop; laser {on}; focus {mode: auto | manual, position "
+        "4090..49152}; enhance, osd, low_light {on}; scan {yaw_deg, pitch_deg, speed_dps 0.2..51}; scan_stop; "
+        "geo_track {lat, lon, alt} or {mode: center | exit}; look_at {x, y, z, frame?}: a local point in the "
+        "control frame (flu east-north-up, frd north-east-down) the pod then points at. Returns the pod's view "
+        "right after. Errors: gimbal_missing, gimbal_offline, gimbal_unsupported, gimbal_busy, invalid_request.",
+        {
+            "vehicle": VID,
+            "action": {"type": "string", "enum": list(GIMBAL_ACTIONS)},
+            "yaw_dps": {"type": "number", "minimum": -100, "maximum": 100, "description": "rate: right +"},
+            "pitch_dps": {"type": "number", "minimum": -100, "maximum": 100, "description": "rate: up +"},
+            "yaw_deg": {"type": "number", "minimum": -180, "maximum": 180, "description": "angle, scan: right +"},
+            "pitch_deg": {"type": "number", "minimum": -120, "maximum": 90, "description": "angle, scan: up +"},
+            "space": {"type": "string", "enum": ["frame", "earth"], "description": "angle (default frame)"},
+            "on": {"type": "boolean", "description": "follow, lock, motors, digital_zoom, record, laser, ..."},
+            "level": {"type": "number", "exclusiveMinimum": 0, "description": "zoom: times, current lens"},
+            "rate": {"type": "number", "minimum": -100, "maximum": 100, "description": "zoom_rate"},
+            "lens": {"type": "string", "enum": list(GIMBAL_LENSES), "description": "lens: the main picture"},
+            "pip": {"type": "string", "enum": list(GIMBAL_LENSES), "description": "lens: the small picture"},
+            "palette": {"type": "string", "enum": ["white_hot", "black_hot", "pseudo"]},
+            "x": {"type": "number", "description": "track: pixel, right +; look_at: local x"},
+            "y": {"type": "number", "description": "track: pixel, down +; look_at: local y"},
+            "z": {"type": "number", "description": "look_at: local z"},
+            "frame": {"type": "string", "enum": ["flu", "frd"], "description": "look_at: frame of x, y, z"},
+            "algorithm": {"type": "string", "enum": ["auto", "person", "vehicle", "building"]},
+            "mode": {"type": "string", "enum": ["auto", "manual", "center", "exit"], "description": "focus; geo_track"},
+            "position": {"type": "integer", "minimum": 4090, "maximum": 49152, "description": "focus manual"},
+            "speed_dps": {"type": "number", "minimum": 0.2, "maximum": 51, "description": "scan"},
+            "lat": {"type": "number", "minimum": -90, "maximum": 90},
+            "lon": {"type": "number", "minimum": -180, "maximum": 180},
+            "alt": {"type": "number", "minimum": -6000, "maximum": 6000, "description": "geo_track, m above sea level"},
+        },
+        ["vehicle", "action"],
+    ),
+    _tool(
+        "relay_gimbal_captures",
+        "Photos and recording starts and stops of the aircraft's pod, newest last: seq, kind (photo | "
+        "record_start | record_stop), time, the aircraft's `nav` pose, the gimbal angles, lens, zoom, laser "
+        "range and the target the pod solved.",
+        {"vehicle": VID, "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100}},
+        ["vehicle"],
+        read_only=True,
     ),
 ]
 TOOL_NAMES = {t["name"] for t in TOOLS}
@@ -528,6 +696,8 @@ COMPACT_KEYS = (
     "position",
     "altitude_m",
     "heading_deg",
+    "model",
+    "nav",
     "controller",
     "claim",
     "possession",
@@ -541,6 +711,10 @@ COMPACT_KEYS = (
 def _compact(v: dict) -> dict:
     out = {k: v.get(k) for k in COMPACT_KEYS}
     out["link"] = v["link"]["state"]
+    gimbal = v.get("gimbal")
+    out["gimbal"] = gimbal and {  # 12 §5: the summary; relay_gimbal_status has the whole view
+        k: gimbal.get(k) for k in ("kind", "link", "yaw_deg", "pitch_deg", "lens", "zoom", "recording", "photos")
+    }
     out["battery"] = {k: v["battery"].get(k) for k in ("voltage", "remaining_pct", "level")}
     if v.get("course"):
         c = v["course"]
@@ -588,19 +762,40 @@ def _dispatch(r: RelayClient, name: str, a: dict) -> Any:
     if name == "relay_mode":
         return r.mode(vid, a["name"])
     if name == "relay_takeoff":
-        return {"skill": r.takeoff(vid, alt=float(a.get("alt", 1.0)), wait=wait, confirm=a.get("confirm"))}
+        return {
+            "skill": r.takeoff(
+                vid,
+                alt=float(a.get("alt", 1.0)),
+                wait=wait,
+                confirm=a.get("confirm"),
+                speed=a.get("speed"),
+                settle_s=a.get("settle_s"),
+            )
+        }
     if name == "relay_land":
         return {"skill": r.land(vid, wait=wait)}
     if name == "relay_hold":
         return {"skill": r.hold(vid, seconds=float(a.get("seconds") or 0.0), wait=True)}
     if name == "relay_move":
         forward, right, up = (float(a.get(k) or 0.0) for k in ("forward", "right", "up"))
-        return {"skill": r.move(vid, forward, right, up, wait=wait)}
+        extra = {k: a.get(k) for k in ("left", "down", "x", "y", "z", "frame", "speed", "settle_s")}
+        return {"skill": r.move(vid, forward, right, up, wait=wait, **extra)}
     if name == "relay_yaw":
-        return {"skill": r.yaw(vid, float(a["deg"]), wait=wait)}
+        return {"skill": r.yaw(vid, float(a["deg"]), wait=wait, frame=a.get("frame"))}
+    if name == "relay_plans_builtin":
+        return {"plans": r.plans_builtin()}
     if name == "relay_plan":
+        if (a.get("steps") is None) == (a.get("builtin") is None):
+            raise ValueError("give steps or builtin, not both")
         return {
-            "plan": r.plan(vid, a["steps"], name=r.session_name, confirm=a.get("confirm"), tuning=a.get("tuning"))
+            "plan": r.plan(
+                vid,
+                a.get("steps"),
+                name=r.session_name,
+                confirm=a.get("confirm"),
+                tuning=a.get("tuning"),
+                builtin=a.get("builtin"),
+            )
         }
     if name == "relay_plan_tune":
         t = a.get("tuning") or {}
@@ -623,7 +818,17 @@ def _dispatch(r: RelayClient, name: str, a: dict) -> Any:
         return r.timeline_record(vid, a["action"], name=a.get("name"))
     if name == "relay_goto":
         return {
-            "skill": r.goto(vid, float(a["x"]), float(a["y"]), float(a["z"]), yaw=a.get("yaw"), wait=wait)
+            "skill": r.goto(
+                vid,
+                float(a["x"]),
+                float(a["y"]),
+                float(a["z"]),
+                yaw=a.get("yaw"),
+                wait=wait,
+                frame=a.get("frame"),
+                speed=a.get("speed"),
+                settle_s=a.get("settle_s"),
+            )
         }
     if name == "relay_stop":
         return r.stop(vid)
@@ -673,6 +878,12 @@ def _dispatch(r: RelayClient, name: str, a: dict) -> Any:
         return r.twin(vid)
     if name == "relay_sim_frame":
         return r.set_frame(vid, **{k: a.get(k) for k in FRAME["properties"]})
+    if name == "relay_gimbal_status":
+        return r.gimbal(vid)
+    if name == "relay_gimbal_control":
+        return r.gimbal_do(vid, a["action"], **{k: a.get(k) for k in GIMBAL_PARAMS})
+    if name == "relay_gimbal_captures":
+        return r.gimbal_captures(vid, limit=int(a["limit"]) if a.get("limit") else None)
     raise KeyError(name)
 
 

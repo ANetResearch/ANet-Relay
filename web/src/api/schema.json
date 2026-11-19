@@ -2025,6 +2025,7 @@
             "refly_finished",
             "refly_failed",
             "sim_assist_changed",
+            "model_changed",
             "sim_airframe_changed",
             "procedure_started",
             "procedure_step",
@@ -2055,7 +2056,13 @@
             "autopilot_pack_imported",
             "hitl_started",
             "hitl_restored",
-            "hitl_failed"
+            "hitl_failed",
+            "gimbal_attached",
+            "gimbal_detached",
+            "gimbal_link",
+            "gimbal_capture",
+            "gimbal_record",
+            "gimbal_lens"
           ],
           "type": "string"
         },
@@ -2621,6 +2628,358 @@
         "input"
       ],
       "title": "Gamepad",
+      "type": "object"
+    },
+    "GimbalFocus": {
+      "properties": {
+        "mode": {
+          "enum": [
+            "auto",
+            "manual"
+          ],
+          "type": "string"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "manual focus value 4090..49152"
+        }
+      },
+      "required": [
+        "mode",
+        "position"
+      ],
+      "title": "GimbalFocus",
+      "type": "object"
+    },
+    "GimbalLaser": {
+      "properties": {
+        "on": {
+          "type": "boolean"
+        },
+        "range_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "null: off or no valid return"
+        }
+      },
+      "required": [
+        "on",
+        "range_m"
+      ],
+      "title": "GimbalLaser",
+      "type": "object"
+    },
+    "GimbalSelftest": {
+      "properties": {
+        "done": {
+          "type": "boolean"
+        },
+        "gyro_ok": {
+          "type": "boolean"
+        },
+        "servo_ok": {
+          "type": "boolean"
+        },
+        "image_ok": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "done",
+        "gyro_ok",
+        "servo_ok",
+        "image_ok"
+      ],
+      "title": "GimbalSelftest",
+      "type": "object"
+    },
+    "GimbalTarget": {
+      "properties": {
+        "lat": {
+          "type": "number"
+        },
+        "lon": {
+          "type": "number"
+        },
+        "alt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "lat",
+        "lon",
+        "alt"
+      ],
+      "title": "GimbalTarget",
+      "type": "object"
+    },
+    "GimbalTracking": {
+      "properties": {
+        "state": {
+          "enum": [
+            "off",
+            "searching",
+            "locked"
+          ],
+          "type": "string"
+        },
+        "algorithm": {
+          "enum": [
+            "auto",
+            "person",
+            "vehicle",
+            "building"
+          ],
+          "type": "string"
+        },
+        "x_deg": {
+          "description": "miss distance, right positive",
+          "type": "number"
+        },
+        "y_deg": {
+          "description": "miss distance, down positive",
+          "type": "number"
+        },
+        "box_px": {
+          "description": "the tracking gate [width, height] in pixels; [0, 0] when off",
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "state",
+        "algorithm",
+        "x_deg",
+        "y_deg",
+        "box_px"
+      ],
+      "title": "GimbalTracking",
+      "type": "object"
+    },
+    "GimbalView": {
+      "description": "``vehicle.gimbal``. Angles are the pod's frame angles: ``yaw_deg`` right positive, ``pitch_deg`` up\npositive (looking down is negative), ``roll_deg`` right positive; independent of ``control_frame``.",
+      "properties": {
+        "kind": {
+          "description": "sim: simulated pod; dyt: a real DYT pod",
+          "enum": [
+            "sim",
+            "dyt"
+          ],
+          "type": "string"
+        },
+        "link": {
+          "enum": [
+            "ok",
+            "connecting",
+            "lost"
+          ],
+          "type": "string"
+        },
+        "address": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "\"10.0.0.5:2000\" or the serial device; null for the simulated pod"
+        },
+        "yaw_deg": {
+          "type": "number"
+        },
+        "pitch_deg": {
+          "type": "number"
+        },
+        "roll_deg": {
+          "type": "number"
+        },
+        "yaw_dps": {
+          "type": "number"
+        },
+        "pitch_dps": {
+          "type": "number"
+        },
+        "mode": {
+          "enum": [
+            "follow",
+            "lock",
+            "rate",
+            "angle",
+            "track",
+            "scan",
+            "off"
+          ],
+          "type": "string"
+        },
+        "lens": {
+          "enum": [
+            "visible1",
+            "visible2",
+            "ir1",
+            "ir2"
+          ],
+          "type": "string"
+        },
+        "pip": {
+          "anyOf": [
+            {
+              "enum": [
+                "visible1",
+                "visible2",
+                "ir1",
+                "ir2"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "the lens of the small picture, or null"
+        },
+        "zoom": {
+          "description": "magnification of the current lens",
+          "type": "number"
+        },
+        "zoom_range": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "digital_zoom": {
+          "type": "boolean"
+        },
+        "fov_deg": {
+          "description": "[horizontal, vertical] field of view now (estimated for DYT)",
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "palette": {
+          "enum": [
+            "white_hot",
+            "black_hot",
+            "pseudo"
+          ],
+          "type": "string"
+        },
+        "tracking": {
+          "$ref": "#/$defs/GimbalTracking"
+        },
+        "laser": {
+          "$ref": "#/$defs/GimbalLaser"
+        },
+        "recording": {
+          "type": "boolean"
+        },
+        "photos": {
+          "description": "photos taken this session",
+          "type": "integer"
+        },
+        "motors": {
+          "type": "boolean"
+        },
+        "enhance": {
+          "type": "boolean"
+        },
+        "osd": {
+          "type": "boolean"
+        },
+        "low_light": {
+          "type": "boolean"
+        },
+        "selftest": {
+          "$ref": "#/$defs/GimbalSelftest"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GimbalTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "the target position the pod solved (DYT table 4)"
+        },
+        "focus": {
+          "$ref": "#/$defs/GimbalFocus"
+        },
+        "debug": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "DYT link counters: frames, bad_frames (checksum failures), rx_bytes ..."
+        },
+        "age_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "seconds since the pod's last state; null before the first"
+        }
+      },
+      "required": [
+        "kind",
+        "link",
+        "address",
+        "yaw_deg",
+        "pitch_deg",
+        "roll_deg",
+        "yaw_dps",
+        "pitch_dps",
+        "mode",
+        "lens",
+        "pip",
+        "zoom",
+        "zoom_range",
+        "digital_zoom",
+        "fov_deg",
+        "palette",
+        "tracking",
+        "laser",
+        "recording",
+        "photos",
+        "motors",
+        "enhance",
+        "osd",
+        "low_light",
+        "selftest",
+        "target",
+        "focus",
+        "debug",
+        "age_s"
+      ],
+      "title": "GimbalView",
       "type": "object"
     },
     "GlobalPosition": {
@@ -3758,6 +4117,90 @@
         "error"
       ],
       "title": "Listen",
+      "type": "object"
+    },
+    "NavView": {
+      "description": "Position, velocity and heading in the ``control_frame`` convention (12 §3.3). ``flu``: local ENU,\nbody forward-left-up, yaw counter-clockwise from +x; ``frd``: local NED, body forward-right-down, yaw\nclockwise from north.",
+      "properties": {
+        "frame": {
+          "enum": [
+            "flu",
+            "frd"
+          ],
+          "type": "string"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "local x, y, z in metres; null without a position"
+        },
+        "velocity": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "local vx, vy, vz in m/s"
+        },
+        "body_velocity": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "velocity along the body axes (heading only)"
+        },
+        "yaw_deg": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "yaw_rate_dps": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "frame",
+        "position",
+        "velocity",
+        "body_velocity",
+        "yaw_deg",
+        "yaw_rate_dps"
+      ],
+      "title": "NavView",
       "type": "object"
     },
     "ParamProgress": {
@@ -8240,6 +8683,27 @@
             }
           ]
         },
+        "model": {
+          "default": "micro",
+          "description": "what the aircraft is (12 §2.2): the stage model and the flight defaults",
+          "enum": [
+            "anet-du7",
+            "micro"
+          ],
+          "type": "string"
+        },
+        "nav": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NavView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "pose in the control_frame convention (12 §3.3)"
+        },
         "procedure": {
           "anyOf": [
             {
@@ -8298,6 +8762,17 @@
             }
           ],
           "default": null
+        },
+        "gimbal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GimbalView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -8348,12 +8823,15 @@
         "course",
         "record_session",
         "sim",
+        "model",
+        "nav",
         "procedure",
         "program",
         "programs_allowed",
         "transport",
         "serial",
-        "hitl"
+        "hitl",
+        "gimbal"
       ],
       "title": "Vehicle",
       "type": "object"

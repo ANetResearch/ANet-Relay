@@ -468,6 +468,7 @@ class TwinOps:
                     v.safety_origin = (spawn[0], spawn[1], 0.0)
                     twin.notify = lambda kind, data, v=v: self._twin_notice(v, kind, data)
                     self.vehicles[vid] = v  # type: ignore[attr-defined]
+                    self._gimbal_autoattach(v)  # type: ignore[attr-defined]  # 12 §5: a DU7 twin has its pod
                     self._twin_reserved.discard(vid)
                     self._twin_reserved_packs.pop(vid, None)
                     self.events.emit(  # type: ignore[attr-defined]

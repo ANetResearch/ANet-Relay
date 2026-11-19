@@ -4,7 +4,7 @@ import { RelayApiError, linkKind, type AutopilotPack, type HitlStatus, type Twin
 import {
   canResetSim, captureBlock, changedRows, compareVersions, defaultSimForm, defaultSource, engineBadge, engineBadgeText, firmwareTitle, formatBytes, frameBlock, frameBody,
   frameErrors, frameForm, hitlCanStart, hitlCanStop, hitlEntry, hitlPollMs, hitlSteps, importBlock, packDeleteBlock, paramValue, portTitle, recommendSource,
-  resetBlock, simBody, sortPacks, sortPorts, sourceOptions, startBlock, twinErrorView, twinRestarting, validateSimForm, vidPid, withFrame, withSource,
+  resetBlock, simBody, sortPacks, sortPorts, sourceOptions, startBlock, twinErrorView, twinRestarting, validateSimForm, vidPid, withAircraft, withFrame, withSource, aircraftOf, defaultAutopilot,
 } from './model'
 import { TWIN_DICTS, translateTwin, type TwinKey } from './strings'
 
@@ -134,8 +134,10 @@ describe('frames (11 §8.1)', () => {
 
 describe('add simulator dialog (11 §11)', () => {
   it('keeps the v0.5.3 body for a default fast simulator; adds a frame when changed', () => {
-    expect(simBody(defaultSimForm())).toEqual({ count: 1, autopilot: 'ardupilot' })
-    const small = withFrame({ ...defaultSimForm(), count: '2', autopilot: 'px4' }, 'small-250')
+    // 12 §2.2: the ANetDU7 is the default aircraft and flies the PX4 flavour; the dialog names both
+    expect(simBody(defaultSimForm())).toEqual({ count: 1, autopilot: 'px4', frame: { preset: 'anet-du7' } })
+    expect(simBody(defaultSimForm('relay', 'micro-120'))).toEqual({ count: 1, autopilot: 'ardupilot', frame: { preset: 'micro-120' } })
+    const small = withFrame({ ...defaultSimForm(), count: '2', autopilot: 'px4', autopilotSet: true }, 'small-250')
     expect(simBody(small)).toEqual({ count: 2, autopilot: 'px4', frame: { preset: 'small-250' } })
     expect(simBody({ ...small, mass: '0.5' })).toEqual({ count: 2, autopilot: 'px4', frame: { preset: 'small-250', mass_kg: 0.5 } })
   })
@@ -248,5 +250,30 @@ describe('serial ports (11 §7.1)', () => {
     expect(vidPid(ports[2])).toBe('26AC:0038')
     expect(vidPid(ports[1])).toBeNull()
     expect(portTitle(ports[1])).toBe('ttyACM10')
+  })
+})
+
+describe('aircraft of the add-simulator dialog (12 §2.2)', () => {
+  it('starts with the ANetDU7 on the PX4 flavour', () => {
+    const f = defaultSimForm()
+    expect(f.frame).toBe('anet-du7')
+    expect(f.autopilot).toBe('px4')
+    expect(aircraftOf(f.frame)).toBe('anet-du7')
+    expect(defaultAutopilot('micro-120')).toBe('ardupilot')
+  })
+
+  it('switches to the small quad last used and back, the autopilot following until the user picks one', () => {
+    const small = withAircraft(defaultSimForm(), 'small', 'small-250')
+    expect(small.frame).toBe('small-250')
+    expect(small.autopilot).toBe('ardupilot')
+    expect(aircraftOf(small.frame)).toBe('small')
+    expect(withAircraft(small, 'small', 'large-450')).toBe(small) // already a small quad
+    const back = withAircraft(small, 'anet-du7')
+    expect(back.frame).toBe('anet-du7')
+    expect(back.autopilot).toBe('px4')
+    const picked = withAircraft({ ...defaultSimForm(), autopilot: 'ardupilot', autopilotSet: true }, 'small')
+    expect(picked.autopilot).toBe('ardupilot')
+    expect(withAircraft({ ...picked, autopilot: 'px4' }, 'anet-du7').autopilot).toBe('px4')
+    expect(withAircraft(defaultSimForm(), 'small', 'anet-du7').frame).toBe('micro-120')
   })
 })

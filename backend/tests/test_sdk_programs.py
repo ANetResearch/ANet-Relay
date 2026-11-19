@@ -99,7 +99,7 @@ def test_sdk_writes_tests_and_versions_a_program(base):
 
 def test_sdk_flies_a_program_at_the_sticks_level(base):
     op = RelayClient(base, operator_token=OP)
-    (vid,) = op.add_sims(1, hover_assist=False)
+    (vid,) = op.add_sims(1, hover_assist=False, frame="micro-120")
     _until(lambda: op.vehicle(vid)["link"]["state"] == "ok")
     agent = RelayClient(base)
     agent.open_session("sdk-pilot")

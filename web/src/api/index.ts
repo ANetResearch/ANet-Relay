@@ -26,3 +26,6 @@ export type { FrameBody, HomeBody, TwinCaptureBody, TwinProfilePatch } from './r
 // 11 §7: USB serial link and PX4 hardware in the loop
 export type { SerialPort, SerialPorts, SerialBaud, SerialLinkView, SerialUsb, HitlState, HitlStep, HitlStepKey, HitlStepState, HitlAction, HitlStatus, HitlBackup, HitlChange, HitlMismatch, HitlRun, HitlError, HitlPose, HitlFirmware, VehicleHitl, VehicleHitlRef, VehicleLinkExt } from './hitl'
 export { linkKind, serialOf, hitlOf } from './hitl'
+// v0.6.0 (12): models, control frames, the gimbal pod, ready-made plans
+export type { GimbalView, GimbalTracking, GimbalLaser, NavView } from './types'
+export type { RequestFrame, BuiltinPlan, GimbalCapture } from './rest'

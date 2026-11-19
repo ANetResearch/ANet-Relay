@@ -41,7 +41,8 @@ def main() -> None:
             for i, vid in enumerate(VEHICLES):
                 sx, sy = CORNERS[(i + step) % len(CORNERS)]
                 cx, cy = centres[vid]
-                pending[vid] = relay.goto(vid, cx + sx * args.half, cy + sy * args.half, args.alt, wait=False)
+                target = (cx + sx * args.half, cy + sy * args.half, args.alt)
+                pending[vid] = relay.goto(vid, *target, wait=False, frame="flu")
             for vid, skill in pending.items():
                 relay.wait_skill(vid, skill["id"], timeout=30)
             log(f"formation step {step + 1}/{args.laps * len(CORNERS) + 1} complete")

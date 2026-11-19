@@ -57,10 +57,15 @@ interface BackendSettings {
   sim_hover_assist?: boolean
   sim_turbulence?: number
   sim_airframe_default?: string // WP-2a (06 §4)
+  // 12 §2.2, §3: control frame and the default models
+  control_frame?: 'flu' | 'frd'
+  sim_frame_default?: string
+  real_model_default?: 'anet-du7' | 'micro'
 }
 
 const SECTIONS: { id: SettingsSection; key: AnyKey; icon: Parameters<typeof Icon>[0]['icon'] }[] = [
   { id: 'general', key: 'set.general', icon: 'settings' },
+  { id: 'aircraft', key: 'set.aircraft', icon: 'sim' }, // 12
   { id: 'safety', key: 'set.safety', icon: 'stop' },
   { id: 'controllers', key: 'set.controllers', icon: 'gamepad' },
   { id: 'copilot', key: 'set.copilot', icon: 'copilot' },
@@ -297,6 +302,62 @@ function Safety({ s, save }: { s: BackendSettings; save(p: Partial<BackendSettin
   )
 }
 
+/** One line per control frame (12 §3), the chosen one in full contrast. */
+function FrameLines({ value }: { value: 'flu' | 'frd' }) {
+  const t = useT8()
+  return (
+    <span className="mt-1 flex flex-col gap-0.5" data-frame-lines="">
+      {(['flu', 'frd'] as const).map((f) => (
+        <span key={f} className={cn('flex gap-2', f === value ? 'text-[var(--g300)]' : 'text-[var(--g600)]')}>
+          <span className="num w-7 shrink-0 font-[560]">{f.toUpperCase()}</span>
+          <span>{t(f === 'flu' ? 'set.frame.flu' : 'set.frame.frd')}</span>
+        </span>
+      ))}
+    </span>
+  )
+}
+
+// 12 §2.2, §3: how unnamed axes are read, what new simulators are and what real aircraft are drawn as
+function AircraftSection({ s, save }: { s: BackendSettings; save(p: Partial<BackendSettings>): Promise<boolean> }) {
+  const t = useT8()
+  const frame = s.control_frame === 'frd' ? 'frd' : 'flu'
+  const simDefault = s.sim_frame_default ?? 'anet-du7'
+  return (
+    <>
+      <Row label={t('set.controlFrame')} hint={<><span>{t('set.controlFrameHint')}</span><FrameLines value={frame} /></>}>
+        <Segmented<'flu' | 'frd'>
+          value={frame}
+          onChange={(v) => void save({ control_frame: v })}
+          label={t('set.controlFrame')}
+          options={[
+            { value: 'flu', label: 'FLU' },
+            { value: 'frd', label: 'FRD' },
+          ]}
+        />
+      </Row>
+      <Row label={t('set.simDefault')} hint={t('set.simDefaultHint')}>
+        <NativeSelect value={simDefault} onChange={(e) => void save({ sim_frame_default: e.target.value })} aria-label={t('set.simDefault')} className="w-44 [&_select]:h-7 [&_select]:text-[12px]" data-sim-frame-default="">
+          <NativeSelectOption value="anet-du7">ANetDU7</NativeSelectOption>
+          <NativeSelectOption value="micro-120">{t('set.simDefault.micro-120')}</NativeSelectOption>
+          <NativeSelectOption value="small-250">{t('set.simDefault.small-250')}</NativeSelectOption>
+          <NativeSelectOption value="large-450">{t('set.simDefault.large-450')}</NativeSelectOption>
+        </NativeSelect>
+      </Row>
+      <Row label={t('set.realModel')} hint={t('set.realModelHint')}>
+        <Segmented<'anet-du7' | 'micro'>
+          value={s.real_model_default === 'micro' ? 'micro' : 'anet-du7'}
+          onChange={(v) => void save({ real_model_default: v })}
+          label={t('set.realModel')}
+          options={[
+            { value: 'anet-du7', label: 'ANetDU7' },
+            { value: 'micro', label: t('model.micro') },
+          ]}
+        />
+      </Row>
+    </>
+  )
+}
+
 // WP-C (05 §6): control feel, stick mode, inversion, detent, learned mappings and the mapping tables.
 function Controllers() {
   return <ControllerSettings Row={Row} />
@@ -393,7 +454,7 @@ export function SettingsDialog({ open, section, onOpenChange }: SettingsDialogPr
     if (open) setCurrent(section)
   }
   const [s, save] = useBackendSettings(open)
-  const needsBackend = current === 'safety' || current === 'network' || current === 'autopilots' || current === 'data'
+  const needsBackend = current === 'aircraft' || current === 'safety' || current === 'network' || current === 'autopilots' || current === 'data'
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -425,6 +486,8 @@ export function SettingsDialog({ open, section, onOpenChange }: SettingsDialogPr
               <p className="text-hud-sub text-[var(--g500)]">{t('set.notConnected')}</p>
             ) : current === 'general' ? (
               <General />
+            ) : current === 'aircraft' && s ? (
+              <AircraftSection s={s} save={save} />
             ) : current === 'safety' && s ? (
               <Safety s={s} save={save} />
             ) : current === 'controllers' ? (

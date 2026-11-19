@@ -12,7 +12,8 @@ import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.l
 
 import { PROGRAMS_GUIDE } from "./programs-guide.mjs";
 import { appTools } from "./tools-app.mjs";
-import { compactVehicle, defineTool, enc, flightHelpers, SESSION_NAME, text, Type, VID } from "./tools-common.mjs";
+import { gimbalTools } from "./tools-gimbal.mjs"; // 12 §5
+import { compactVehicle, CONVENTION, defineTool, enc, FRAME_ARG, flightHelpers, SESSION_NAME, SETTLE_ARG, SPEED_ARG, text, Type, VID } from "./tools-common.mjs";
 import { dangerResolver, deviceTools } from "./tools-device.mjs";
 import { PROGRAM_DANGER, programTools } from "./tools-programs.mjs";
 import { matchTools } from "./tools-match.mjs"; // WP-B (07 §3-§4)
@@ -237,13 +238,22 @@ const ARS = Type.Object(
 );
 const STEP = Type.Object(
   {
-    action: Type.Union(["takeoff", "hover", "move", "yaw", "land"].map((a) => Type.Literal(a))),
+    action: Type.Union(["takeoff", "hover", "move", "yaw", "goto", "land"].map((a) => Type.Literal(a))),
     alt: Type.Optional(Type.Number({ description: "takeoff: metres above the ground" })),
     seconds: Type.Optional(Type.Number({ description: "hover: seconds" })),
     forward: Type.Optional(Type.Number({ description: "move: metres forward, negative = back" })),
     right: Type.Optional(Type.Number({ description: "move: metres right, negative = left" })),
+    left: Type.Optional(Type.Number({ description: "move: metres left, negative = right" })),
     up: Type.Optional(Type.Number({ description: "move: metres up, negative = down" })),
-    deg: Type.Optional(Type.Number({ description: "yaw: degrees, positive = clockwise (right)" })),
+    down: Type.Optional(Type.Number({ description: "move: metres down, negative = up" })),
+    x: Type.Optional(Type.Number({ description: "move: body x offset; goto: local x; in the step's frame" })),
+    y: Type.Optional(Type.Number({ description: "move: body y offset (flu LEFT, frd and relay right); goto: local y" })),
+    z: Type.Optional(Type.Number({ description: "move: body z offset (flu and relay up, frd DOWN); goto: local z" })),
+    deg: Type.Optional(Type.Number({ description: "yaw: degrees; flu counter-clockwise +, frd and relay clockwise +" })),
+    yaw: Type.Optional(Type.Number({ description: "goto: heading in the step's frame" })),
+    frame: Type.Optional(FRAME_ARG),
+    speed: Type.Optional(SPEED_ARG),
+    settle_s: Type.Optional(SETTLE_ARG),
   },
   { additionalProperties: false },
 );
@@ -256,7 +266,7 @@ export function relayTools(relay) {
     {
       name: "relay_fleet",
       label: "Fleet",
-      description: "List every aircraft: link, armed, mode, altitude, heading, battery, who controls it, capabilities.",
+      description: "List every aircraft: link, armed, mode, altitude, heading, model (anet-du7 or micro), nav (pose in the control frame), a gimbal summary, battery, who controls it, capabilities.",
       parameters: Type.Object({}),
       execute: async () => {
         const fleet = await relay.call("GET", "/fleet");
@@ -266,7 +276,7 @@ export function relayTools(relay) {
     {
       name: "relay_vehicle",
       label: "Aircraft status",
-      description: "Full status of one aircraft, including preflight results and recent status text.",
+      description: "Full status of one aircraft, including preflight results, recent status text, model, nav (position, velocity, body velocity, yaw and yaw rate in the control frame) and gimbal (the pod's view; null without one).",
       parameters: Type.Object({ vehicle: VID }),
       execute: async (_id, p) => {
         const v = await vehicle(p.vehicle);
@@ -276,6 +286,7 @@ export function relayTools(relay) {
           statustext: (v.statustext || []).slice(-5),
           gps: v.gps,
           link: v.link,
+          gimbal: v.gimbal,
         });
       },
     },
@@ -309,10 +320,17 @@ export function relayTools(relay) {
       label: "Take off",
       description:
         "Arm (simulators directly; real aircraft after the operator approves) and climb to alt metres, then hold. " +
-        "Works without a position estimate (climbs in altitude hold).",
-      parameters: Type.Object({ vehicle: VID, alt: Type.Number({ minimum: 0.2, maximum: 3, default: 1 }) }),
+        "Works without a position estimate (climbs in altitude hold). The ANetDU7 with a position estimate (PX4) arms in POSCTL, switches to OFFBOARD and climbs on speed-limited body velocity, 0.5 m/s unless speed says otherwise; " +
+        "its monitors (tilt over 20 degrees, position jump or loss, overspeed, the pilot taking the mode) fail the take-off and request a landing.",
+      parameters: Type.Object({
+        vehicle: VID,
+        alt: Type.Number({ minimum: 0.2, maximum: 3, default: 1 }),
+        speed: Type.Optional(SPEED_ARG),
+        settle_s: Type.Optional(SETTLE_ARG),
+      }),
       executionMode: "sequential",
-      execute: async (_id, p, signal) => text(await skill(p.vehicle, "takeoff", { alt: p.alt ?? 1, confirm: "ARM" }, signal)),
+      execute: async (_id, p, signal) =>
+        text(await skill(p.vehicle, "takeoff", { alt: p.alt ?? 1, ...(p.speed !== undefined ? { speed: p.speed } : {}), ...(p.settle_s !== undefined ? { settle_s: p.settle_s } : {}), confirm: "ARM" }, signal)),
     },
     {
       name: "relay_hover",
@@ -326,25 +344,42 @@ export function relayTools(relay) {
       name: "relay_move",
       label: "Move",
       description:
-        "Move relative to the nose: forward (negative back), right (negative left), up (negative down), metres. " +
-        "Without a position estimate the horizontal distance is an open-loop estimate (at most 2 m).",
+        "Move relative to the nose, metres. Name the direction: forward (negative back), right (negative left), left, up (negative down), down; these mean the same in every frame and are the safe way to say it. " +
+        "Or give x, y, z, body offsets in frame (flu: forward, LEFT, up; frd: forward, RIGHT, down; relay: forward, right, up); not both. " +
+        CONVENTION +
+        " Without a position estimate the horizontal distance is an open-loop estimate (at most 2 m). With one and speed (the ANetDU7 default is 0.5 m/s) it flies on speed-limited body velocity and finishes after settle_s within 0.2 m.",
       parameters: Type.Object({
         vehicle: VID,
         forward: Type.Optional(Type.Number({ minimum: -2, maximum: 2 })),
         right: Type.Optional(Type.Number({ minimum: -2, maximum: 2 })),
+        left: Type.Optional(Type.Number({ minimum: -2, maximum: 2 })),
         up: Type.Optional(Type.Number({ minimum: -1, maximum: 1 })),
+        down: Type.Optional(Type.Number({ minimum: -1, maximum: 1 })),
+        x: Type.Optional(Type.Number({ minimum: -2, maximum: 2, description: "body x (forward) in frame" })),
+        y: Type.Optional(Type.Number({ minimum: -2, maximum: 2, description: "body y in frame: flu LEFT, frd and relay right" })),
+        z: Type.Optional(Type.Number({ minimum: -1, maximum: 1, description: "body z in frame: flu and relay up, frd DOWN" })),
+        frame: Type.Optional(FRAME_ARG),
+        speed: Type.Optional(SPEED_ARG),
+        settle_s: Type.Optional(SETTLE_ARG),
       }),
       executionMode: "sequential",
-      execute: async (_id, p, signal) =>
-        text(await skill(p.vehicle, "move", { forward: p.forward ?? 0, right: p.right ?? 0, up: p.up ?? 0 }, signal)),
+      execute: async (_id, p, signal) => {
+        const { vehicle: id, ...rest } = p;
+        const generic = ["x", "y", "z"].some((k) => rest[k] !== undefined);
+        const named = ["forward", "right", "left", "up", "down"].some((k) => rest[k] !== undefined);
+        if (generic && named) throw new Error("invalid arguments: move takes x / y / z or named directions, not both");
+        // the pre-0.6 call (forward / right / up, zeros included) stays as it was
+        const body = generic || rest.left !== undefined || rest.down !== undefined ? rest : { ...rest, forward: rest.forward ?? 0, right: rest.right ?? 0, up: rest.up ?? 0 };
+        return text(await skill(id, "move", body, signal));
+      },
     },
     {
       name: "relay_yaw",
       label: "Turn",
-      description: "Turn in place by deg degrees relative to the current heading; positive turns right (clockwise).",
-      parameters: Type.Object({ vehicle: VID, deg: Type.Number({ minimum: -360, maximum: 360 }) }),
+      description: "Turn in place by deg degrees relative to the current heading. The sign follows frame: flu (the default) positive turns left (counter-clockwise), frd and relay positive turns right (clockwise). " + CONVENTION,
+      parameters: Type.Object({ vehicle: VID, deg: Type.Number({ minimum: -360, maximum: 360 }), frame: Type.Optional(FRAME_ARG) }),
       executionMode: "sequential",
-      execute: async (_id, p, signal) => text(await skill(p.vehicle, "yaw", { deg: p.deg }, signal)),
+      execute: async (_id, p, signal) => text(await skill(p.vehicle, "yaw", { deg: p.deg, ...(p.frame ? { frame: p.frame } : {}) }, signal)),
     },
     {
       name: "relay_land",
@@ -358,22 +393,37 @@ export function relayTools(relay) {
       name: "relay_plan",
       label: "Fly a sequence",
       description:
-        "Fly a whole sequence and wait for it: takeoff {alt}, hover {seconds}, move {forward,right,up}, yaw {deg}, land. " +
+        "Fly a whole sequence and wait for it, or a ready-made plan with builtin (du7_box: take off to 2 m, 1 m forward and back, 1 m left and back, land, at 0.5 m/s; relay_plans_builtin lists them). Give steps or builtin, not both. " +
+        "Actions: takeoff {alt, speed?}, hover {seconds}, move {forward, right, left, up, down | x, y, z; speed?, frame?}, yaw {deg, frame?}, goto {x, y, z, yaw?; speed?, frame?}, land. " +
+        "A step's numbers follow its own frame, omitted: the server's control_frame (flu by default: left and counter-clockwise are positive; frd and relay: right and clockwise); prefer the named directions in move. " +
         "Prefer this for multi-step requests. A failed step stops the sequence and the aircraft holds. " +
         "Aircraft without a position estimate fly it on the throttle stick in altitude hold: tuning {climb 0.55-1 (default 0.72), hover 0.35-0.65 (default 0.5)} sets the lift-off/climb stick and the stick that holds height; raise climb when it does not lift off, hover when it sinks.",
-      parameters: Type.Object({ vehicle: VID, steps: Type.Array(STEP, { minItems: 1, maxItems: 24 }), tuning: Type.Optional(TUNING) }),
+      parameters: Type.Object({
+        vehicle: VID,
+        steps: Type.Optional(Type.Array(STEP, { minItems: 1, maxItems: 24 })),
+        builtin: Type.Optional(Type.Literal("du7_box", { description: "a ready-made plan instead of steps (relay_plans_builtin)" })),
+        tuning: Type.Optional(TUNING),
+      }),
       executionMode: "sequential",
       execute: async (_id, p, signal, onUpdate) => {
+        if ((p.steps === undefined) === (p.builtin === undefined)) throw new Error("invalid arguments: give steps or builtin, not both");
         await claimFor(p.vehicle);
         const started = await relay.call("POST", `/vehicles/${enc(p.vehicle)}/plan`, {
-          steps: p.steps,
-          name: "copilot",
+          ...(p.builtin ? { builtin: p.builtin } : { steps: p.steps }),
+          name: p.builtin ?? "copilot",
           confirm: "ARM",
           ...(p.tuning ? { tuning: p.tuning } : {}),
         });
         return text(await waitPlan(p.vehicle, started.plan.id, signal, onUpdate));
       },
     },
+    defineTool(
+      "relay_plans_builtin",
+      "Ready-made plans",
+      "The ready-made plans relay_plan can fly with builtin: id, title, description and steps (du7_box is the ANetDU7 box test of its onboard test node).",
+      Type.Object({}),
+      async () => (await relay.call("GET", "/plans/builtin")).plans ?? [],
+    ),
     {
       name: "relay_plan_tune",
       label: "Tune sequence throttle",
@@ -530,6 +580,7 @@ export function toolsFor(relay, scope = "all", danger = dangerResolver(relay), l
   tools.push(...programTools(relay));
   tools.push(...matchTools(relay)); // WP-B: dogfight and leaderboard, in every scope
   tools.push(...twinTools(relay)); // 11 §12: firmware twins are simulators, in every scope and at every level
+  tools.push(...gimbalTools(relay)); // 12 §5: the gimbal pod is no flight action: in every scope and at every level
   if (scope === "flight") return tools;
   tools.push(...deviceTools(relay, danger).filter((t) => !sticks || !STICKS_HIDDEN_DEVICE.has(t.name)));
   if (scope === "flight+device") return tools;
@@ -542,7 +593,12 @@ export function systemPrompt(lang, scope = "all", level = "full") {
   const parts = [
     "You are Copilot, the assistant built into ANet Relay, a ground station for small quadcopters on a local network.",
     "Simulated aircraft have ids sim-N; real ones real-<ip>.",
-    "Units: metres, seconds, degrees. Moves are relative to the aircraft's nose; yaw is positive clockwise (right).",
+    "Units: metres, seconds, degrees. Moves are relative to the aircraft's nose.",
+    // 12 §3: the control frame; flu is the default since 0.6, and a sign mistake flies the wrong way
+    "Control frame (every tool that takes x / y / z, vx / vy / vz, yaw, deg or yaw_rate_dps reads them in it): by default flu, the server's control_frame setting: body forward / LEFT / up, local east / north / up, yaw 0 along +x (east) and counter-clockwise positive, so turning left and moving left are positive. frd: body forward / RIGHT / down, local north / east / down, yaw a compass heading (0 north), clockwise positive. " +
+      "Pass frame (flu, frd or relay) on a call to override the setting; relay is the pre-0.6 axes (body forward / right / up, local east / north / up, compass heading, clockwise positive), use it for numbers you read from ring courses or from earlier records. " +
+      "Prefer the named directions forward, right, left, up and down in relay_move: they mean the same in every frame. relay_vehicle reports nav, the pose in the control frame.",
+    "Aircraft: the ANetDU7 (model anet-du7, 2.5 kg, with a gimbal pod) is the default simulator and the main real aircraft; small aircraft (model micro) are optional. The ANetDU7 flies take-off, move and goto on speed-limited body velocity, 0.5 m/s unless you pass speed, and its monitors (tilt over 20 degrees, position jump or loss, overspeed, the pilot taking the mode) fail the step and request a landing.",
   ];
   if (sticks) {
     parts.push(
@@ -554,6 +610,9 @@ export function systemPrompt(lang, scope = "all", level = "full") {
     sticks
       ? "- relay_* (flight): read status, set a manual mode, arm and disarm, push the sticks for a few seconds (relay_sticks_for), fly stick timelines in stabilize (relay_timeline_*), land as a safety action, release the claim and stop."
       : "- relay_* (flight): read status and fly with takeoff, hover, move, yaw, land, whole sequences (relay_plan), stick timelines (relay_timeline_*: .ars files of throttle / pitch / roll / yaw blocks, trimmed and edited in flight, recorded from any flight), timed stick pushes (relay_sticks_for), arming, manual modes and flying a recorded flight again (relay_refly).",
+    ...(sticks ? [] : ["- relay_plans_builtin and relay_plan {builtin}: ready-made plans; du7_box is the ANetDU7 box test (take off to 2 m, 1 m forward and back, 1 m left and back, land)."]),
+    // 12 §5
+    "- relay_gimbal_status, relay_gimbal_control and relay_gimbal_captures: the gimbal pod of an aircraft (angle, rate, zoom, lens, photo, record, look_at, track and the rest); allowed at every flight level once you control the aircraft. Pod angles are the pod's own (yaw right +, pitch up +, looking down is negative) and do not follow the control frame; look_at takes a local point in the control frame. Zoom works per lens (visible1 1-30x, ir1 1-8x; visible2 and ir2 are fixed). Photos and recordings are listed by relay_gimbal_captures.",
     // 10 §2-§3: the timeline tuning loop
     "- Timelines: to tune a take-off / hover / land for an aircraft without a position estimate, write an .ars timeline, fly it on a simulator with airframe_set {params: {level_trim_deg, cg_offset_cm, with_assist: true}} so it drifts like the real one, watch relay_vehicle, cancel the drift with relay_timeline_edit trim (forward drift: negative pitch) and adjust block values and lengths; then fly the same timeline on the real aircraft.",
     "- program_*, challenge_*, job_status, duel_run, ladder, airframe_set (programs): write, check, test, judge and deploy onboard flight programs that fly the aircraft at 50 Hz, tune them live, read their status and log, run duels, and set simulator airframe defects. The guide at the end of these instructions explains how to write them.",
@@ -613,17 +672,21 @@ function summarise(name, args, danger) {
   const a = args || {};
   switch (name) {
     case "relay_takeoff":
-      return { action: "takeoff", alt: a.alt ?? 1 };
+      return { action: "takeoff", alt: a.alt ?? 1, ...(a.speed !== undefined ? { speed: a.speed } : {}) };
     case "relay_hover":
       return { action: "hover", seconds: a.seconds ?? 3 };
-    case "relay_move":
-      return { action: "move", forward: a.forward ?? 0, right: a.right ?? 0, up: a.up ?? 0 };
+    case "relay_move": {
+      // the directions the model asked for, with their frame and speed (12 §3): the card shows what will be flown
+      const { vehicle: _v, ...rest } = a;
+      const asked = Object.keys(rest).some((k) => ["left", "down", "x", "y", "z"].includes(k) && rest[k] !== undefined);
+      return { action: "move", ...(asked ? rest : { forward: a.forward ?? 0, right: a.right ?? 0, up: a.up ?? 0, ...rest }) };
+    }
     case "relay_yaw":
-      return { action: "yaw", deg: a.deg };
+      return { action: "yaw", deg: a.deg, ...(a.frame ? { frame: a.frame } : {}) };
     case "relay_land":
       return { action: "land" };
     case "relay_plan":
-      return { action: "plan", steps: a.steps };
+      return { action: "plan", ...(a.builtin ? { builtin: a.builtin } : { steps: a.steps }) };
     default: {
       // everything else: the renderer shows the tool name and its arguments
       const { vehicle: _vehicle, ...rest } = a;

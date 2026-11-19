@@ -9,7 +9,9 @@ body drag and the battery. Three presets ship:
   3S 850 mAh); the default, so a simulator without a frame flies as before;
 * ``small-250``: a 250 mm class quadrotor on 5 inch propellers and a 3S pack (the operator's small aircraft
   class, 11 §0);
-* ``large-450``: a 450 mm class quadrotor on 10 inch propellers and a 4S pack.
+* ``large-450``: a 450 mm class quadrotor on 10 inch propellers and a 4S pack;
+* ``anet-du7``: the ANetDU7 (12 §2.1): 2.5 kg with its protective cage, 500 mm wheelbase, 10 inch
+  propellers, 4S 5300 mAh. New simulators take it unless the request or the settings say otherwise.
 
 ``derive_from_hover`` sets the rotor maximum so the aircraft hovers at a flight controller's learned hover
 throttle (ArduPilot ``MOT_THST_HOVER`` with ``MOT_THST_EXPO`` and ``MOT_SPIN_MIN`` / ``MOT_SPIN_MAX``;
@@ -35,6 +37,7 @@ LEG_RATIO = 0.12  # leg length below the centre of mass per metre of wheelbase (
 TOP_RATIO = 0.12  # top of the body above the centre of mass
 PROP_Z_RATIO = 0.06  # propeller plane above the centre of mass
 DEFAULT = "micro-120"
+ANET_DU7 = "anet-du7"
 
 # Limits for validation (and the editor's ranges). Vectors are checked per component.
 LIMITS: dict[str, tuple[float, float]] = {
@@ -308,7 +311,10 @@ def derive_from_hover(
     return replace(frame, thrust_to_weight=twr)
 
 
-def _preset(name: str, mass: float, wheelbase: float, prop_in: float, **kw: Any) -> FrameModel:
+def _preset(
+    name: str, mass: float, wheelbase: float, prop_in: float, drag: float = 1.0, **kw: Any
+) -> FrameModel:
+    """``drag`` scales the body drag of an open frame (a protective cage adds frontal area)."""
     ixx, iyy, izz = inertia_from(mass, wheelbase)
     return FrameModel(
         preset=name,
@@ -318,8 +324,8 @@ def _preset(name: str, mass: float, wheelbase: float, prop_in: float, **kw: Any)
         ixx=ixx,
         iyy=iyy,
         izz=izz,
-        body_drag_lin=(0.20 * mass, 0.20 * mass, 0.35 * mass),
-        body_drag_quad=(0.065 * mass, 0.065 * mass, 0.08 * mass),
+        body_drag_lin=(0.20 * mass * drag, 0.20 * mass * drag, 0.35 * mass * drag),
+        body_drag_quad=(0.065 * mass * drag, 0.065 * mass * drag, 0.08 * mass * drag),
         **kw,
     )
 
@@ -359,6 +365,24 @@ PRESETS: dict[str, FrameModel] = {
         r_internal_ohm=0.02,
         load_current_a=45.0,
     ),
+    # ANetDU7 (12 §2.1): 2.5 kg with battery and cage, 500 mm wheelbase, 10 inch propellers, 4S 5300 mAh
+    # 45C, about 10 minutes of flight (27 A in hover). The cage raises the body drag.
+    ANET_DU7: _preset(
+        ANET_DU7,
+        2.5,
+        0.50,
+        10.0,
+        drag=1.6,
+        thrust_to_weight=2.0,
+        omega_max=1000.0,
+        tau_up_s=0.04,
+        tau_down_s=0.06,
+        yaw_moment_m=0.016,
+        cells=4,
+        capacity_mah=5300.0,
+        r_internal_ohm=0.012,
+        load_current_a=62.0,
+    ),
 }
 
 
@@ -371,6 +395,7 @@ def preset(name: str) -> FrameModel:
 
 
 __all__ = [
+    "ANET_DU7",
     "DEFAULT",
     "DEFAULT_FRAME",
     "PRESETS",

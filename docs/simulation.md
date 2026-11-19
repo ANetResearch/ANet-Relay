@@ -10,14 +10,14 @@ through Relay instead.
 
 | Property | What it means |
 |---|---|
-| Built into the desktop app | **Add sim** in the fleet bar (or `POST /sims`) starts a simulated aircraft in the same process; no game engine, GPU or extra installation |
+| Built into the desktop app | **Add sim** in the fleet bar (or `POST /sims`) starts a simulated aircraft in the same process; no game engine, GPU or extra installation. Since 0.6.0 it is an ANetDU7 unless you pick a small preset (below) |
 | Speaks MAVLink like a real aircraft | A simulated ArduPilot-style or PX4-style autopilot (modes, arming checks, failsafes, parameters, landing detection) behind the same driver, stick path, skills and preflight as a real aircraft |
 | Stick-level control | Agents and onboard programs fly with roll, pitch, yaw and throttle at 50 Hz (06 §5); hover assist can be switched off for physical flight |
 | Deterministic | The same scenario, seed and program revision always give the same flight; airframe defects (centre of gravity, level error, motor efficiency, propeller damage, noise) are seeded |
 | Headless and faster than real time | The judge's evaluator steps the same simulator without sockets or a window, about 13x real time with one aircraft and 3.5–4x with four, for challenges, duels and their replays |
 | Arena | Virtual rounds, collisions, matches, dogfights and a leaderboard, also across terminals on the LAN; simulators only |
 
-It is not a replacement for a high-fidelity simulator: there are no camera or lidar images, the aerodynamics are a
+It is not a replacement for a high-fidelity simulator: there are no camera or lidar sensor images (the gimbal pod's picture-in-picture is a render of the stage scene, not a camera model), the aerodynamics are a
 compact rigid-body model with motor dynamics, drag, ground effect and gusts, and the flight-control firmware is a
 model of the autopilot, not the firmware itself. To test the real firmware, start a firmware twin (0.5.4): Relay
 runs the official ArduCopter or PX4 SITL build that ships with it, with a real aircraft's version and parameters,
@@ -25,6 +25,21 @@ against its own physics, and the twin flies like any simulator ([Agent API, Firm
 [runtime packs](autopilot-packs.md)). PX4 aircraft connected over USB can also run hardware in the loop. Section 3
 connects a SITL you run yourself, for example with Gazebo; to study vision or aerodynamics, use one of the
 simulators below.
+
+### Aircraft: the ANetDU7 and the small presets (0.6.0)
+
+A simulator's physics is a frame preset (`sim.frame`; mass, wheelbase, propellers, battery, thrust-to-weight and the motor and drag model that follow from them). A new simulator takes the setting `sim_frame_default`, by default `anet-du7`; a request names another with `frame.preset` (**Add sim** offers the same choice), and any value of a preset can be overridden.
+
+| Preset | Aircraft | Mass | Wheelbase | Propellers | Battery | Thrust-to-weight | Flavour by default |
+|---|---|---|---|---|---|---|---|
+| `anet-du7` (default) | ANetDU7, CUAV X7+ quadcopter with a guard frame, 684 × 684 × 211 mm | 2.5 kg | 500 mm | 10 in | 4S 5300 mAh | 2.0 | PX4, with a simulated gimbal pod |
+| `micro-120` | The small aircraft of 0.5 (GoFilm 20 model on the stage) | 0.12 kg | 250 mm | 5.1 in | 3S 850 mAh | 2.4 | ArduPilot |
+| `small-250` | 250 mm class, 5 in propellers | 0.42 kg | 250 mm | 5 in | 3S 850 mAh | 3.5 | ArduPilot |
+| `large-450` | 450 mm class, 10 in propellers | 1.5 kg | 450 mm | 10 in | 4S 5000 mAh | 2.2 | ArduPilot |
+
+The `anet-du7` preset takes mass, wheelbase and battery from the aircraft's data sheet, and the guard frame raises the body drag. Its rotor inertia and thrust curve are typical values for that class, not an identification of a real aircraft; a firmware twin loaded with a real aircraft's parameters aligns the hover throttle. The vehicle's `model` is `anet-du7` for this preset and `micro` for the others, which decides the model the stage draws at real size and the flight defaults (the ANetDU7 flies take-off, move and goto on speed-limited body velocity at 0.5 m/s, see the [Agent API](agent-api.md#anetdu7-and-speed-limited-flight-060)). Dogfights, judged challenges and built-in programs always use `micro-120`; firmware twins use their profile's frame, else `micro-120`.
+
+**The gimbal pod.** An `anet-du7` simulator carries a simulated pod (`vehicle.gimbal`, `kind: "sim"`) with the same actions as the real DYT pod ([Agent API, Gimbal pod](agent-api.md#gimbal-pod-060)). It runs on the physics clock, so it is deterministic: each axis follows its rate command with a first-order lag (time constant 0.08 s, at most 100°/s), pitch is limited to −120°…+90°, azimuth is continuous over ±180°, `follow` keeps the azimuth with the nose and `lock` holds the geographic pointing; zoom approaches the target at 2× per second, each lens keeping its own magnification; the laser rangefinder intersects the line of sight with the ground (z = 0) and the rings and obstacles of the world up to 1200 m; `track` locks the ground point behind a picture pixel and holds the pointing to it; photos and recording are logged with the aircraft's pose. The stage draws the ANetDU7 model and turns its pod with `vehicle.gimbal`; the picture-in-picture is rendered from the stage scene with the lens's field of view (a simulated pod only; a real pod's video stream is not decoded in 0.6.0). A `micro` simulator has no pod and answers pod actions with `gimbal_missing`.
 
 ## 2. Simulators in the field
 

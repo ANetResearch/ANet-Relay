@@ -25,8 +25,8 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from . import authority as auth
-from . import course as coursemod
 from . import (
+    coords,  # 12 §3: control frame conventions
     device,
     flight_level,  # WP-1: agent flight level (06 §5)
     plans,
@@ -34,6 +34,7 @@ from . import (
     refly,
     skills,
 )
+from . import course as coursemod
 from .alerts import AlertBook, Condition
 from .authority import Actor, Authority
 from .config import (
@@ -72,6 +73,7 @@ from .errors import RelayError, err
 from .events import EventBus
 from .fleet_airframe import AirframeOps  # WP-2a airframe defects (06 §4)
 from .fleet_device import DeviceOps
+from .fleet_gimbal import GimbalOps  # 12 §5 gimbal pods
 from .fleet_hitl import HitlOps  # serial links and PX4 hardware in the loop (11 §7)
 from .fleet_sequence import SequenceOps  # stick timelines, .ars (10 §2)
 from .fleet_sim import SimOps
@@ -92,6 +94,7 @@ from .procedures import ProcedureOps
 from .programs.service import ProgramService  # WP-1: onboard programs (06 §2)
 from .scenarios import Dogfights  # WP-B: dogfight scenario (07 §3)
 from .sessions import Session, SessionManager
+from .sim import frame as simframe  # 12 §2: frame presets (the ANetDU7)
 from .sim.autopilot import ARDUPILOT, PX4, SimAutopilot
 from .sim.world import World  # WP-A (07 §2)
 
@@ -173,6 +176,8 @@ class Vehicle:
         self.link_state = "waiting"
         self.bridge: dict[str, Any] | None = None
         self.spawn: tuple[float, float] = (0.0, 0.0)
+        self.model_override: str | None = None  # 12 §2.2: set directly (tests, replays)
+        self.model_source: Callable[[Any], str] | None = None  # real aircraft: the fleet's settings
         self.frame_offset = (0.0, 0.0, 0.0)
         self.safety_origin: tuple[float, float, float] | None = None
         self.identity_at: float | None = None
@@ -257,6 +262,33 @@ class Vehicle:
 
     def airborne(self) -> bool:
         return self.armed and self.landed in ("air", "takeoff", "landing")
+
+    @property
+    def model(self) -> str:
+        """``anet-du7`` or ``micro`` (12 §2.2): a simulator's follows its physics frame, a real
+        aircraft's is the operator's choice (default: the ``real_model_default`` setting)."""
+        if self.model_override is not None:
+            return self.model_override
+        if self.kind == "sim":
+            quad = getattr(getattr(self.driver, "sim", None), "quad", None)
+            preset = getattr(getattr(quad, "frame", None), "preset", None)
+            return "anet-du7" if preset == simframe.ANET_DU7 else "micro"
+        return self.model_source(self) if self.model_source is not None else "micro"
+
+    @model.setter
+    def model(self, value: str) -> None:
+        self.model_override = value
+
+    def local_velocity_enu(self) -> tuple[float, float, float] | None:
+        local = self.state["local"]
+        if local is None:
+            return None
+        return (local["vy"], local["vx"], -local["vz"])
+
+    def local_age(self, now: float) -> float | None:
+        """Seconds since the last local position report."""
+        local = self.state["local"]
+        return None if local is None else now - local["t"]
 
     def has_capability(self, name: str) -> bool:
         return self.capabilities.has(name)
@@ -366,7 +398,9 @@ class Vehicle:
         return auth.controller(self.auth, claim is not None and sessions.alive(claim.session_id))
 
 
-class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, WorldOps, TwinOps, HitlOps):
+class FleetService(
+    DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, WorldOps, TwinOps, HitlOps, GimbalOps
+):
     def __init__(
         self,
         settings: Settings | None = None,
@@ -471,6 +505,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
         if self.link is not None:
             self.link.close()
         self._serial_shutdown()  # 11 §7: release the serial ports
+        self._gimbal_shutdown()  # 12 §5: close the gimbal pods' links
         self.arena.close()
         self.dogfights.close()  # WP-B
         self.judge.close()  # WP-2b: cancel evaluation jobs and wait for their workers
@@ -565,6 +600,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
             for msg in msgs:
                 self._on_message(v, msg, now)
         self._hitl_step(now)  # 11 §7: hardware-in-the-loop sessions and their sensor frames
+        self._gimbal_step(now)  # 12 §5: gimbal pods, with the aircraft poses the drivers just reported
         # LAN arena (WP-D): fire, bullets and hits right after the simulators stepped; it keeps to its own
         # wall-time budget, and a failure in it never skips the stick, watchdog and stop path below
         try:
@@ -1277,6 +1313,38 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
     def _attach(self, v: Vehicle) -> None:
         v.clock = self.clock
         v.driver.clock = self.clock
+        v.model_source = self._real_model
+
+    def _real_model(self, v: Vehicle) -> str:
+        """A real aircraft's model (12 §2.2): the operator's choice for it, else the default setting."""
+        settings = self.settings
+        key = getattr(v, "store_key", None) or v.id
+        return settings.vehicle_models.get(key) or settings.real_model_default
+
+    def set_model(self, vid: str, model: str) -> dict[str, Any]:
+        """Set what a real aircraft is (anet-du7 or micro); a simulator's model follows its frame."""
+        if model not in ("anet-du7", "micro"):
+            raise err("invalid_request", reason="model must be anet-du7 or micro")
+
+        def run() -> dict[str, Any]:
+            v = self._vehicle(vid)
+            if v.kind != "real":
+                raise err(
+                    "invalid_request", reason="a simulator's model follows its frame (PUT /sims/{id}/frame)"
+                )
+            key = getattr(v, "store_key", None) or v.id
+            models = {**self.settings.vehicle_models, key: model}
+            self.settings = self.settings.merged({"vehicle_models": models})
+            save_settings(self.data_dir, self.settings)
+            self.events.emit(
+                "model_changed",
+                v.id,
+                data={"model": model},
+                labels={"vehicle": v.label, "detail": {"anet-du7": "ANetDU7", "micro": "Micro 120"}[model]},
+            )
+            return {"id": vid, "model": model}
+
+        return self.call(run)
 
     def _new_id(self, host: str) -> str:
         return "real-" + host.replace(".", "-")
@@ -1373,6 +1441,12 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
             )
         if profile is not None or pack is not None or home is not None:
             raise err("invalid_request", reason="profile, pack and home apply to engine sitl")
+        if frame is None and self.settings.sim_frame_default != simframe.DEFAULT:
+            frame = {"preset": self.settings.sim_frame_default}  # 12 §2.2: the ANetDU7 unless set otherwise
+        if not autopilot_given and (frame or {}).get("preset") == simframe.ANET_DU7:
+            flavour = PX4  # the real ANetDU7 flies PX4 (CUAV X7+)
+        if frame == {"preset": simframe.DEFAULT}:
+            frame = None  # exactly the micro-120 flight model of v0.5.3 (no rounded values)
         frame_model = None
         if frame is not None:
             from .twin import profile as tprofile
@@ -1410,6 +1484,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
                 v.frame_offset = (v.spawn[0], v.spawn[1], 0.0)
                 v.safety_origin = (v.spawn[0], v.spawn[1], 0.0)
                 self.vehicles[vid] = v
+                self._gimbal_autoattach(v)  # 12 §5: an ANetDU7 carries its pod (after v.model is set)
                 added.append(vid)
                 self.events.emit(
                     "sim_added",
@@ -1419,6 +1494,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
                         "engine": "relay",
                         "hover_assist": autopilot.hover_assist,
                         "airframe": autopilot.airframe.ref(),  # WP-2a
+                        "model": v.model,  # 12 §2.2
                     },
                     labels={"vehicle": v.label},
                 )
@@ -1460,6 +1536,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
         if v.kind == "sim":
             self._close_twin(v)  # 11 §6.3: the firmware process ends with its simulator
             self.events.emit("sim_removed", v.id, labels={"vehicle": v.label})
+        self._gimbal_drop(v)  # 12 §5
         self.vehicles.pop(v.id, None)
         if v.host:
             self.by_host.pop(v.host, None)
@@ -1862,7 +1939,11 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
         self, v: Vehicle, name: str, params: dict[str, Any]
     ) -> tuple[dict[str, Any], tuple[float, float, float] | None]:
         """Check a skill against the vehicle and return its executor parameters (vehicle thread)."""
-        params = dict(params)
+        try:  # 12 §3: the request's frame (or the control_frame setting) into the executor's own axes
+            params = coords.normalise_skill(name, dict(params), self.settings.control_frame)
+        except coords.FrameError as exc:
+            raise err("invalid_request", reason=exc.reason) from None
+        track = self._track_speed(v, name, params)  # 12 §4: speed-limited tracking
         sv = self.settings.safety_volume
         required = skills.requirement(name)
         if not v.capabilities.has(required):
@@ -1876,6 +1957,8 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
             params["alt"] = float(alt)
             # Without a position estimate GUIDED / OFFBOARD takeoff is refused: climb on the stick.
             params["_stick"] = not position
+            if track is not None and position and v.autopilot == modes.PX4:
+                params["_track"] = track  # arm in POSCTL, OFFBOARD, climb on body velocity (12 §4)
             if not v.armed:
                 self._arm_checks(v, params.get("confirm"))
         elif name == "goto":
@@ -1889,6 +1972,8 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
             params["distance"] = math.dist(local, target_local) if local else 3.0
             if not v.armed:
                 raise err("not_armed")
+            if track is not None:
+                params["_track"] = track
         elif name == "move":
             forward, right, up = (_number_param(params, k) for k in ("forward", "right", "up"))
             params.update(forward=forward, right=right, up=up)
@@ -1908,6 +1993,8 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
                 target_local = (local[0] + east, local[1] + north, local[2] + up)
                 params["distance"] = math.dist(local, target_local)
                 params["yaw"] = None
+                if track is not None:
+                    params["_track"] = track
             else:
                 if math.hypot(forward, right) > skills.MOVE_OPEN_LOOP_MAX_M:
                     raise err(
@@ -1959,6 +2046,11 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
             if local is None:
                 raise err("no_position_estimate")
             params["_box"] = self._local_box(v, local)
+            body = params.get("_body")
+            if body is not None:  # 12 §3.2: body velocity; the same +-2 m/s per axis
+                for axis, value in zip(("vx", "vy", "vz"), body, strict=True):
+                    if not -2.0 <= value <= 2.0:
+                        raise err("invalid_request", reason=f"{axis} must be -2 to 2")
         elif name == "land":
             params["_stick"] = v.autopilot == modes.PX4 and not position
             params["_ground"] = v.ground_alt
@@ -1967,6 +2059,27 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
         elif name == "replay" and not v.armed:
             self._arm_checks(v, params.get("confirm"))
         return params, target_local
+
+    def _track_speed(self, v: Vehicle, name: str, params: dict[str, Any]) -> dict[str, float] | None:
+        """The tracker settings of a take-off, move or goto (12 §4), or None for the autopilot's own
+        position setpoints. ``speed`` asks for it on any aircraft; the ANetDU7 flies it by default at
+        0.5 m/s, the way its onboard test node does."""
+        if name not in ("takeoff", "move", "goto"):
+            return None  # elsewhere ``speed`` is something else (a replay's time scale) or ignored
+        speed, settle = params.pop("speed", None), params.pop("settle_s", None)
+        if speed is None and v.model != "anet-du7":
+            if settle is not None:
+                raise err("invalid_request", reason="settle_s needs speed")
+            return None
+        out = {"speed": skills.TRACK_SPEED, "settle_s": skills.TRACK_SETTLE_S}
+        for key, value, low, high in (("speed", speed, 0.1, 5.0), ("settle_s", settle, 0.0, 10.0)):
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not low <= value <= high:
+                raise err("invalid_request", reason=f"{key} must be {low:g}-{high:g}")
+            out[key] = float(value)
+        params["speed"], params["settle_s"] = out["speed"], out["settle_s"]
+        return out
 
     def _start_skill(
         self,
@@ -2977,6 +3090,14 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
             "confirmed": v.confirmed.view(),
             "preflight": preflight.summary(items),
             "sim": self._sim_view(v),  # WP-C (05 §5.2)
+            "model": v.model,  # 12 §2.2
+            "nav": coords.nav_view(  # 12 §3.3: in the control_frame convention
+                self.settings.control_frame,
+                v.world_enu(),
+                v.local_velocity_enu(),
+                None if att is None else float(att["yaw"]),
+                None if att is None else float(att["yawspeed"]),
+            ),
             "course": None if v.course is None else v.course.view(now),
             "record_session": v.record_session,
             "procedure": self._procedure_brief(v),  # bench procedure (WP-B, 05 §4.4)
@@ -2987,6 +3108,7 @@ class FleetService(DeviceOps, SimOps, AirframeOps, SequenceOps, ProcedureOps, Wo
             "transport": self._transport(v),  # udp | serial | sim
             "serial": self._serial_view(v),
             "hitl": self._hitl_snapshot(v),
+            "gimbal": self._gimbal_view(v, now),  # 12 §5: null without a pod
         }
         self._hitl_overlay(v, view, now)
         return view

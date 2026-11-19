@@ -16,19 +16,24 @@ from .errors import err
 MAX_STEPS = 24
 ACTIONS = ("takeoff", "hover", "hold", "move", "yaw", "land", "goto", "rtl", "sticks", "attitude", "velocity")
 
+# 12 §4: speed-limited tracking of take-off, move and goto
+_TRACK = ("speed", "settle_s")
+# 12 §3: text parameters and their values (the control frame of a step and the velocity reference)
+_CHOICES = {"frame": ("flu", "frd", "relay"), "reference": ("body", "local")}
+
 # action -> (skill name, allowed parameters)
 _SKILL = {
-    "takeoff": ("takeoff", {"alt"}),
+    "takeoff": ("takeoff", {"alt", *_TRACK}),
     "hover": ("hold", {"seconds"}),
     "hold": ("hold", {"seconds"}),
-    "move": ("move", {"forward", "right", "up"}),
-    "yaw": ("yaw", {"deg"}),
+    "move": ("move", {"forward", "right", "left", "up", "down", "x", "y", "z", "frame", *_TRACK}),
+    "yaw": ("yaw", {"deg", "frame"}),
     "land": ("land", set()),
-    "goto": ("goto", {"x", "y", "z", "yaw"}),
+    "goto": ("goto", {"x", "y", "z", "yaw", "frame", *_TRACK}),
     "rtl": ("rtl", set()),
     "sticks": ("sticks", {"roll", "pitch", "yaw", "throttle", "seconds"}),
     "attitude": ("attitude", {"roll_deg", "pitch_deg", "yaw_rate_dps", "thrust", "seconds"}),
-    "velocity": ("velocity", {"vx", "vy", "vz", "yaw_rate_dps", "seconds"}),
+    "velocity": ("velocity", {"vx", "vy", "vz", "yaw_rate_dps", "seconds", "frame", "reference"}),
 }
 
 _RANGES = {
@@ -37,6 +42,10 @@ _RANGES = {
     "forward": (-5.0, 5.0),
     "right": (-5.0, 5.0),
     "up": (-2.0, 2.0),
+    "left": (-5.0, 5.0),
+    "down": (-2.0, 2.0),
+    "speed": (0.1, 5.0),
+    "settle_s": (0.0, 10.0),
     "deg": (-360.0, 360.0),
     "x": (-1e4, 1e4),
     "y": (-1e4, 1e4),
@@ -53,6 +62,7 @@ _RANGES = {
 # Parameters whose range differs from the shared table for one action.
 _ACTION_RANGES = {
     "sticks": {"roll": (-1.0, 1.0), "pitch": (-1.0, 1.0), "yaw": (-1.0, 1.0), "throttle": (0.0, 1.0)},
+    "move": {"x": (-5.0, 5.0), "y": (-5.0, 5.0), "z": (-5.0, 5.0)},  # body offsets in the step's frame
 }
 _SECONDS = {"sticks": (0.05, 10.0), "attitude": (0.05, 10.0), "velocity": (0.05, 10.0)}
 _REQUIRED = {
@@ -116,6 +126,12 @@ def normalise_steps(steps: Any, max_steps: int = MAX_STEPS) -> list[dict[str, An
             if key not in raw or raw[key] is None:
                 continue
             value = raw[key]
+            if key in _CHOICES:
+                if value not in _CHOICES[key]:
+                    choices = " or ".join(_CHOICES[key])
+                    raise err("invalid_request", reason=f"step {i} ({action}): {key} must be {choices}")
+                step[key] = value
+                continue
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
                 raise err("invalid_request", reason=f"step {i} ({action}): {key} must be a number")
             low, high = _ACTION_RANGES.get(action, {}).get(key) or (
@@ -124,8 +140,10 @@ def normalise_steps(steps: Any, max_steps: int = MAX_STEPS) -> list[dict[str, An
             if not low <= float(value) <= high:
                 raise err("invalid_request", reason=f"step {i} ({action}): {key} must be {low:g} to {high:g}")
             step[key] = float(value)
-        if action == "move" and not any(step.get(k) for k in ("forward", "right", "up")):
-            raise err("invalid_request", reason=f"step {i} (move): give forward, right or up")
+        if action == "move" and not any(
+            step.get(k) for k in ("forward", "right", "left", "up", "down", "x", "y", "z")
+        ):
+            raise err("invalid_request", reason=f"step {i} (move): give a direction or x, y, z")
         for key in _REQUIRED.get(action, ()):
             if key not in step:
                 raise err("invalid_request", reason=f"step {i} ({action}): {key} is required")
@@ -135,6 +153,47 @@ def normalise_steps(steps: Any, max_steps: int = MAX_STEPS) -> list[dict[str, An
             raise err("invalid_request", reason=f"step {i} (goto): x, y and z are required")
         out.append(step)
     return out
+
+
+# Ready-made plans (12 §4). ``du7_box`` is the route of the ANetDU7 onboard test node
+# (vehicles/anet-du7/tests/u7_mavros_simple.py): 2 m up, 1 m forward and back, 1 m left and back, land. The
+# directions are named, so it reads the same in every control frame.
+BUILTIN: dict[str, dict[str, Any]] = {
+    "du7_box": {
+        "title": "ANetDU7 box test",
+        "title_zh": "ANetDU7 方框测试",
+        "description": "Take off to 2 m, 1 m forward and back, 1 m left and back, land; 0.5 m/s.",
+        "description_zh": "起飞到 2 米，前进 1 米并返回，左移 1 米并返回，降落；限速 0.5 m/s。",
+        "steps": [
+            {"action": "takeoff", "alt": 2.0, "speed": 0.5},
+            {"action": "move", "forward": 1.0, "speed": 0.5},
+            {"action": "move", "forward": -1.0, "speed": 0.5},
+            {"action": "move", "left": 1.0, "speed": 0.5},
+            {"action": "move", "left": -1.0, "speed": 0.5},
+            {"action": "land"},
+        ],
+    },
+}
+
+
+def native(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """``steps`` with ``frame: "relay"`` on every step that takes a frame and names none: plans built
+    inside Relay (bench procedures, re-flies of records) are in Relay's own axes (12 §3)."""
+    out = []
+    for step in steps:
+        step = dict(step)
+        action = step.get("action")
+        if action in _SKILL and "frame" in _SKILL[action][1] and step.get("frame") is None:
+            step["frame"] = "relay"
+        out.append(step)
+    return out
+
+
+def builtin(name: Any) -> dict[str, Any]:
+    plan = BUILTIN.get(name) if isinstance(name, str) else None
+    if plan is None:
+        raise err("invalid_request", reason=f"builtin must be one of {', '.join(BUILTIN)}")
+    return plan
 
 
 def skill_for(step: dict[str, Any]) -> tuple[str, dict[str, Any]]:

@@ -74,9 +74,18 @@ test('03 §14 scenario: boot, possess, relay hand-back, gamepad, course, scan, b
     const card = (id: string) => page.locator(`[data-fleet-card="${id}"]`)
 
     await test.step('add four simulators', async () => {
+      // the add-simulator dialog (11 §11); this suite flies the small ArduPilot quad of 0.5 (ALT_HOLD below), the
+      // ANetDU7 default has its own spec (du7.e2e.ts)
       await page.getByRole('button', { name: 'Add simulated aircraft' }).click()
+      const dialog = page.locator('[data-sim-dialog]')
+      await expect(dialog).toBeVisible()
+      await expect(dialog.locator('[data-sim-aircraft="anet-du7"]')).toBeVisible()
+      await dialog.getByRole('button', { name: 'Small quad' }).click()
+      await expect(dialog.locator('[data-sim-aircraft="small"]')).toBeVisible()
+      await expect(dialog.locator('[data-sim-autopilot]')).toHaveValue('ardupilot')
+      await dialog.locator('#sim-count').fill('4')
+      await dialog.locator('[data-sim-add]').click()
       await expect(card('sim-1')).toBeVisible()
-      for (let i = 0; i < 3; i++) await page.getByRole('button', { name: 'Add sim', exact: true }).click()
       await expect(card('sim-4')).toBeVisible()
       await until(async () => (await fleet()).vehicles.filter((v) => v.kind === 'sim').length === 4, '4 sims')
       await shot(page, 'four-sims')

@@ -2,7 +2,8 @@
 // React); here they are smoothed for display only (02 §6.3: 120 ms exponential smoothing of position and attitude,
 // with a short dead-reckoning step so 10 Hz snapshots glide instead of stepping). 11 §8.5: the attitude is smoothed
 // as a quaternion (slerp), so inverted flight, full rolls and a tumbling wreck never jump; a wreck keeps the pose
-// the physics leaves it in.
+// the physics leaves it in. 12 §5.5: the gimbal joints follow vehicle.gimbal with the same smoothing and lead.
+// Each aircraft is drawn with its model's template (stage/models.ts); an aircraft waits until its template exists.
 import * as React from 'react'
 import * as THREE from 'three'
 import { useFrame } from '@react-three/fiber'
@@ -12,11 +13,13 @@ import { useUi } from '@/store/ui'
 import { motionReduced } from '@/ui/motion/tier'
 import { useReplay } from '@/records/replayState'
 import { live } from '../live'
-import { attitudeQuat, enuToScene, expAlpha, smoothAttitude } from '../math'
+import { attitudeQuat, enuToScene, expAlpha, smoothAngle, smoothAttitude } from '../math'
+import { modelOf, type ModelId } from '../models'
 import { useStage } from '../store'
 import { Aircraft, handles, TRAIL_HZ, TRAIL_POINTS, type AircraftHandles } from './Aircraft'
 import { trailJump } from './trail'
-import type { AirframeTemplate } from './model'
+import { restQuaternion, type AirframeTemplate } from './model'
+import { gimbalNodeAngles } from '@/gimbal/model'
 
 const SMOOTH_TAU = 0.12
 const LEAD_MAX_S = 0.15
@@ -25,7 +28,11 @@ const PULSE_MS = 350
 
 const tmp = new THREE.Vector3()
 const proj = new THREE.Vector3()
-const LABEL_LIFT = 0.12
+const qb = new THREE.Quaternion()
+const AXIS_Y = new THREE.Vector3(0, 1, 0)
+const AXIS_X = new THREE.Vector3(1, 0, 0)
+const camPos = new THREE.Vector3()
+const camDir = new THREE.Vector3()
 
 interface LabelBox {
   h: AircraftHandles
@@ -51,7 +58,7 @@ function declutter(camera: THREE.Camera, size: { width: number; height: number }
     const el = h.label.current
     if (!el || !h.root.visible) continue
     proj.copy(h.root.position)
-    proj.y += LABEL_LIFT
+    proj.y += h.metrics.label
     proj.project(camera)
     if (proj.z > 1) continue
     boxes.push({
@@ -87,20 +94,66 @@ function declutter(camera: THREE.Camera, size: { width: number; height: number }
   }
 }
 
-/** Live fleet ids, or only the replayed aircraft while Records replays a flight. */
-function useIds(): { id: string; label: string; sim: boolean }[] {
-  const liveIds = useRelay(useShallow((s) => (s.fleet?.vehicles ?? []).map((v) => v.id)))
+/** Live fleet ids with their models, or only the replayed aircraft while Records replays a flight. */
+function useIds(): { id: string; label: string; sim: boolean; model: ModelId }[] {
+  const liveIds = useRelay(useShallow((s) => (s.fleet?.vehicles ?? []).map((v) => `${v.id}\u0000${modelOf(v)}`)))
   const replay = useReplay(useShallow((r) => (r.active && r.vehicleId ? [r.vehicleId, r.label, r.kind] : null)))
   // WP-3: the aircraft of a multi-aircraft trace, keyed by id and label only (frames change every tick)
   const crafts = useReplay(useShallow((r) => (r.active && r.crafts ? r.crafts.map((c) => `${c.id}\u0000${c.label}`) : null)))
   return React.useMemo(() => {
-    if (crafts) return crafts.map((k) => { const [id, label] = k.split('\u0000'); return { id, label, sim: true } })
-    if (replay) return [{ id: replay[0], label: replay[1], sim: replay[2] === 'sim' }]
-    return liveIds.map((id) => ({ id, label: id, sim: id.startsWith('sim-') }))
+    // evaluation traces are headless micro-120 simulators
+    if (crafts) return crafts.map((k) => { const [id, label] = k.split('\u0000'); return { id, label, sim: true, model: 'micro' as const } })
+    if (replay) {
+      // a record carries no model: the live aircraft's when it is still connected, else the micro
+      const known = liveIds.find((k) => k.split('\u0000')[0] === replay[0])
+      const model: ModelId = known?.split('\u0000')[1] === 'anet-du7' ? 'anet-du7' : 'micro'
+      return [{ id: replay[0], label: replay[1], sim: replay[2] === 'sim', model }]
+    }
+    return liveIds.map((k) => {
+      const [id, model] = k.split('\u0000')
+      return { id, label: id, sim: id.startsWith('sim-'), model: model === 'anet-du7' ? ('anet-du7' as const) : ('micro' as const) }
+    })
   }, [replay, crafts, liveIds])
 }
 
-export function Fleet({ template }: { template: AirframeTemplate }) {
+/** One frame of a gimbal joint: smoothed towards the pod's angles with a short lead on its rates. */
+function driveGimbal(h: AircraftHandles, g: NonNullable<ReturnType<typeof live.targets.get>>['gimbal'], lead: number, a: number): void {
+  const gh = h.gimbal
+  if (!gh) return
+  const want = gimbalNodeAngles(g ? g.yaw + (g.yawRate ? g.yawRate * lead : 0) : 0, g ? g.pitch + (g.pitchRate ? g.pitchRate * lead : 0) : 0)
+  if (!Number.isFinite(want.x) || !Number.isFinite(want.y)) return
+  if (!gh.ready) {
+    gh.y = want.y
+    gh.x = want.x
+    gh.ready = true
+  } else {
+    gh.y = smoothAngle(gh.y, want.y, a)
+    gh.x += (want.x - gh.x) * a
+  }
+  restQuaternion(gh.yaw, gh.yaw.quaternion).multiply(qb.setFromAxisAngle(AXIS_Y, gh.y))
+  restQuaternion(gh.pitch, gh.pitch.quaternion).multiply(qb.setFromAxisAngle(AXIS_X, gh.x))
+}
+
+/** The selected aircraft's line of sight from the gimbal camera to its laser range point. */
+function driveSight(h: AircraftHandles, range: number | null, show: boolean): void {
+  const gh = h.gimbal
+  if (!gh || range === null || !show) {
+    if (h.sight.visible) h.sight.visible = false
+    return
+  }
+  gh.camera.updateWorldMatrix(true, false)
+  gh.camera.getWorldPosition(camPos)
+  // the camera looks along its local +Z
+  camDir.set(0, 0, 1).transformDirection(gh.camera.matrixWorld)
+  const pos = h.sight.geometry.getAttribute('position') as THREE.BufferAttribute
+  pos.setXYZ(0, camPos.x, camPos.y, camPos.z)
+  pos.setXYZ(1, camPos.x + camDir.x * range, camPos.y + camDir.y * range, camPos.z + camDir.z * range)
+  pos.needsUpdate = true
+  h.sight.computeLineDistances()
+  h.sight.visible = true
+}
+
+export function Fleet({ templates }: { templates: Partial<Record<ModelId, AirframeTemplate>> }) {
   const ids = useIds()
 
   useFrame((state, rawDt) => {
@@ -109,6 +162,7 @@ export function Fleet({ template }: { template: AirframeTemplate }) {
     const a = expAlpha(dt, SMOOTH_TAU)
     const pulses = useStage.getState().pulses
     const reduced = motionReduced()
+    const selected = useUi.getState().selectedId
     for (const [id, h] of handles) {
       const t = live.targets.get(id)
       if (!t) {
@@ -123,7 +177,7 @@ export function Fleet({ template }: { template: AirframeTemplate }) {
       const lead = t.kind === 'position' ? Math.min(LEAD_MAX_S, (now - t.at) / 1000) : 0
       // a simulator's height is its centre of mass less the leg height (physics.py): a wreck on its back may sit
       // a little below 0; the attitude group pivots at the body centre (Aircraft.tsx), so it stays above ground
-      const floor = t.sim ? -template.lift : 0
+      const floor = t.sim ? -h.lift : 0
       const [sx, sy, sz] = enuToScene(t.x + t.vx * lead, t.y + t.vy * lead, Math.max(floor, t.z + t.vz * lead))
       tmp.set(sx, sy, sz)
       const target = attitudeQuat(t.roll ?? 0, t.pitch ?? 0, t.yaw ?? st?.yaw ?? 0)
@@ -142,6 +196,13 @@ export function Fleet({ template }: { template: AirframeTemplate }) {
       h.root.position.copy(st.pos)
       h.yaw.rotation.y = -st.yaw
       h.ground.position.set(st.pos.x, 0, st.pos.z)
+
+      // 12 §5.5: gimbal joints (yaw right +, pitch up +), the line of sight of the selected aircraft's laser
+      if (h.gimbal) {
+        const since = (now - t.at) / 1000
+        driveGimbal(h, t.gimbal, Number.isFinite(since) ? Math.min(LEAD_MAX_S, Math.max(0, since)) : 0, a)
+        driveSight(h, t.gimbal?.laser ?? null, id === selected && !reduced)
+      }
 
       // propellers: still while disarmed, 8 + 40 x throttle rev/s while armed, plus a faint motion disc
       h.throttle += ((t.armed ? t.throttle : 0) - h.throttle) * expAlpha(dt, 0.15)
@@ -185,13 +246,14 @@ export function Fleet({ template }: { template: AirframeTemplate }) {
         h.trail.geometry.setDrawRange(0, 0)
       }
 
-      // one-shot ripple of the selection ring (0.24 -> 0.5 m, opacity 0.8 -> 0, medium 350 ms)
+      // one-shot ripple of the selection ring (0.24 -> 0.5 m on the micro, opacity 0.8 -> 0, medium 350 ms)
       const p = pulses.length ? pulses.findLast((x) => x.id === id) : undefined
       const age = p ? now - p.at : Infinity
       if (!reduced && age < PULSE_MS) {
         const k = age / PULSE_MS
         const e = 1 - (1 - k) * (1 - k)
-        const r = (0.24 + 0.26 * e) / 0.24
+        const m = h.metrics
+        const r = (m.ring + (m.pulseTo - m.ring) * e) / m.ring
         h.pulse.visible = true
         h.pulse.scale.set(r, 1, r)
         ;(h.pulse.material as THREE.LineBasicMaterial).opacity = 0.8 * (1 - e)
@@ -204,9 +266,10 @@ export function Fleet({ template }: { template: AirframeTemplate }) {
 
   return (
     <>
-      {ids.map((v) => (
-        <Aircraft key={v.id} id={v.id} template={template} fallbackLabel={v.label} fallbackSim={v.sim} />
-      ))}
+      {ids.map((v) => {
+        const template = templates[v.model]
+        return template ? <Aircraft key={`${v.id}:${v.model}`} id={v.id} template={template} fallbackLabel={v.label} fallbackSim={v.sim} /> : null
+      })}
     </>
   )
 }

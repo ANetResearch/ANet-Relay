@@ -123,7 +123,8 @@ export async function flyRingCourse(pad: number, courseId: string = DEFAULT_COUR
     if (!id) {
       id = autoBindTarget(vs)?.id ?? null
       if (!id) {
-        const res = (await api.addSim()) as { added?: string[] }
+        // the ring courses are sized for the small aircraft (12 §2.2)
+        const res = (await api.addSim({ frame: { preset: 'micro-120' } })) as { added?: string[] }
         id = res.added?.[0] ?? null
         if (!id || !(await waitForVehicle(id))) return
       }

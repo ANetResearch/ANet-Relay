@@ -10,6 +10,22 @@
         relay.land("sim-1")
 
 Errors from the API raise ``RelayError`` with the stable ``code`` from the error body.
+
+Control frames (0.6.0). The numbers of ``move`` (``x, y, z``), ``goto`` (``x, y, z, yaw``), ``yaw`` (``deg``) and
+``velocity`` (``vx, vy, vz, yaw_rate_dps``) are read in a control frame: the ``frame`` argument, or when it is None
+the server's ``control_frame`` setting (``"flu"`` by default).
+
+=======  ====================================  =============================  ===========================
+frame    body x / y / z                        local x / y / z                heading ``yaw``, yaw rates
+=======  ====================================  =============================  ===========================
+flu      forward / left / up                   east / north / up              0 along +x (east), counter-
+                                                                              clockwise positive
+frd      forward / right / down                north / east / down            0 north, clockwise positive
+relay    forward / right / up (``move``)       east / north / up              0 north, clockwise positive
+=======  ====================================  =============================  ===========================
+
+``"relay"`` is Relay's own axes and what every release before 0.6 used. The named directions of ``move``
+(``forward``, ``right``, ``left``, ``up``, ``down``) mean the same in every frame.
 """
 
 from __future__ import annotations
@@ -29,7 +45,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 __all__ = ["DEFAULT_BASE", "RelayClient", "RelayError"]
-__version__ = "0.5.4"
+__version__ = "0.6.0"
 
 DEFAULT_BASE = os.environ.get("RELAY_API", "http://127.0.0.1:8765")
 API = "/api/v1"
@@ -318,11 +334,23 @@ class RelayClient:
         alt: float = 1.0,
         wait: bool = True,
         confirm: str | None = None,
-        timeout: float = 40.0,
+        timeout: float | None = None,
+        speed: float | None = None,
+        settle_s: float | None = None,
     ) -> dict:
+        """Take off to ``alt`` metres above the ground and hold.
+
+        ``speed`` (m/s, 0.1-5) climbs on speed-limited body velocity (PX4 with a position estimate: arms in POSCTL,
+        switches to OFFBOARD); the ANetDU7 does so by default at 0.5. ``settle_s`` (0-10, default 2) is how long the
+        aircraft must stay within 0.2 m before the take-off counts as done. ``timeout`` defaults to the time the
+        climb needs plus 40 s.
+        """
         params: dict[str, Any] = {"alt": alt}
         if confirm:
             params["confirm"] = confirm
+        params.update(_drop_none(speed=speed, settle_s=settle_s))
+        if timeout is None:
+            timeout = 40.0 + 2.0 * float(alt) / (speed or 0.5)
         return self.skill(vehicle_id, "takeoff", params, wait, timeout)
 
     def land(self, vehicle_id: str, wait: bool = True, timeout: float = 90.0) -> dict:
@@ -342,32 +370,79 @@ class RelayClient:
         right: float = 0.0,
         up: float = 0.0,
         wait: bool = True,
-        timeout: float = 40.0,
+        timeout: float | None = None,
+        *,
+        left: float | None = None,
+        down: float | None = None,
+        x: float | None = None,
+        y: float | None = None,
+        z: float | None = None,
+        frame: str | None = None,
+        speed: float | None = None,
+        settle_s: float | None = None,
     ) -> dict:
-        """Move in the body frame. Without a position estimate the distance is an open-loop estimate."""
-        params = {"forward": forward, "right": right, "up": up}
+        """Move in the body frame, metres. Without a position estimate the distance is an open-loop estimate.
+
+        Name the direction: ``forward``, ``right``, ``left``, ``up``, ``down`` (negative goes the other way); these
+        mean the same in every frame. Or give ``x, y, z``, the body offsets in ``frame`` (flu: forward, left, up;
+        frd: forward, right, down; relay: forward, right, up); ``frame`` None follows the server's ``control_frame``.
+        Not both. ``speed`` (m/s) flies on speed-limited body velocity (the ANetDU7 default is 0.5); ``settle_s``
+        is the hold time within 0.2 m before it counts as done.
+        """
+        if any(c is not None for c in (x, y, z)):
+            if forward or right or up or left is not None or down is not None:
+                raise ValueError("move takes x / y / z or named directions, not both")
+            params: dict[str, Any] = _drop_none(x=x, y=y, z=z)
+        elif left is not None or down is not None or not (forward or right or up):
+            params = {"forward": forward}
+            if left is not None:
+                params["left"] = left
+            elif right:
+                params["right"] = right
+            if down is not None:
+                params["down"] = down
+            elif up:
+                params["up"] = up
+        else:
+            params = {"forward": forward, "right": right, "up": up}
+        params.update(_drop_none(frame=frame, speed=speed, settle_s=settle_s))
+        if timeout is None:
+            reach = max(abs(float(v)) for k, v in params.items() if k in _MOVE_AXES) if any(
+                k in params for k in _MOVE_AXES
+            ) else 0.0
+            timeout = 40.0 + 3.0 * reach / (speed or 0.5)
         return self.skill(vehicle_id, "move", params, wait, timeout)
 
-    def yaw(self, vehicle_id: str, deg: float, wait: bool = True, timeout: float = 30.0) -> dict:
-        """Turn by ``deg`` degrees relative to the current heading, positive clockwise."""
-        return self.skill(vehicle_id, "yaw", {"deg": deg}, wait, timeout)
+    def yaw(
+        self, vehicle_id: str, deg: float, wait: bool = True, timeout: float = 30.0, frame: str | None = None
+    ) -> dict:
+        """Turn by ``deg`` degrees relative to the current heading. The direction follows ``frame`` (None: the
+        server's ``control_frame``): flu counter-clockwise positive, frd and relay clockwise positive."""
+        return self.skill(vehicle_id, "yaw", _drop_none(deg=deg, frame=frame), wait, timeout)
 
     def plan(
         self,
         vehicle_id: str,
-        steps: list[dict],
+        steps: list[dict] | None = None,
         name: str | None = None,
         confirm: str | None = None,
         wait: bool = True,
         timeout: float = 180.0,
         tuning: dict | None = None,
+        builtin: str | None = None,
     ) -> dict:
         """Fly a sequence, e.g. [{"action": "takeoff", "alt": 1}, {"action": "move", "forward": 1}, ...].
 
         With ``wait`` it returns the finished plan and raises ``plan_failed`` when a step fails. ``tuning``
         ``{climb?, hover?}`` sets the throttle sticks of the stick-flown steps (no position estimate).
+        ``builtin`` flies a ready-made plan instead of ``steps`` (``plans_builtin()`` lists them), for example
+        ``plan(id, builtin="du7_box")``. A step may carry ``frame`` (``flu`` | ``frd`` | ``relay``; omitted: the
+        server's ``control_frame``), ``speed`` and ``settle_s`` (move, goto, takeoff), ``reference``
+        (velocity) and the named directions ``left`` / ``down``; see the module docstring for the frames.
         """
-        body: dict[str, Any] = {"steps": steps}
+        if (steps is None) == (builtin is None):
+            raise ValueError("give steps or builtin")
+        body: dict[str, Any] = {"builtin": builtin} if builtin else {"steps": steps}
         if name:
             body["name"] = name
         if confirm:
@@ -378,6 +453,10 @@ class RelayClient:
         if not wait:
             return plan
         return self.wait_plan(vehicle_id, plan["id"], timeout)
+
+    def plans_builtin(self) -> list[dict]:
+        """The ready-made plans: ``[{id, title, title_zh, description, description_zh, steps}]`` (``du7_box``)."""
+        return self._get("/plans/builtin")["plans"]
 
     def plan_tune(self, vehicle_id: str, climb: float | None = None, hover: float | None = None) -> dict:
         """Change the throttle tuning of the aircraft's sequence while it flies (09 §3)."""
@@ -476,13 +555,23 @@ class RelayClient:
         z: float,
         yaw: float | None = None,
         wait: bool = True,
-        timeout: float = 30.0,
+        timeout: float | None = None,
+        frame: str | None = None,
+        speed: float | None = None,
+        settle_s: float | None = None,
     ) -> dict:
-        """Fly to (x east, y north, z up) metres in the vehicle's position frame; ``yaw`` in degrees."""
+        """Fly to the local point ``x, y, z`` (metres) in the vehicle's position frame, optionally turning to the
+        heading ``yaw`` (degrees) first.
+
+        The axes follow ``frame`` (None: the server's ``control_frame``): flu is east, north, up with ``yaw`` 0 along
+        +x (east) and counter-clockwise positive; frd is north, east, down with ``yaw`` a compass heading; relay is
+        east, north, up with a compass heading (what ring courses report as ``c`` and ``yaw_deg``). ``speed`` (m/s)
+        flies on speed-limited body velocity (the ANetDU7 default is 0.5), ``settle_s`` is the hold time within
+        0.2 m before it counts as done. ``timeout`` defaults to 120 s.
+        """
         params: dict[str, Any] = {"x": x, "y": y, "z": z}
-        if yaw is not None:
-            params["yaw"] = yaw
-        return self.skill(vehicle_id, "goto", params, wait, timeout)
+        params.update(_drop_none(yaw=yaw, frame=frame, speed=speed, settle_s=settle_s))
+        return self.skill(vehicle_id, "goto", params, wait, 120.0 if timeout is None else timeout)
 
     def course_start(self, vehicle_id: str, course_id: str = "cage-loop") -> dict:
         return self._post(f"/vehicles/{vehicle_id}/course/start", {"course_id": course_id})
@@ -640,7 +729,8 @@ class RelayClient:
         seconds: float = 1.0,
         wait: bool = True,
     ) -> dict:
-        """Command an attitude and thrust for ``seconds`` (<= 10) while airborne, then hover again."""
+        """Command an attitude and thrust for ``seconds`` (<= 10) while airborne, then hover again. Not affected by
+        the control frame: roll right positive, pitch nose-up positive, ``yaw_rate_dps`` clockwise positive."""
         params = {
             "roll_deg": roll_deg,
             "pitch_deg": pitch_deg,
@@ -659,12 +749,102 @@ class RelayClient:
         yaw_rate_dps: float | None = None,
         seconds: float = 1.0,
         wait: bool = True,
+        reference: str | None = None,
+        frame: str | None = None,
     ) -> dict:
-        """Command an ENU velocity (m/s, each <= 2) for ``seconds`` (<= 10) inside the safety volume."""
+        """Command a velocity (m/s, each <= 2) for ``seconds`` (<= 10) inside the safety volume.
+
+        ``reference`` ``"body"`` (the default; ``"local"`` in the relay frame) reads ``vx, vy, vz`` along the aircraft's
+        axes, so the direction follows the nose: in flu forward, left, up; in frd forward, right, down. ``"local"``
+        reads them in the local frame: flu east, north, up; frd north, east, down. ``yaw_rate_dps`` is counter-clockwise
+        positive in flu and clockwise positive in frd and relay. ``frame`` None follows the server's ``control_frame``.
+        """
         params: dict[str, Any] = {"vx": vx, "vy": vy, "vz": vz, "seconds": seconds}
-        if yaw_rate_dps is not None:
-            params["yaw_rate_dps"] = yaw_rate_dps
+        params.update(_drop_none(yaw_rate_dps=yaw_rate_dps, reference=reference, frame=frame))
         return self.skill(vehicle_id, "velocity", params, wait, 15.0 + seconds)
+
+    # ------------------------------------------------------------------ gimbal pod (12 §5)
+
+    def gimbal(self, vehicle_id: str) -> dict:
+        """The aircraft's gimbal pod view (``vehicle["gimbal"]``): ``kind`` sim | dyt, ``link``, ``yaw_deg`` (right
+        positive), ``pitch_deg`` (up positive, looking down is negative), ``mode``, ``lens``, ``zoom``, ``fov_deg``,
+        ``recording``, ``photos`` ... ``gimbal_missing`` (404) when the aircraft has no pod. Angles are the pod's own
+        and do not follow the control frame."""
+        return self._get(f"/vehicles/{_q(vehicle_id)}/gimbal")
+
+    def gimbal_do(self, vehicle_id: str, action: str, **params: Any) -> dict:
+        """Run a pod action; returns ``{id, gimbal}`` with the pod's view right after. Needs the claim on the aircraft
+        (or the operator), at every agent flight level. Actions and parameters: ``rate {yaw_dps, pitch_dps}`` (+-100,
+        right / up positive), ``stop``, ``angle {yaw_deg (+-180), pitch_deg (-120..90), space: frame | earth}``,
+        ``center``, ``follow {on}``, ``lock {on}``, ``motors {on}``, ``zoom {level}``, ``zoom_rate {rate (-100..100)}``,
+        ``digital_zoom {on}``, ``lens {lens: visible1 | visible2 | ir1 | ir2, pip?}``,
+        ``palette {palette: white_hot | black_hot | pseudo}``, ``photo``, ``record {on}``,
+        ``track {x, y (pixels from the picture centre, 1280 x 720), algorithm?}``, ``track_stop``, ``laser {on}``,
+        ``focus {mode: auto | manual, position (4090..49152)}``, ``enhance`` / ``osd`` / ``low_light {on}``,
+        ``scan {yaw_deg, pitch_deg, speed_dps (0.2..51)}``, ``scan_stop``, ``geo_track {lat, lon, alt} | {mode:
+        center | exit}`` and ``look_at {x, y, z, frame?}`` (a local point in the control frame; ``frame`` flu | frd)."""
+        return self._post(f"/vehicles/{_q(vehicle_id)}/gimbal", {"action": action, **_drop_none(**params)})
+
+    def gimbal_angle(
+        self, vehicle_id: str, yaw_deg: float, pitch_deg: float, space: str | None = None
+    ) -> dict:
+        """Point the pod: ``yaw_deg`` (right positive, +-180) and ``pitch_deg`` (up positive, -120..90). ``space``
+        ``"frame"`` (the default) is relative to the aircraft's nose, ``"earth"`` is a compass azimuth and elevation."""
+        return self.gimbal_do(vehicle_id, "angle", yaw_deg=yaw_deg, pitch_deg=pitch_deg, space=space)
+
+    def gimbal_rate(self, vehicle_id: str, yaw_dps: float = 0.0, pitch_dps: float = 0.0) -> dict:
+        """Turn the pod at a rate (+-100 deg/s; right and up positive) until ``gimbal_do(id, "stop")`` or a new
+        command."""
+        return self.gimbal_do(vehicle_id, "rate", yaw_dps=yaw_dps, pitch_dps=pitch_dps)
+
+    def gimbal_zoom(self, vehicle_id: str, level: float) -> dict:
+        """Zoom the current lens to ``level`` times (``visible1`` 1-30, ``ir1`` 1-8; the others are fixed and fail
+        with ``gimbal_unsupported``)."""
+        return self.gimbal_do(vehicle_id, "zoom", level=level)
+
+    def gimbal_lens(self, vehicle_id: str, lens: str, pip: str | None = None) -> dict:
+        """Switch the main picture to ``visible1`` (zoom), ``visible2`` (wide), ``ir1`` or ``ir2``; ``pip`` puts a
+        second lens in the small picture."""
+        return self.gimbal_do(vehicle_id, "lens", lens=lens, pip=pip)
+
+    def gimbal_photo(self, vehicle_id: str) -> dict:
+        """Take a photo; the record (aircraft pose, gimbal angles, lens, zoom, laser range) is in ``gimbal_captures``."""
+        return self.gimbal_do(vehicle_id, "photo")
+
+    def gimbal_record(self, vehicle_id: str, on: bool = True) -> dict:
+        """Start or stop video recording."""
+        return self.gimbal_do(vehicle_id, "record", on=bool(on))
+
+    def gimbal_look_at(
+        self, vehicle_id: str, x: float, y: float, z: float, frame: str | None = None
+    ) -> dict:
+        """Point the pod at the local point ``x, y, z`` (metres) in the control frame (``frame`` flu | frd; None:
+        the server's ``control_frame``). The aircraft needs a position and an attitude."""
+        return self.gimbal_do(vehicle_id, "look_at", x=x, y=y, z=z, frame=frame)
+
+    def gimbal_captures(self, vehicle_id: str, limit: int | None = None) -> dict:
+        """``{id, total, captures}``: photos and recording changes, newest last (``limit`` 1-500, default 100); each
+        has ``seq``, ``kind`` (photo | record_start | record_stop), ``t``, ``nav``, ``gimbal`` angles, ``lens``,
+        ``zoom``, ``laser_range_m`` and ``target``."""
+        return self._get(f"/vehicles/{_q(vehicle_id)}/gimbal/captures", limit=limit)
+
+    def gimbal_attach(
+        self,
+        vehicle_id: str,
+        transport: str = "tcp",
+        host: str | None = None,
+        port: int | None = None,
+        device: str | None = None,
+        baud: int | None = None,
+    ) -> dict:
+        """Attach a pod (operator token): ``"tcp"`` with ``host`` (port 2000) or ``"serial"`` with ``device`` (baud
+        115200) for a real aircraft, ``"sim"`` for a simulator. Returns ``{id, gimbal}``."""
+        body = _drop_none(transport=transport, host=host, port=port, device=device, baud=baud)
+        return self._op("POST", f"/vehicles/{_q(vehicle_id)}/gimbal/attach", body)
+
+    def gimbal_detach(self, vehicle_id: str) -> dict:
+        """Detach the pod and close its link (operator token). Returns ``{id, detached}``."""
+        return self._op("DELETE", f"/vehicles/{_q(vehicle_id)}/gimbal")
 
     # ------------------------------------------------------------------ application level (04 §3)
 
@@ -703,7 +883,8 @@ class RelayClient:
         return self._get("/settings")
 
     def update_settings(self, **patch: Any) -> dict:
-        """Change settings; agents_app_control itself belongs to the operator."""
+        """Change settings; agents_app_control itself belongs to the operator. ``control_frame="flu" | "frd"`` is the
+        convention of every skill that does not name a ``frame`` (default flu)."""
         return self._app("PUT", "/settings", patch)
 
     def ack_alert(self, alert_id: str) -> dict:
@@ -903,13 +1084,26 @@ class RelayClient:
     # ------------------------------------------------------------------ simulators (app operations)
 
     def add_sims(
-        self, count: int = 1, autopilot: str = "ardupilot", hover_assist: bool | None = None
+        self,
+        count: int = 1,
+        autopilot: str | None = None,
+        hover_assist: bool | None = None,
+        frame: str | dict | None = None,
     ) -> list[str]:
-        """Add simulators; ``hover_assist=False`` gives physical flight (omitted: the setting)."""
-        body: dict[str, Any] = {"count": count, "autopilot": autopilot}
-        if hover_assist is not None:
-            body["hover_assist"] = hover_assist
+        """Add simulators; ``hover_assist=False`` gives physical flight (omitted: the setting).
+
+        ``frame`` is the aircraft: a preset name (``"anet-du7"``, ``"micro-120"``, ``"small-250"``, ``"large-450"``)
+        or a frame object ``{preset?, mass_kg?, ...}``. Omitted: the server's ``sim_frame_default`` setting, which is
+        the ANetDU7 (``vehicle.model`` ``"anet-du7"``, with a simulated gimbal pod). ``autopilot`` ``"ardupilot"`` |
+        ``"px4"``; omitted: PX4 for an ANetDU7, ArduPilot for the small presets.
+        """
+        body = _drop_none(count=count, autopilot=autopilot, hover_assist=hover_assist, frame=_frame_body(frame))
         return self._app("POST", "/sims", body)["added"]
+
+    def set_model(self, vehicle_id: str, model: str) -> dict:
+        """What a real aircraft is shown and flown as, ``"anet-du7"`` or ``"micro"`` (operator token). The ANetDU7
+        flies take-off, move and goto on speed-limited body velocity by default. Returns ``{id, model}``."""
+        return self._op("POST", f"/vehicles/{_q(vehicle_id)}/model", {"model": model})
 
     def sim_assist(self, vehicle_id: str, on: bool) -> dict:
         """Switch a simulator's hover assist (05 §5), armed and in flight too; returns ``{id, hover_assist}``.
@@ -1339,6 +1533,9 @@ class RelayClient:
 
     def release(self, vehicle_id: str) -> dict:
         return self._op("POST", f"/vehicles/{vehicle_id}/release")
+
+
+_MOVE_AXES = ("forward", "right", "left", "up", "down", "x", "y", "z")
 
 
 def _q(value: str) -> str:

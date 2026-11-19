@@ -1,14 +1,24 @@
-// Video (02 §4.4, §9; R-17). VideoPip: stage picture-in-picture of the selected aircraft's bound source, 320 x 180 by
-// default, resizable to 640 x 360 from its inner corner, draggable to any corner where it snaps, closable; it keeps
-// clear of the course HUD and the stage HUD strip. VideoSourceGroup: the inspector Overview "Video" group with the
-// 16:9 thumbnail, source select and binding. States: No video device, Camera access is off, No signal, LIVE.
+// Video (02 §4.4, §9; R-17; 12 §5.5). VideoPip: stage picture-in-picture of the selected aircraft's bound source or
+// gimbal pod, 320 x 180 by default, resizable to 640 x 360 from its inner corner, draggable to any corner where it
+// snaps, closable; it keeps clear of the course HUD and the stage HUD strip. VideoSourceGroup: the inspector Overview
+// "Video" group with the 16:9 thumbnail, source select and binding. States: No video device, Camera access is off,
+// No signal, LIVE.
+//
+// One PiP per aircraft (12 §5.5). Its source:
+//   - a simulated pod and no bound video: the pod's rendered picture with the gimbal HUD;
+//   - a simulated pod and a bound video source: a GIMBAL | VIDEO switch in the PiP header picks one (remembered per
+//     aircraft for the session; the pod's picture first);
+//   - a real (DYT) pod: the bound video with the gimbal HUD over it, or "No video source" with the HUD when nothing is
+//     bound (Relay does not decode the pod's own stream, 12 §9);
+//   - no pod: the bound video as before.
+// A click on the pod's picture (without dragging) tracks that point.
 import * as React from 'react'
 import { createPortal } from 'react-dom'
-import { env } from '@/api'
+import { api, env, RelayApiError } from '@/api'
 import { useT } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { useRelay } from '@/store/relay'
-import { useVehicleField } from '@/store/selectors'
+import { useHello, useVehicleField } from '@/store/selectors'
 import { Button } from '@/ui/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/components/ui/select'
 import { Icon } from '@/ui/icons'
@@ -16,6 +26,10 @@ import { Group } from '@/ui/relay'
 import { useStageFrame } from '@/control/stageFrame'
 import { useCT } from '@/control/strings'
 import '@/control/control.css'
+import { notifyError } from '@/shell/notify'
+import { GimbalHud, GimbalPicture } from '@/gimbal/GimbalView'
+import { pictureFromPointer, pipSource, trackBody } from '@/gimbal/model'
+import { useGimbalUi, watchCaptures } from '@/gimbal/store'
 import {
   acquireStream,
   BLACK_LUMA,
@@ -146,7 +160,7 @@ function LiveBadge() {
 }
 
 /** The feed in a box: video when live, otherwise the honest state. */
-function Feed({ vehicleId, className, onClick, label }: { vehicleId: string; className?: string; onClick?(): void; label?: string }) {
+function Feed({ vehicleId, className, onClick, label, badge = true }: { vehicleId: string; className?: string; onClick?(): void; label?: string; badge?: boolean }) {
   const feed = useFeed(vehicleId, true)
   const bound = useVideo((s) => s.bindings[vehicleId]?.label ?? '')
   const [signal, setSignal] = React.useState<'live' | 'nosignal'>('live')
@@ -155,7 +169,7 @@ function Feed({ vehicleId, className, onClick, label }: { vehicleId: string; cla
   return (
     <div className={cn('relative overflow-hidden bg-[var(--g950)]', className)} onClick={onClick} title={label} data-video-feed={state}>
       {feed.stream ? <VideoSurface stream={feed.stream} onSignal={onSignal} /> : null}
-      {state === 'live' ? <LiveBadge /> : null}
+      {state === 'live' && badge ? <LiveBadge /> : null}
       <StateText state={state} device={bound} />
     </div>
   )
@@ -172,6 +186,50 @@ function insets(corner: PipCorner, courseActive: boolean): { x: number; y: numbe
   return { x: INSET, y: INSET }
 }
 
+function SourceSwitch({ vehicleId, value }: { vehicleId: string; value: 'gimbal' | 'video' }) {
+  const t = useT()
+  const set = useGimbalUi((s) => s.setSource)
+  return (
+    <div className="gimbal-source" data-pip-control="" role="group" aria-label={t('gimbal.pip.source')} data-pip-source={value}>
+      {(['gimbal', 'video'] as const).map((s) => (
+        <button key={s} type="button" aria-pressed={value === s} onClick={() => set(vehicleId, s)}>
+          {t(s === 'gimbal' ? 'gimbal.pip.gimbal' : 'gimbal.pip.video')}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** The rendered pod picture with its state text until the first frame. */
+function PodPicture({ vehicleId, cssWidth }: { vehicleId: string; cssWidth: number }) {
+  const t = useT()
+  const ct = useCT()
+  const [state, setState] = React.useState<'starting' | 'live' | 'unavailable'>('starting')
+  return (
+    <div className="relative h-full w-full overflow-hidden bg-[var(--g950)]" data-video-feed={state === 'live' ? 'gimbal' : state}>
+      <GimbalPicture vehicleId={vehicleId} cssWidth={cssWidth} onState={setState} />
+      {state !== 'live' ? (
+        <div className="absolute inset-0 flex items-center justify-center p-3 text-center text-hud-sub text-[var(--g400)]" data-video-state={state}>
+          {state === 'unavailable' ? t('gimbal.pip.noStage') : ct('vid.starting')}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** A real pod without a bound video source: the honest state under its HUD. */
+function NoVideoSource() {
+  const t = useT()
+  return (
+    <div className="relative h-full w-full bg-[var(--g950)]" data-video-feed="none">
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 p-3 text-center" data-video-state="nosource">
+        <span className="text-hud-sub text-[var(--g300)]">{t('gimbal.pip.noSource')}</span>
+        <span className="text-hud-sub text-[var(--g500)]">{t('gimbal.pip.noSourceHint')}</span>
+      </div>
+    </div>
+  )
+}
+
 export function VideoPip({ vehicleId }: VideoPipProps) {
   const ct = useCT()
   const frame = useStageFrame()
@@ -181,38 +239,56 @@ export function VideoPip({ vehicleId }: VideoPipProps) {
   const width = useVideo((s) => s.width)
   const setPip = useVideo((s) => s.setPip)
   const setHidden = useVideo((s) => s.setHidden)
+  const pod = useVehicleField(vehicleId, (v) => v.gimbal?.kind ?? null) ?? null
+  const chosen = useGimbalUi((s) => (vehicleId ? s.source[vehicleId] : undefined))
+  const operator = Boolean(useHello()?.operator)
   const courseActive = useRelay((s) => {
     const c = s.fleet?.vehicles.find((v) => v.id === vehicleId)?.course
     return Boolean(c && c.state !== 'finished' && c.state !== 'aborted')
   })
-  const [drag, setDrag] = React.useState<{ x: number; y: number; dx: number; dy: number } | null>(null)
+  const [drag, setDrag] = React.useState<{ x: number; y: number; dx: number; dy: number; x0: number; y0: number; moved: boolean } | null>(null)
   const [resize, setResize] = React.useState<{ w: number; x0: number } | null>(null)
   const [snapping, setSnapping] = React.useState(false)
   const box = React.useRef<HTMLDivElement>(null)
+  // 12 §5.5: capture thumbnails for the inspector (one watcher per window)
+  React.useEffect(() => watchCaptures(), [])
 
-  if (!frame || !vehicleId || !binding || hidden) return null
+  const show = pipSource(pod, Boolean(binding), chosen)
+  if (!frame || !vehicleId || !show.source || hidden) return null
   const fw = frame.clientWidth
   const fh = frame.clientHeight
   const maxW = Math.min(640, fw - 2 * INSET, ((fh - 2 * INSET - 120) * 16) / 9)
   const w = clampWidth(resize ? resize.w : width, maxW)
   const h = Math.round((w * 9) / 16)
   const off = insets(corner, courseActive)
-  const left = drag ? drag.x : corner[1] === 'l' ? off.x : fw - w - off.x
-  const top = drag ? drag.y : corner[0] === 't' ? off.y : fh - h - off.y
+  const left = drag?.moved ? drag.x : corner[1] === 'l' ? off.x : fw - w - off.x
+  const top = drag?.moved ? drag.y : corner[0] === 't' ? off.y : fh - h - off.y
+  const trackable = show.source === 'gimbal' && pod === 'sim' && operator
 
   const onDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || (e.target as HTMLElement).closest('[data-pip-control]')) return
     e.currentTarget.setPointerCapture(e.pointerId)
     const r = frame.getBoundingClientRect()
-    setDrag({ x: left, y: top, dx: e.clientX - r.left - left, dy: e.clientY - r.top - top })
+    setDrag({ x: left, y: top, dx: e.clientX - r.left - left, dy: e.clientY - r.top - top, x0: e.clientX, y0: e.clientY, moved: false })
   }
   const onMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!drag) return
     const r = frame.getBoundingClientRect()
-    setDrag({ ...drag, x: Math.max(0, Math.min(fw - w, e.clientX - r.left - drag.dx)), y: Math.max(0, Math.min(fh - h, e.clientY - r.top - drag.dy)) })
+    // a few pixels of jitter are still a click (12 §5.5: a click on the pod's picture tracks)
+    const moved = drag.moved || Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > 4
+    setDrag({ ...drag, moved, x: Math.max(0, Math.min(fw - w, e.clientX - r.left - drag.dx)), y: Math.max(0, Math.min(fh - h, e.clientY - r.top - drag.dy)) })
   }
-  const onUp = () => {
+  const onUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!drag) return
+    if (!drag.moved) {
+      setDrag(null)
+      if (trackable && e.type === 'pointerup' && box.current) {
+        const r = box.current.getBoundingClientRect()
+        const p = pictureFromPointer(e.clientX - r.left, e.clientY - r.top, r.width, r.height)
+        api.gimbalDo(vehicleId, trackBody(p.x, p.y)).catch((err: unknown) => (err instanceof RelayApiError ? notifyError(err) : undefined))
+      }
+      return
+    }
     const c = nearestCorner(drag.x + w / 2, drag.y + h / 2, fw, fh)
     setDrag(null)
     setSnapping(true)
@@ -244,13 +320,16 @@ export function VideoPip({ vehicleId }: VideoPipProps) {
       data-corner={corner}
       data-snapping={snapping ? '' : undefined}
       data-video-pip={vehicleId}
-      style={{ left, top, width: w, height: h, cursor: drag ? 'grabbing' : 'grab' }}
+      data-pip-shows={show.source}
+      style={{ left, top, width: w, height: h, cursor: drag?.moved ? 'grabbing' : trackable ? 'crosshair' : 'grab' }}
       onPointerDown={onDown}
       onPointerMove={onMove}
       onPointerUp={onUp}
       onPointerCancel={onUp}
     >
-      <Feed vehicleId={vehicleId} className="h-full w-full" />
+      {show.source === 'gimbal' ? <PodPicture vehicleId={vehicleId} cssWidth={w} /> : binding ? <Feed vehicleId={vehicleId} className="h-full w-full" badge={!show.hud} /> : <NoVideoSource />}
+      {show.hud ? <GimbalHud vehicleId={vehicleId} compact={w < 400} picture={show.source === 'gimbal' || Boolean(binding)} /> : null}
+      {show.switchable && show.source ? <SourceSwitch vehicleId={vehicleId} value={show.source} /> : null}
       <button
         type="button"
         data-pip-control=""

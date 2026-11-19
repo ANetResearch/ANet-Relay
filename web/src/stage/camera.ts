@@ -40,7 +40,7 @@ export function overviewDirection(): { e: number; n: number } {
   return { e: Math.sin(b), n: Math.cos(b) }
 }
 
-export function overviewDistance(b: Bounds, aspect: number, fovDeg = FOV_DEG): number {
+export function overviewDistance(b: Bounds, aspect: number, fovDeg = FOV_DEG, minDistance = 1.2): number {
   const dir = overviewDirection()
   const w = b.maxX - b.minX
   const d = b.maxY - b.minY
@@ -55,14 +55,14 @@ export function overviewDistance(b: Bounds, aspect: number, fovDeg = FOV_DEG): n
   const dw = Math.max(w, d) / (OVERVIEW_FILL * 2 * tanH)
   const dfit = across / (OVERVIEW_FIT * 2 * tanH)
   const dv = vertical / (OVERVIEW_FILL_V * 2 * tanV)
-  return Math.max(dw, dfit, dv, 1.2)
+  return Math.max(dw, dfit, dv, minDistance)
 }
 
 /** Overview pose for the framed bounds: target at the bounds centre, a little above ground when aircraft fly. */
-export function overviewPose(b: Bounds, aspect: number, fovDeg = FOV_DEG): PerspPose {
+export function overviewPose(b: Bounds, aspect: number, fovDeg = FOV_DEG, minDistance = 1.2): PerspPose {
   const c = boundsCenter(b)
   const tz = Math.min(1, b.maxZ * 0.4)
-  return overviewPoseAt([c.x, c.y, tz], overviewDistance(b, aspect, fovDeg))
+  return overviewPoseAt([c.x, c.y, tz], overviewDistance(b, aspect, fovDeg, minDistance))
 }
 
 /** Overview direction and elevation looking at an ENU point from a given distance. */
@@ -78,12 +78,15 @@ export const CHASE_BACK = 1.2
 export const CHASE_UP = 0.45
 export const CHASE_AHEAD = 2
 
-/** Chase: 1.2 m behind and 0.45 m above the aircraft, looking at a point 2 m ahead of the nose. Yaw only. */
-export function chasePose(posEnu: Vec3, yaw: number): PerspPose {
+/**
+ * Chase: 1.2 m behind and 0.45 m above the aircraft, looking at a point 2 m ahead of the nose (the micro; a larger
+ * model passes its own distances, stage/models.ts). Yaw only.
+ */
+export function chasePose(posEnu: Vec3, yaw: number, d: { back: number; up: number; ahead: number } = { back: CHASE_BACK, up: CHASE_UP, ahead: CHASE_AHEAD }): PerspPose {
   const fe = Math.sin(yaw)
   const fn = Math.cos(yaw)
-  const cam: Vec3 = [posEnu[0] - fe * CHASE_BACK, posEnu[1] - fn * CHASE_BACK, posEnu[2] + CHASE_UP]
-  const look: Vec3 = [posEnu[0] + fe * CHASE_AHEAD, posEnu[1] + fn * CHASE_AHEAD, posEnu[2]]
+  const cam: Vec3 = [posEnu[0] - fe * d.back, posEnu[1] - fn * d.back, posEnu[2] + d.up]
+  const look: Vec3 = [posEnu[0] + fe * d.ahead, posEnu[1] + fn * d.ahead, posEnu[2]]
   return { position: enuToScene(...cam), target: enuToScene(...look) }
 }
 

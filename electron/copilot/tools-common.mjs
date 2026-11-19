@@ -10,6 +10,29 @@ export const PLAN_TIMEOUT_MS = 240_000;
 
 export const VID = Type.String({ description: "Aircraft id from relay_fleet, e.g. sim-1 or real-10-7-7-36" });
 
+/**
+ * 12 §3: how the numbers of a skill are read. Tools that take x / y / z, vx / vy / vz, yaw, deg or yaw_rate_dps
+ * state it, so that a model cannot misread a sign. The named directions are the same in every frame.
+ */
+export const CONVENTION =
+  "Axes follow frame, omitted: the server's control_frame setting (flu unless the operator changed it). " +
+  "flu (default): body x forward, y LEFT, z up; local x east, y north, z up; yaw 0 along +x (east), counter-clockwise positive. " +
+  "frd: body forward, RIGHT, down; local north, east, down; yaw is the compass heading (0 north), clockwise positive. " +
+  "relay: the axes before 0.6: body forward, right, up; local east, north, up; compass heading, clockwise positive. " +
+  "The named directions forward, right, left, up and down mean the same in every frame.";
+export const FRAME_ARG = Type.Union([Type.Literal("flu"), Type.Literal("frd"), Type.Literal("relay")], {
+  description: "control frame of this call's numbers; omitted: the server's control_frame setting (flu unless changed)",
+});
+export const SPEED_ARG = Type.Number({
+  minimum: 0.1,
+  maximum: 5,
+  description: "m/s: fly on speed-limited body velocity at most this fast (the ANetDU7 does so by default at 0.5; other aircraft use the autopilot's own setpoints unless given)",
+});
+export const SETTLE_ARG = Type.Number({ minimum: 0, maximum: 10, description: "with speed tracking: seconds within 0.2 m before the step counts as done (default 2)" });
+
+/** Keep the defined values of an object (undefined keys never reach the request body). */
+export const defined = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+
 export const text = (value) => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }], details: {} });
 
 export const sleep = (ms, signal) =>
@@ -39,6 +62,18 @@ export function compactVehicle(v) {
     mode: v.mode,
     altitude_m: v.altitude_m,
     heading_deg: v.heading_deg,
+    model: v.model,
+    nav: v.nav,
+    gimbal: v.gimbal && {
+      kind: v.gimbal.kind,
+      link: v.gimbal.link,
+      yaw_deg: v.gimbal.yaw_deg,
+      pitch_deg: v.gimbal.pitch_deg,
+      lens: v.gimbal.lens,
+      zoom: v.gimbal.zoom,
+      recording: v.gimbal.recording,
+      photos: v.gimbal.photos,
+    },
     battery: v.battery && { voltage: v.battery.voltage, remaining_pct: v.battery.remaining_pct, level: v.battery.level },
     controller: v.controller,
     claim: v.claim?.name ?? null,

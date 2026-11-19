@@ -160,6 +160,14 @@ export interface Vehicle {
   course: CourseRunView | null
   record_session: number | null
   sim: SimView | null
+  /**
+   * what the aircraft is (12 §2.2): the stage model and the flight defaults
+   */
+  model: 'anet-du7' | 'micro'
+  /**
+   * pose in the control_frame convention (12 §3.3)
+   */
+  nav: NavView | null
   procedure: ProcedureBrief | null
   program: ProgramRunView | null
   /**
@@ -172,6 +180,7 @@ export interface Vehicle {
   transport: 'udp' | 'serial' | 'sim'
   serial: SerialLinkView | null
   hitl: VehicleHitl | null
+  gimbal: GimbalView | null
 }
 /**
  * The aircraft's firmware identity (11 §4) from HEARTBEAT and AUTOPILOT_VERSION; null fields are
@@ -580,6 +589,31 @@ export interface SimFirmware {
   state: 'new' | 'booting' | 'running' | 'restarting' | 'exited' | 'failed' | 'stopped'
 }
 /**
+ * Position, velocity and heading in the ``control_frame`` convention (12 §3.3). ``flu``: local ENU,
+ * body forward-left-up, yaw counter-clockwise from +x; ``frd``: local NED, body forward-right-down, yaw
+ * clockwise from north.
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "NavView".
+ */
+export interface NavView {
+  frame: 'flu' | 'frd'
+  /**
+   * local x, y, z in metres; null without a position
+   */
+  position: number[] | null
+  /**
+   * local vx, vy, vz in m/s
+   */
+  velocity: number[] | null
+  /**
+   * velocity along the body axes (heading only)
+   */
+  body_velocity: number[] | null
+  yaw_deg: number | null
+  yaw_rate_dps: number | null
+}
+/**
  * The aircraft's bench procedure run, current or last (WP-B, 05 §4.4).
  *
  * This interface was referenced by `RelaySchema`'s JSON-Schema
@@ -759,6 +793,132 @@ export interface HitlPose {
   on_ground: boolean
 }
 /**
+ * ``vehicle.gimbal``. Angles are the pod's frame angles: ``yaw_deg`` right positive, ``pitch_deg`` up
+ * positive (looking down is negative), ``roll_deg`` right positive; independent of ``control_frame``.
+ *
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "GimbalView".
+ */
+export interface GimbalView {
+  /**
+   * sim: simulated pod; dyt: a real DYT pod
+   */
+  kind: 'sim' | 'dyt'
+  link: 'ok' | 'connecting' | 'lost'
+  /**
+   * "10.0.0.5:2000" or the serial device; null for the simulated pod
+   */
+  address: string | null
+  yaw_deg: number
+  pitch_deg: number
+  roll_deg: number
+  yaw_dps: number
+  pitch_dps: number
+  mode: 'follow' | 'lock' | 'rate' | 'angle' | 'track' | 'scan' | 'off'
+  lens: 'visible1' | 'visible2' | 'ir1' | 'ir2'
+  /**
+   * the lens of the small picture, or null
+   */
+  pip: ('visible1' | 'visible2' | 'ir1' | 'ir2') | null
+  /**
+   * magnification of the current lens
+   */
+  zoom: number
+  zoom_range: number[]
+  digital_zoom: boolean
+  /**
+   * [horizontal, vertical] field of view now (estimated for DYT)
+   */
+  fov_deg: number[]
+  palette: 'white_hot' | 'black_hot' | 'pseudo'
+  tracking: GimbalTracking
+  laser: GimbalLaser
+  recording: boolean
+  /**
+   * photos taken this session
+   */
+  photos: number
+  motors: boolean
+  enhance: boolean
+  osd: boolean
+  low_light: boolean
+  selftest: GimbalSelftest
+  /**
+   * the target position the pod solved (DYT table 4)
+   */
+  target: GimbalTarget | null
+  focus: GimbalFocus
+  /**
+   * DYT link counters: frames, bad_frames (checksum failures), rx_bytes ...
+   */
+  debug: {} | null
+  /**
+   * seconds since the pod's last state; null before the first
+   */
+  age_s: number | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "GimbalTracking".
+ */
+export interface GimbalTracking {
+  state: 'off' | 'searching' | 'locked'
+  algorithm: 'auto' | 'person' | 'vehicle' | 'building'
+  /**
+   * miss distance, right positive
+   */
+  x_deg: number
+  /**
+   * miss distance, down positive
+   */
+  y_deg: number
+  /**
+   * the tracking gate [width, height] in pixels; [0, 0] when off
+   */
+  box_px: number[]
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "GimbalLaser".
+ */
+export interface GimbalLaser {
+  on: boolean
+  /**
+   * null: off or no valid return
+   */
+  range_m: number | null
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "GimbalSelftest".
+ */
+export interface GimbalSelftest {
+  done: boolean
+  gyro_ok: boolean
+  servo_ok: boolean
+  image_ok: boolean
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "GimbalTarget".
+ */
+export interface GimbalTarget {
+  lat: number
+  lon: number
+  alt: number
+}
+/**
+ * This interface was referenced by `RelaySchema`'s JSON-Schema
+ * via the `definition` "GimbalFocus".
+ */
+export interface GimbalFocus {
+  mode: 'auto' | 'manual'
+  /**
+   * manual focus value 4090..49152
+   */
+  position: number | null
+}
+/**
  * This interface was referenced by `RelaySchema`'s JSON-Schema
  * via the `definition` "Alert".
  */
@@ -841,6 +1001,7 @@ export interface Event {
     | 'refly_finished'
     | 'refly_failed'
     | 'sim_assist_changed'
+    | 'model_changed'
     | 'sim_airframe_changed'
     | 'procedure_started'
     | 'procedure_step'
@@ -872,6 +1033,12 @@ export interface Event {
     | 'hitl_started'
     | 'hitl_restored'
     | 'hitl_failed'
+    | 'gimbal_attached'
+    | 'gimbal_detached'
+    | 'gimbal_link'
+    | 'gimbal_capture'
+    | 'gimbal_record'
+    | 'gimbal_lens'
   vehicle: string | null
   session: string | null
   text_en: string

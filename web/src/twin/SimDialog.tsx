@@ -1,10 +1,12 @@
-// Add simulated aircraft (11 §11): the engine (fast simulator or firmware twin); for a twin a profile or a pack,
-// the recommended one marked with its source ("Recommended: exact match with Quad 01"); the frame preset with mass
-// and wheelbase for both engines; an optional home for a twin. A refusal stays in the dialog with the backend's
-// bilingual message, and for twin_start_failed the firmware's last output lines (11 §6.3).
+// Add simulated aircraft (11 §11, 12 §2.2): the aircraft (ANetDU7 by default, or a small quad), the engine (fast
+// simulator or firmware twin); for a twin a profile or a pack, the recommended one marked with its source
+// ("Recommended: exact match with Quad 01"); the frame preset with mass and wheelbase for both engines; an optional
+// home for a twin. The ANetDU7 flies the PX4 flavour unless the user picks the autopilot. The dialog opens on the
+// sim_frame_default setting. A refusal stays in the dialog with the backend's bilingual message, and for
+// twin_start_failed the firmware's last output lines (11 §6.3).
 import * as React from 'react'
 import { api, type AutopilotPack, type TwinProfileSummary, type VehicleFirmware } from '@/api'
-import { useLang } from '@/i18n'
+import { useLang, useT } from '@/i18n'
 import { notify } from '@/shell/notify'
 import { useRelay } from '@/store/relay'
 import { useUi } from '@/store/ui'
@@ -18,8 +20,8 @@ import { Switch } from '@/ui/components/ui/switch'
 import { Icon } from '@/ui/icons'
 import { useSimDialog } from './actions'
 import {
-  defaultSimForm, defaultSource, FRAME_PRESETS, recommendSource, simBody, sourceOptions, twinErrorView, validateSimForm, withFrame, withSource,
-  type Engine, type Recommendation, type SimField, type SimForm, type TwinErrorView,
+  aircraftOf, defaultSimForm, defaultSource, FRAME_PRESETS, recommendSource, simBody, SMALL_PRESETS, sourceOptions, twinErrorView, validateSimForm, withAircraft, withFrame, withSource,
+  type Aircraft, type Engine, type FramePreset, type Recommendation, type SimField, type SimForm, type TwinErrorView,
 } from './model'
 import { useTT } from './strings'
 import { TwinFailure } from './parts'
@@ -86,6 +88,26 @@ function useSources(open: boolean, connected: { id: string; label: string }[], s
   return s
 }
 
+/** The sim_frame_default setting (12 §2.2), read once per opening; the ANetDU7 until it answers. */
+function useDefaultPreset(open: boolean): FramePreset | null {
+  const [preset, setPreset] = React.useState<FramePreset | null>(null)
+  React.useEffect(() => {
+    if (!open) return
+    let alive = true
+    api.settings().then(
+      (s) => {
+        const p = (s as { sim_frame_default?: unknown }).sim_frame_default
+        if (alive) setPreset(typeof p === 'string' && (FRAME_PRESETS as readonly string[]).includes(p) ? (p as FramePreset) : 'anet-du7')
+      },
+      () => alive && setPreset('anet-du7'),
+    )
+    return () => {
+      alive = false
+    }
+  }, [open])
+  return preset
+}
+
 function NumberInput({ id, value, onChange, invalid, step }: { id: string; value: string; onChange(v: string): void; invalid?: boolean; step?: string }) {
   return (
     <Input
@@ -103,6 +125,7 @@ function NumberInput({ id, value, onChange, invalid, step }: { id: string; value
 
 export function SimDialog() {
   const t = useTT()
+  const ti = useT()
   const lang = useLang()
   const open = useSimDialog((s) => s.open)
   const preset = useSimDialog((s) => s.preset)
@@ -114,6 +137,10 @@ export function SimDialog() {
   const [tried, setTried] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
   const [failure, setFailure] = React.useState<TwinErrorView | null>(null)
+  const settingPreset = useDefaultPreset(open)
+  // the small quad last chosen, so switching the aircraft back and forth keeps it
+  const [lastSmall, setLastSmall] = React.useState<FramePreset>('micro-120')
+  const [aircraftSet, setAircraftSet] = React.useState(false)
 
   const rec: Recommendation | null = React.useMemo(() => recommendSource(sources.profiles, connected, selectedId, sources.firmware), [sources, connected, selectedId])
   const options = React.useMemo(() => sourceOptions(sources.profiles, sources.packs, rec), [sources, rec])
@@ -123,9 +150,10 @@ export function SimDialog() {
   if (seen.open !== open || seen.loaded !== sources.loaded) {
     setSeen({ open, loaded: sources.loaded })
     if (open && seen.open !== open) {
-      setForm(defaultSimForm(preset.engine ?? 'relay'))
+      setForm(defaultSimForm(preset.engine ?? 'relay', settingPreset ?? 'anet-du7'))
       setTried(false)
       setFailure(null)
+      setAircraftSet(false)
     }
     if (open && sources.loaded) {
       const source = preset.source && options.some((o) => o.value === preset.source) ? preset.source : defaultSource(options, rec)
@@ -134,6 +162,12 @@ export function SimDialog() {
     }
   }
 
+  // the setting answers after the dialog opened: apply it unless the user already chose
+  const [seenPreset, setSeenPreset] = React.useState(settingPreset)
+  if (seenPreset !== settingPreset) {
+    setSeenPreset(settingPreset)
+    if (open && settingPreset && !aircraftSet && form.frame !== 'profile' && form.frame !== settingPreset) setForm((f) => withFrame(f, settingPreset))
+  }
   const errors = validateSimForm(form)
   const err = (k: SimField) => {
     const e = tried ? errors[k] : undefined
@@ -144,6 +178,18 @@ export function SimDialog() {
   const chosenProfile = chosen?.kind === 'profile' ? sources.profiles.find((p) => `profile:${p.id}` === chosen.value) ?? null : null
   const chosenMatch = chosenProfile?.match ?? (rec && rec.value === form.source ? rec.match : null)
   const weakMatch = twin && chosenMatch !== null && chosenMatch !== 'exact' && chosenMatch !== 'version'
+  const aircraft: Aircraft = aircraftOf(form.frame === 'profile' ? chosenProfile?.frame.preset : form.frame)
+  const chooseAircraft = (a: Aircraft) => {
+    setAircraftSet(true)
+    setForm((f) => withAircraft(f, a, lastSmall))
+  }
+  const choosePreset = (p: SimForm['frame']) => {
+    if (p !== 'profile' && p !== 'anet-du7') setLastSmall(p)
+    setAircraftSet(true)
+    setForm((f) => withFrame(f, p))
+  }
+  const presets: readonly FramePreset[] = aircraft === 'anet-du7' ? ['anet-du7'] : SMALL_PRESETS
+
 
   const submit = () => {
     setTried(true)
@@ -189,11 +235,25 @@ export function SimDialog() {
             submit()
           }}
         >
+          <FieldRow label={ti('simAircraft.title')} hint={ti(aircraft === 'anet-du7' ? 'simAircraft.du7Hint' : 'simAircraft.smallHint')}>
+            <div className="flex" data-sim-aircraft={aircraft}>
+              <Segmented<Aircraft>
+                value={aircraft}
+                onChange={chooseAircraft}
+                label={ti('simAircraft.title')}
+                options={[
+                  { value: 'anet-du7', label: 'ANetDU7' },
+                  { value: 'small', label: ti('simAircraft.small') },
+                ]}
+              />
+            </div>
+          </FieldRow>
+
           <FieldRow label={t('sim.engine')} hint={t(twin ? 'sim.engine.sitlHint' : 'sim.engine.relayHint')}>
             <div className="flex" data-sim-engine={form.engine}>
               <Segmented<Engine>
                 value={form.engine}
-                onChange={(engine) => setForm((f) => (engine === f.engine ? f : engine === 'sitl' ? withSource({ ...f, engine }, f.source) : withFrame({ ...f, engine }, f.frame === 'profile' ? 'micro-120' : f.frame)))}
+                onChange={(engine) => setForm((f) => (engine === f.engine ? f : engine === 'sitl' ? withSource({ ...f, engine }, f.source, aircraft === 'anet-du7' ? 'anet-du7' : lastSmall) : withFrame({ ...f, engine }, f.frame === 'profile' ? lastSmall : f.frame)))}
                 label={t('sim.engine')}
                 options={[
                   { value: 'relay', label: t('eng.relay') },
@@ -223,7 +283,7 @@ export function SimDialog() {
                   ) : undefined
                 }
               >
-                <NativeSelect id="sim-source" value={form.source} onChange={(e) => setForm((f) => withSource(f, e.target.value))} className="w-full" disabled={!sources.loaded} data-sim-source="">
+                <NativeSelect id="sim-source" value={form.source} onChange={(e) => setForm((f) => withSource(f, e.target.value, aircraft === 'anet-du7' ? 'anet-du7' : lastSmall))} className="w-full" disabled={!sources.loaded} data-sim-source="">
                   {!form.source ? <NativeSelectOption value="">{sources.loaded ? t('sim.err.source') : '…'}</NativeSelectOption> : null}
                   {profileOpts.length ? (
                     <NativeSelectOptGroup label={t('sim.group.profiles')}>
@@ -247,7 +307,7 @@ export function SimDialog() {
               </FieldRow>
             ) : (
               <FieldRow label={t('sim.autopilot')} htmlFor="sim-autopilot">
-                <NativeSelect id="sim-autopilot" value={form.autopilot} onChange={(e) => setForm((f) => ({ ...f, autopilot: e.target.value === 'px4' ? 'px4' : 'ardupilot' }))} className="w-full">
+                <NativeSelect id="sim-autopilot" value={form.autopilot} onChange={(e) => setForm((f) => ({ ...f, autopilot: e.target.value === 'px4' ? 'px4' : 'ardupilot', autopilotSet: true }))} className="w-full" data-sim-autopilot="">
                   <NativeSelectOption value="ardupilot">ArduPilot</NativeSelectOption>
                   <NativeSelectOption value="px4">PX4</NativeSelectOption>
                 </NativeSelect>
@@ -263,9 +323,9 @@ export function SimDialog() {
 
           <div className="grid grid-cols-3 gap-x-4 gap-y-3">
             <FieldRow label={t('frame.title')} htmlFor="sim-frame">
-              <NativeSelect id="sim-frame" value={form.frame} onChange={(e) => setForm((f) => withFrame(f, e.target.value as SimForm['frame']))} className="w-full" data-sim-frame="">
+              <NativeSelect id="sim-frame" value={form.frame} onChange={(e) => choosePreset(e.target.value as SimForm['frame'])} className="w-full" data-sim-frame="" disabled={!(twin && chosenProfile) && presets.length < 2}>
                 {twin && chosenProfile ? <NativeSelectOption value="profile">{t('frame.preset.profile')}</NativeSelectOption> : null}
-                {FRAME_PRESETS.map((p) => (
+                {presets.map((p) => (
                   <NativeSelectOption key={p} value={p}>
                     {t(`frame.preset.${p}`)}
                   </NativeSelectOption>

@@ -21,14 +21,16 @@ export const TWIN_TOOL_NAMES = [
 
 /** 11 §5, §8.1: the frame fields; omitted values keep the preset's (or the current frame's on a change). */
 const FRAME_FIELDS = {
-  preset: opt(lit("micro-120", "small-250", "large-450")),
+  preset: opt(lit("anet-du7", "micro-120", "small-250", "large-450")),
   mass_kg: opt(Type.Number({ exclusiveMinimum: 0, description: "take-off mass, kg" })),
   wheelbase_m: opt(Type.Number({ exclusiveMinimum: 0, description: "motor-to-motor diagonal, m" })),
   prop_in: opt(Type.Number({ exclusiveMinimum: 0, description: "propeller diameter, inches" })),
   cells: opt(Type.Integer({ minimum: 1, maximum: 14, description: "battery cells (S)" })),
   capacity_mah: opt(Type.Number({ exclusiveMinimum: 0 })),
 };
-export const FRAME = Type.Object(FRAME_FIELDS, { description: "physics frame: a preset and any of its values" });
+export const FRAME = Type.Object(FRAME_FIELDS, {
+  description: "physics frame: a preset and any of its values. Omitted: a twin takes its profile's frame or micro-120, a simulator the sim_frame_default setting (anet-du7, the ANetDU7 with a gimbal pod)",
+});
 export const HOME = Type.Object(
   {
     lat: Type.Number({ minimum: -89, maximum: 89 }),
@@ -95,7 +97,7 @@ export function twinTools(relay) {
     defineTool(
       "relay_sim_frame",
       "Change simulator frame",
-      "Change the physics frame of a disarmed simulator or firmware twin on the ground: a preset (micro-120, small-250, large-450) and any of mass, wheelbase, propeller, cells, capacity. A twin recomputes the motor thrust from its parameters. Fails with armed while armed or airborne.",
+      "Change the physics frame of a disarmed simulator or firmware twin on the ground: a preset (anet-du7, micro-120, small-250, large-450) and any of mass, wheelbase, propeller, cells, capacity. A twin recomputes the motor thrust from its parameters. Fails with armed while armed or airborne.",
       Type.Object({ vehicle: VID, ...FRAME_FIELDS }),
       ({ vehicle, ...frame }) => call("PUT", `/sims/${enc(vehicle)}/frame`, defined(frame)),
     ),

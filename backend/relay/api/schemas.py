@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .schemas_gimbal import GimbalView  # 12 §5
 from .schemas_hitl import SerialConnect, SerialLinkView, VehicleHitl  # 11 §7
 
 
@@ -328,6 +329,22 @@ class SimView(_Model):
     frame: str = Field(default="micro-120", description="frame preset of the physics (11 §8.1)")
 
 
+VehicleModel = Literal["anet-du7", "micro"]
+
+
+class NavView(_Model):
+    """Position, velocity and heading in the ``control_frame`` convention (12 §3.3). ``flu``: local ENU,
+    body forward-left-up, yaw counter-clockwise from +x; ``frd``: local NED, body forward-right-down, yaw
+    clockwise from north."""
+
+    frame: Literal["flu", "frd"]
+    position: list[float] | None = Field(description="local x, y, z in metres; null without a position")
+    velocity: list[float] | None = Field(description="local vx, vy, vz in m/s")
+    body_velocity: list[float] | None = Field(description="velocity along the body axes (heading only)")
+    yaw_deg: float | None
+    yaw_rate_dps: float | None
+
+
 class FirmwareInfo(_Model):
     """The aircraft's firmware identity (11 §4) from HEARTBEAT and AUTOPILOT_VERSION; null fields are
     not reported by the aircraft (or not decoded yet)."""
@@ -436,6 +453,10 @@ class Vehicle(_Model):
     course: CourseRunView | None
     record_session: int | None
     sim: SimView | None
+    model: VehicleModel = Field(
+        default="micro", description="what the aircraft is (12 §2.2): the stage model and the flight defaults"
+    )
+    nav: NavView | None = Field(default=None, description="pose in the control_frame convention (12 §3.3)")
     procedure: ProcedureBrief | None = None  # bench procedure (WP-B)
     # WP-1 onboard programs (06 §2.6)
     program: ProgramRunView | None = None
@@ -448,6 +469,7 @@ class Vehicle(_Model):
     )
     serial: SerialLinkView | None = None
     hitl: VehicleHitl | None = None
+    gimbal: GimbalView | None = None  # 12 §5: the gimbal pod; null on an aircraft without one
 
 
 class Alert(_Model):
@@ -534,6 +556,7 @@ EventKind = Literal[
     "refly_finished",
     "refly_failed",
     "sim_assist_changed",
+    "model_changed",  # 12 §2.2
     "sim_airframe_changed",  # WP-2a (06 §4)
     # bench procedures (WP-B, 05 §4.4)
     "procedure_started",
@@ -573,6 +596,13 @@ EventKind = Literal[
     "hitl_started",
     "hitl_restored",
     "hitl_failed",
+    # v0.6.0 gimbal pod (12 §5.2)
+    "gimbal_attached",
+    "gimbal_detached",
+    "gimbal_link",
+    "gimbal_capture",
+    "gimbal_record",
+    "gimbal_lens",
 ]
 
 
@@ -795,7 +825,9 @@ class PlanStep(_Body):
     forward: float | None = Field(default=None, description="move: metres forward (negative: back)")
     right: float | None = Field(default=None, description="move: metres right (negative: left)")
     up: float | None = Field(default=None, description="move: metres up (negative: down)")
-    deg: float | None = Field(default=None, description="yaw: degrees, positive clockwise")
+    deg: float | None = Field(
+        default=None, description="yaw: degrees to turn; flu: counter-clockwise +, frd: clockwise +"
+    )
     x: float | None = None
     y: float | None = None
     z: float | None = None
@@ -807,9 +839,32 @@ class PlanStep(_Body):
     pitch_deg: float | None = Field(default=None, description="attitude: pitch in degrees, nose up +")
     yaw_rate_dps: float | None = Field(default=None, description="attitude / velocity: yaw rate, deg/s")
     thrust: float | None = Field(default=None, description="attitude: collective thrust 0..1")
-    vx: float | None = Field(default=None, description="velocity: m/s east")
-    vy: float | None = Field(default=None, description="velocity: m/s north")
-    vz: float | None = Field(default=None, description="velocity: m/s up")
+    vx: float | None = Field(default=None, description="velocity: m/s along x of the frame")
+    vy: float | None = Field(default=None, description="velocity: m/s along y of the frame")
+    vz: float | None = Field(default=None, description="velocity: m/s along z of the frame")
+    # 12 §3, §4: control frame and speed-limited tracking
+    left: float | None = Field(default=None, description="move: metres left (instead of right)")
+    down: float | None = Field(default=None, description="move: metres down (instead of up)")
+    frame: Literal["flu", "frd", "relay"] | None = Field(
+        default=None,
+        description="control frame of x / y / z, vx / vy / vz, yaw, deg and yaw_rate_dps: flu (forward-left-"
+        "up body, ENU local, counter-clockwise +), frd (forward-right-down body, NED local, clockwise +) "
+        "or relay (Relay's own axes, which skill.params echo: forward-right-up body, ENU local, compass "
+        "heading, clockwise +); omitted: the control_frame setting",
+    )
+    reference: Literal["body", "local"] | None = Field(
+        default=None, description="velocity: vx / vy / vz in the body frame (default) or the local frame"
+    )
+    speed: float | None = Field(
+        default=None,
+        ge=0.1,
+        le=5.0,
+        description="takeoff / move / goto: fly on speed-limited body velocity at most this fast, m/s "
+        "(the ANetDU7 does so by default at 0.5)",
+    )
+    settle_s: float | None = Field(
+        default=None, ge=0, le=10, description="with speed: seconds within 0.2 m before the target counts"
+    )
 
 
 class SkillBody(_Body):
@@ -818,11 +873,15 @@ class SkillBody(_Body):
     x: float | None = None
     y: float | None = None
     z: float | None = None
-    yaw: float | None = Field(default=None, description="goto heading in degrees (0 north, clockwise)")
+    yaw: float | None = Field(
+        default=None, description="goto heading in degrees, in the frame (flu: 0 along +x, counter-clockwise)"
+    )
     forward: float | None = Field(default=None, description="move: metres forward (negative: back)")
     right: float | None = Field(default=None, description="move: metres right (negative: left)")
     up: float | None = Field(default=None, description="move: metres up (negative: down)")
-    deg: float | None = Field(default=None, description="yaw: degrees, positive clockwise")
+    deg: float | None = Field(
+        default=None, description="yaw: degrees to turn; flu: counter-clockwise +, frd: clockwise +"
+    )
     seconds: float | None = Field(default=None, description="hold: seconds before the skill reports done")
     roll: float | None = Field(default=None, description="sticks: -1..1")
     pitch: float | None = Field(default=None, description="sticks: -1..1")
@@ -831,9 +890,32 @@ class SkillBody(_Body):
     pitch_deg: float | None = Field(default=None, description="attitude: pitch in degrees, nose up +")
     yaw_rate_dps: float | None = Field(default=None, description="attitude / velocity: yaw rate, deg/s")
     thrust: float | None = Field(default=None, description="attitude: collective thrust 0..1")
-    vx: float | None = Field(default=None, description="velocity: m/s east")
-    vy: float | None = Field(default=None, description="velocity: m/s north")
-    vz: float | None = Field(default=None, description="velocity: m/s up")
+    vx: float | None = Field(default=None, description="velocity: m/s along x of the frame")
+    vy: float | None = Field(default=None, description="velocity: m/s along y of the frame")
+    vz: float | None = Field(default=None, description="velocity: m/s along z of the frame")
+    # 12 §3, §4: control frame and speed-limited tracking
+    left: float | None = Field(default=None, description="move: metres left (instead of right)")
+    down: float | None = Field(default=None, description="move: metres down (instead of up)")
+    frame: Literal["flu", "frd", "relay"] | None = Field(
+        default=None,
+        description="control frame of x / y / z, vx / vy / vz, yaw, deg and yaw_rate_dps: flu (forward-left-"
+        "up body, ENU local, counter-clockwise +), frd (forward-right-down body, NED local, clockwise +) "
+        "or relay (Relay's own axes, which skill.params echo: forward-right-up body, ENU local, compass "
+        "heading, clockwise +); omitted: the control_frame setting",
+    )
+    reference: Literal["body", "local"] | None = Field(
+        default=None, description="velocity: vx / vy / vz in the body frame (default) or the local frame"
+    )
+    speed: float | None = Field(
+        default=None,
+        ge=0.1,
+        le=5.0,
+        description="takeoff / move / goto: fly on speed-limited body velocity at most this fast, m/s "
+        "(the ANetDU7 does so by default at 0.5)",
+    )
+    settle_s: float | None = Field(
+        default=None, ge=0, le=10, description="with speed: seconds within 0.2 m before the target counts"
+    )
     confirm: str | None = None
 
 
@@ -849,7 +931,10 @@ class PlanTuning(_Body):
 
 
 class PlanBody(_Body):
-    steps: list[PlanStep] = Field(min_length=1, max_length=24)
+    steps: list[PlanStep] | None = Field(default=None, min_length=1, max_length=24)
+    builtin: str | None = Field(
+        default=None, description="a ready-made plan instead of steps (GET /plans/builtin), e.g. du7_box"
+    )
     name: str | None = Field(default=None, max_length=80)
     confirm: str | None = Field(default=None, description='"ARM" when the plan arms a real aircraft')
     tuning: PlanTuning | None = Field(default=None, description="throttle tuning, adjustable while flying")
@@ -917,7 +1002,7 @@ class FrameBody(_Body):
     """A simulator frame (11 §5, §8.1): a preset and any of its values; omitted values keep the preset's (or
     the current frame's on PUT /sims/{id}/frame)."""
 
-    preset: Literal["micro-120", "small-250", "large-450"] | None = None
+    preset: Literal["anet-du7", "micro-120", "small-250", "large-450"] | None = None
     mass_kg: float | None = Field(default=None, gt=0)
     wheelbase_m: float | None = Field(default=None, gt=0)
     prop_in: float | None = Field(default=None, gt=0)
@@ -956,7 +1041,9 @@ class SimsBody(_Body):
         default=None, description="sitl: runtime pack id; omitted: the profile's or newest"
     )
     frame: FrameBody | None = Field(
-        default=None, description="frame of the physics; omitted: profile or micro-120"
+        default=None,
+        description="frame of the physics; omitted: the profile's, else the sim_frame_default setting "
+        "(anet-du7). An anet-du7 simulator without an autopilot named flies the PX4 flavour",
     )
     home: HomeBody | None = Field(
         default=None, description="sitl: home position; omitted: the profile's or default"
@@ -985,6 +1072,10 @@ class AirframeBody(_Body):
     preset: AirframePreset | None = None
     params: AirframeParamsBody | None = None
     seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
+
+
+class ModelBody(_Body):
+    model: VehicleModel
 
 
 class SimAssistBody(_Body):

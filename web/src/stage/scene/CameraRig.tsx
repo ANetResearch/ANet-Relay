@@ -16,15 +16,15 @@ import {
 import { live } from '../live'
 import { easeSmoothOut, expAlpha, sceneToEnu, smoothAngle, type Vec3 } from '../math'
 import { addPoint, emptyBounds, framed, type Bounds } from '../placement'
+import { largest, metrics, type ModelId, type ModelMetrics } from '../models'
 import { useStage } from '../store'
-import { rig } from './rigState'
+import { MARK_LAYER, rig } from './rigState'
 import { cameraShake } from '@/arena/shake' // WP-C v0.5
 
 const SLOW_MS = 400
 const MEDIUM_MS = 350
 const UP = new THREE.Vector3(0, 1, 0)
 const NORTH_UP = new THREE.Vector3(0, 0, -1)
-const FLY_TO_DISTANCE = 1.6
 /**
  * Chase keeps 02 §6.5's pose (1.2 m behind, 0.45 m above, looking 2 m ahead), which puts the aircraft at about
  * 89 % of the stage height, under the bottom HUD strip. A vertical lens shift (NDC units) moves the image up
@@ -49,20 +49,28 @@ export function chaseTargetId(): string | null {
   return null
 }
 
-function currentBounds(): { b: Bounds; aircraft: number } {
+/** Sizes of an aircraft's model (fly-to and chase distances); the micro's when it is not placed. */
+function metricsOf(id: string): ModelMetrics {
+  return metrics(live.targets.get(id)?.model ?? 'micro')
+}
+
+function currentBounds(): { b: Bounds; aircraft: number; big: ModelMetrics } {
   const b = emptyBounds()
   let aircraft = 0
-  for (const s of live.state.values()) {
+  const models: ModelId[] = []
+  for (const [id, s] of live.state) {
     if (!s.ready) continue
     const [x, y, z] = sceneToEnu(s.pos.x, s.pos.y, s.pos.z)
     addPoint(b, x, y, z)
     aircraft++
+    models.push(live.targets.get(id)?.model ?? 'micro')
   }
   for (const e of framingExtras.values()) {
     addPoint(b, e.minX, e.minY, e.maxZ)
     addPoint(b, e.maxX, e.maxY, e.maxZ)
   }
-  return { b: framed(b, aircraft), aircraft }
+  const big = largest(models)
+  return { b: framed(b, aircraft, big.single), aircraft, big }
 }
 
 function lookQuat(pos: THREE.Vector3, target: THREE.Vector3, up: THREE.Vector3, out: THREE.Quaternion): THREE.Quaternion {
@@ -118,6 +126,9 @@ class ViewRig {
   ) {
     this.persp.position.set(3, 2.4, 4)
     this.ortho.up.copy(NORTH_UP)
+    // the stage's own marks (rings, trails, labels' lines) are on their own layer; the gimbal camera skips it
+    this.persp.layers.enable(MARK_LAYER)
+    this.ortho.layers.enable(MARK_LAYER)
     // R3F leaves projection updates of "manual" cameras to their owner (this rig sizes both itself)
     Object.assign(this.persp, { manual: true })
     Object.assign(this.ortho, { manual: true })
@@ -180,7 +191,7 @@ class ViewRig {
     persp.aspect = aspect
     const stage = useStage.getState()
     const now = performance.now()
-    const { b, aircraft } = currentBounds()
+    const { b, aircraft, big } = currentBounds()
     rig.extent = Math.max(b.maxX - b.minX, b.maxY - b.minY) / 2
 
     // chase needs a target; fall back to overview when it disappears
@@ -198,7 +209,7 @@ class ViewRig {
     }
 
     // automatic overview and top targets, smoothed so framing glides as aircraft move
-    const ov = overviewPose(b, aspect)
+    const ov = overviewPose(b, aspect, undefined, big.minDistance)
     const tp = topPose(b, aspect)
     const a = this.first ? 1 : expAlpha(dt, 0.45)
     this.autoPos.lerp(v3(ov.position), a)
@@ -215,7 +226,7 @@ class ViewRig {
         this.chaseYaw = cs.yaw
       }
       this.chaseYaw = smoothAngle(this.chaseYaw, cs.yaw, expAlpha(dt, 0.2))
-      const cp = chasePose(sceneToEnu(cs.pos.x, cs.pos.y, cs.pos.z), this.chaseYaw)
+      const cp = chasePose(sceneToEnu(cs.pos.x, cs.pos.y, cs.pos.z), this.chaseYaw, metricsOf(chaseId).chase)
       const pos = v3(cp.position)
       const target = v3(cp.target)
       chase = { pos, target, quat: lookQuat(pos, target, UP, new THREE.Quaternion()) }
@@ -231,7 +242,7 @@ class ViewRig {
         this.use(persp)
         this.applied = 'overview'
         this.shiftFrom = this.shift
-        this.transition = { from, start: now, dur: reduced ? 0 : MEDIUM_MS, fly: { id: stage.flyTo.id, target: fs.pos.clone(), distance: FLY_TO_DISTANCE } }
+        this.transition = { from, start: now, dur: reduced ? 0 : MEDIUM_MS, fly: { id: stage.flyTo.id, target: fs.pos.clone(), distance: metricsOf(stage.flyTo.id).flyTo } }
       }
     }
 

@@ -52,8 +52,8 @@ def main() -> None:
             nx, ny = math.sin(math.radians(ring["yaw_deg"])), math.cos(math.radians(ring["yaw_deg"]))
             entry = inside(cx - OFFSET_M * nx, cy - OFFSET_M * ny, cz)
             exit_ = inside(cx + OFFSET_M * nx, cy + OFFSET_M * ny, cz)
-            relay.goto(vid, *entry, yaw=ring["yaw_deg"])
-            relay.goto(vid, *exit_, yaw=ring["yaw_deg"])
+            relay.goto(vid, *entry, yaw=ring["yaw_deg"], frame="relay")
+            relay.goto(vid, *exit_, yaw=ring["yaw_deg"], frame="relay")
             course = vehicle_view(relay, vid)["course"]
             log(f"ring {index}/{len(rings)}: course shows {course['next']}/{course['total']} passed")
 

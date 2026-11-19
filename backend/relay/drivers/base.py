@@ -39,6 +39,9 @@ class Driver(Protocol):
         self, roll: float, pitch: float, yaw: float, yaw_rate: float, thrust: float
     ) -> None: ...
     def velocity_target(self, vx: float, vy: float, vz: float, yaw_rate: float | None) -> None: ...
+    def velocity_target_body(
+        self, forward: float, right: float, up: float, yaw_rate: float | None
+    ) -> None: ...
     def set_mode(self, name: str) -> None: ...
     def command_long(self, cmd: int, params: tuple[float, ...]) -> None: ...
     def position_target_local(self, x: float, y: float, z: float, yaw: float | None) -> None: ...
@@ -248,6 +251,38 @@ class MavCommands:
                 vy,
                 vx,
                 -vz,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0 if yaw_rate is None else yaw_rate,
+            )
+        )
+
+    def velocity_target_body(
+        self, forward: float, right: float, up: float, yaw_rate: float | None
+    ) -> None:
+        """Velocity setpoint in the body frame, m/s, and a clockwise yaw rate in rad/s (12 §3.2).
+
+        Sent as ``SET_POSITION_TARGET_LOCAL_NED`` with ``MAV_FRAME_BODY_NED``: x forward, y right, z down,
+        velocity and yaw rate only (type mask 0x05C7). PX4 and ArduPilot both read the velocity of this
+        frame relative to the aircraft's heading. It is the frame MAVROS sends for ``setpoint_raw/local``
+        with ``FRAME_BODY_NED`` (after its FLU to FRD conversion), which the ANetDU7 test node uses.
+        """
+        mask = VELOCITY_ONLY_MASK | YAW_IGNORE | (0 if yaw_rate is not None else YAW_RATE_IGNORE)
+        self.send_message(
+            M.MAVLink_set_position_target_local_ned_message(
+                int(self.clock() * 1000) & 0xFFFFFFFF,
+                self.target_system,
+                self.target_component,
+                M.MAV_FRAME_BODY_NED,
+                mask,
+                0.0,
+                0.0,
+                0.0,
+                forward,
+                right,
+                -up,
                 0.0,
                 0.0,
                 0.0,

@@ -8,7 +8,7 @@ ANet Relay 把它所管理的机群开放给外部程序：脚本、自主智能
 
 ## 1. 快速开始（无需硬件）
 
-1. 启动 Relay，在桌面应用中点击机群栏底部的 **Add sim** 添加模拟机。从源码运行时也可以只启动后端：`.venv/bin/python -m relay --dev`（操作员令牌只在 stderr 打印一次）。
+1. 启动 Relay，在桌面应用中点击机群栏底部的 **Add sim** 添加模拟机：新模拟机是 ANetDU7（PX4，2.5 kg，带模拟云台吊舱），0.5 的小机仍可通过 `frame.preset` 选用（[ANetDU7](#anetdu7-与限速飞行060)）。从源码运行时也可以只启动后端：`.venv/bin/python -m relay --dev`（操作员令牌只在 stderr 打印一次）。
 2. 用 Python SDK 驾驶模拟机（只用标准库，Python 3.10 及以上）：
 
 ```python
@@ -28,7 +28,7 @@ with RelayClient() as relay:                # 缺省 http://127.0.0.1:8765，或
 
 3. 或者通过 MCP 接入大语言模型（第 8 节）：飞行、设备级、应用控制各一套服务。
 
-`sdk/python/examples/` 下的六个示例都在模拟机上运行：
+`sdk/python/examples/` 下的七个示例都在模拟机上运行：
 
 | 示例 | 内容 |
 |---|---|
@@ -38,6 +38,7 @@ with RelayClient() as relay:                # 缺省 http://127.0.0.1:8765，或
 | `swarm_square.py` | 四架模拟机同时起飞，同步做方阵旋转，然后一起降落 |
 | `bench_routine.py` | 以一个动作序列完成起飞、悬停、前进 1 m、后退 1 m、转向 45°、降落 |
 | `device_tour.py` | 设备总览、原始指令目录、单电机测试与 `attitude` 姿态保持 |
+| `du7_box_and_gimbal.py` | 在 ANetDU7 模拟机上飞完内置的 `du7_box` 计划，然后转动云台、变焦、切换镜头、拍照并打印拍照记录 |
 
 每个示例都接受 `--base` 与 `--name`。提供 `--operator-token`（或环境变量 `$RELAY_OPERATOR_TOKEN`）时，示例会自行补齐缺少的模拟机；否则请在应用中通过 **Add sim** 添加。
 
@@ -76,15 +77,43 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | `sticks`（缺省） | 推杆（WebSocket 流、`POST /vehicles/{id}/sticks`、`sticks` 技能）、解锁与上锁、切换到手动类模式（ArduPilot STABILIZE / ACRO，PX4 MANUAL / STABILIZED / ACRO；DRIFT 带速度阻尼辅助，不属于此类）、关闭模拟机的悬停辅助（不能开启）、射击、部署并运行机载程序，以及安全动作：急停与 `land`（其事件标注 `safety`） |
 | `full` | 本文的全部接口，与 0.3 相同 |
 
-在 `sticks` 等级下，技能 `takeoff`、`hold`、`move`、`yaw`、`goto`、`rtl`、`velocity`、`attitude`，包含这些动作的动作序列，以动作序列或轨迹方式再飞，定高、定点与自动类模式，设备级接口中的飞行类命令，以及 4 通道以上的 RC 覆盖，均返回 403 `sticks_only`（`detail.level = "sticks"`，`detail.action` 指明被拒绝的操作）。飞行 MCP 服务只列出仍可用的工具（34 个中的 26 个；每次 `tools/list` 都重新读取设置），Copilot 同样去掉这些工具，并提示模型编写程序。在这一等级下，稳定飞行由机载程序完成：智能体按自己的节奏修改程序、调整参数、查看结果，程序负责 50 Hz 的闭环。
+在 `sticks` 等级下，技能 `takeoff`、`hold`、`move`、`yaw`、`goto`、`rtl`、`velocity`、`attitude`，包含这些动作的动作序列，以动作序列或轨迹方式再飞，定高、定点与自动类模式，设备级接口中的飞行类命令，以及 4 通道以上的 RC 覆盖，均返回 403 `sticks_only`（`detail.level = "sticks"`，`detail.action` 指明被拒绝的操作）。飞行 MCP 服务只列出仍可用的工具（38 个中的 29 个；每次 `tools/list` 都重新读取设置），Copilot 同样去掉这些工具，并提示模型编写程序。在这一等级下，稳定飞行由机载程序完成：智能体按自己的节奏修改程序、调整参数、查看结果，程序负责 50 Hz 的闭环。
+
+云台吊舱不属于飞行动作：对控制该机的会话，它的动作与读取在两个等级下都可用，见[云台吊舱](#云台吊舱060)。
 
 ## 3. 坐标系与单位
 
 - **位置**：米，东北天（ENU）：`x` 向东、`y` 向北、`z` 向上。所有模拟机共用坐标系 `sim`（各自出生在不同网格点）。每架真机报告自己的 `local` 坐标系，原点是飞控初始化估计器的位置。
 - **姿态**：弧度；roll 右翼下沉为正，pitch 抬头为正，yaw 为 NED 航向（0 为正北，顺时针为正）。`heading_deg` 为角度。
 - **杆量**：roll 向右为正、pitch 向前为正、yaw 顺时针为正，范围 −1..1；throttle 0..1。定高类模式下 0.5 保持高度。
-- **goto 的 yaw 与环的朝向**：罗盘角度（0 为正北，顺时针）。
+- **goto 的 yaw**：按控制坐标系解释的角度（见[控制坐标系](#控制坐标系060)；`flu` 下 0 为正东、逆时针为正）。**环的朝向**（环的 `yaw_deg`）仍是罗盘角度（0 为正北，顺时针）。
 - **安全区**：一个长方体，缺省 3 × 3 × 2 m（见机群快照的 `safety_volume`），水平方向以飞机原点为中心，底面在原点高度。模拟机的原点是出生点，真机的原点是首次解锁点。超出安全区的 `goto` 目标返回 `outside_safety_volume`；穿环航线按安全区缩放。
+
+### 控制坐标系（0.6.0）
+
+技能与动作序列步骤中带方向的数值，按**控制坐标系**解释。缺省是 `flu`，即 ROS 与 ANetDU7 机载软件栈的习惯。单次请求用 `frame` 指定别的体系；操作员用设置项 `control_frame`（`flu` 或 `frd`，`PUT /settings`）修改缺省值。
+
+| 坐标系 | 机体 x / y / z | 本地 x / y / z | 航向 `yaw` | 偏航角速度与 `yaw` 转向的正方向 |
+|---|---|---|---|---|
+| `flu`（缺省） | 前 / **左** / 上 | 东 / 北 / 上（ENU：MAVROS `local_position`、ROS `map`） | 0° 指向 +x（正东），逆时针为正 | 逆时针 |
+| `frd` | 前 / **右** / **下** | 北 / 东 / **下**（NED：PX4 的本地系） | 0° 为正北（罗盘），顺时针为正 | 顺时针 |
+| `relay` | 前 / 右 / 上 | 东 / 北 / 上 | 0° 为正北（罗盘），顺时针为正 | 顺时针 |
+
+`relay` 是 Relay 自己的坐标轴，也是 0.6 之前各版本对这些参数的含义（见下面的回显规则）。按坐标系解释的参数：
+
+| 技能或步骤 | 按坐标系解释 | 不受影响 |
+|---|---|---|
+| `move` | `x, y, z`：机体系位移（米） | 有名字的方向 `forward`、`right`、`left`、`up`、`down`：在任何体系下含义相同，请优先使用 |
+| `velocity` | `vx, vy, vz`（m/s）与 `yaw_rate_dps`；`reference` 为 `body`（缺省，`relay` 体系下缺省为 `local`）时三者沿机体轴，速度方向随机头转动；为 `local` 时沿本地轴 | `seconds` |
+| `goto` | `x, y, z`：本地坐标；`yaw`：航向（度） | |
+| `yaw` | `deg`：转角，正方向见最后一列 | |
+| `takeoff`、`land`、`hold`、`rtl`、`sticks`、`attitude` | | 全部：`alt` 是起飞点以上的米数；`attitude` 仍是 roll 向右为正、pitch 抬头为正、`yaw_rate_dps` 顺时针为正 |
+
+`move` 只能给 `x, y, z` 或有名字的方向之一（`invalid_request`），`left` 与 `right`、`down` 与 `up` 也不能同时给。请求体（或动作序列的步骤）带 `frame`（`flu`、`frd` 或 `relay`；缺省取设置）；`velocity` 另可带 `reference`（`body` 或 `local`），其他取值一律 `invalid_request`。机体系 `velocity` 以 `SET_POSITION_TARGET_LOCAL_NED`、`MAV_FRAME_BODY_NED` 发送，只含速度与偏航角速度，与 MAVROS 为 `FRAME_BODY_NED` 发出的帧一致；安全区前瞻按当前航向把它转到本地系后判断。
+
+**回显规则。** 事件 `skill_started` 的 `data.params` 总是换算成 `relay` 体系并带 `frame: "relay"`（机体速度表示为前、右、上并带 `reference: "body"`），与设置和请求无关。因此从事件里读到的已执行技能，在任何设置下重飞都是同一条航线；Relay 自己生成的动作序列（标定流程、再飞）也使用 `relay`。不是命令的数据保持原有坐标轴：`position`、`attitude`、`heading_deg`、杆量与穿环航线（`c` 为东北天，`yaw_deg` 为罗盘角）与以前相同。
+
+**`vehicle.nav`** 按设置的控制坐标系报告位姿，方便按 `flu` 或 `frd` 思考的智能体直接使用：`{frame, position: [x, y, z]（本地系，米；没有本地位置时为 null）, velocity: [vx, vy, vz]（本地系，m/s）, body_velocity: [vx, vy, vz]（沿机体轴，只按航向旋转）, yaw_deg, yaw_rate_dps}`。`GET /capabilities` 带 `control_frame`、`control_frames`（上表中 `flu` 与 `frd` 的机器可读形式：`body` 与 `local` 的轴名、`yaw`、`yaw_rate`）、`models` 与 `sim_frame_default`。
 
 ## 4. 鉴权
 
@@ -97,9 +126,9 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 
 | 级别 | 调用方 | 包含 |
 |---|---|---|
-| 控制者 | 认领了该飞机的会话；操作员 | 杆量、解锁、模式、技能、动作序列、再飞、穿环航线、急停、设备级指令（电机、执行器、遥控覆盖、原始指令、重启、校准、终止）、写参数 |
+| 控制者 | 认领了该飞机的会话；操作员 | 杆量、解锁、模式、技能、动作序列、再飞、穿环航线、云台动作、急停、设备级指令（电机、执行器、遥控覆盖、原始指令、重启、校准、终止）、写参数 |
 | 应用操作 | 操作员；设置项 `agents_app_control` 开启时（缺省开启）的任意会话 | 扫描网络、按地址连接、移除飞机、模拟机增删与复位、全部急停、数传重试与配网、告警确认、航线编辑、修改设置、界面动作（`POST /app/ui`） |
-| 操作员专属 | 仅 Relay 窗口 | REST 附身与释放、杆量方向与桨叶确认、授予或收回 `agents_app_control` |
+| 操作员专属 | 仅 Relay 窗口 | REST 附身与释放、杆量方向与桨叶确认、授予或收回 `agents_app_control`、设置真机机型、接入与断开云台吊舱 |
 
 `agents_app_control` 关闭时，会话发起的应用操作返回 403 `app_control_disabled`；会话试图修改该设置项返回 403 `operator_required`。会话发起的每个界面动作都会在窗口中显示通知并记录事件 `app_command`。
 
@@ -112,7 +141,7 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | 方法与路径 | 鉴权 | 用途 |
 |---|---|---|
 | `GET /health` | – | `{ok, version, uptime_s}` |
-| `GET /capabilities` | – | 坐标系、门限、技能及参数、模式名称、确认词 |
+| `GET /capabilities` | – | 坐标系、`control_frame` 与 `control_frames`、机型 `models`、`sim_frame_default`、门限、技能及参数、模式名称、确认词 |
 | `GET /fleet` | – | 机群快照：飞机、会话、告警、安全区 |
 | `GET /vehicles/{id}` | – | 单机状态，另含 `detail`（home、安全区原点、单节电压、起飞前检查项）。`health` 为飞行健康诊断（见第 5 节） |
 | `GET /vehicles/{id}/preflight` | – | 起飞前检查项 |
@@ -128,8 +157,8 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | `POST /vehicles/{id}/sticks` | 控制者 | `{roll, pitch, yaw, throttle}`；以 10–50 Hz 重复发送 |
 | `POST /vehicles/{id}/arm` | 控制者 | `{arm: true}`（真机：`{arm: true, confirm: "ARM"}`）或 `{arm: false}` |
 | `POST /vehicles/{id}/mode` | 控制者 | `{name}`，例如 `LOITER`、`ALT_HOLD`、`POSCTL` |
-| `POST /vehicles/{id}/skills/{name}` | 控制者 | `takeoff {alt}`、`land`、`hold {seconds?}`、`move {forward?, right?, up?}`、`yaw {deg}`、`rtl`、`goto {x, y, z, yaw?}` |
-| `POST /vehicles/{id}/plan` | 控制者 | `{steps, name?, confirm?, tuning?}`：执行动作序列（见下文） |
+| `POST /vehicles/{id}/skills/{name}` | 控制者 | `takeoff {alt, speed?, settle_s?}`、`land`、`hold {seconds?}`、`move {forward? \| right? \| left? \| up? \| down? \| x?, y?, z?; frame?, speed?, settle_s?}`、`yaw {deg, frame?}`、`rtl`、`goto {x, y, z, yaw?, frame?, speed?, settle_s?}`、`velocity {vx, vy, vz, yaw_rate_dps?, seconds, reference?, frame?}` |
+| `POST /vehicles/{id}/plan` | 控制者 | `{steps \| builtin, name?, confirm?, tuning?}`：执行动作序列或内置计划（见下文） |
 | `PATCH /vehicles/{id}/plan/tuning` | 控制者 | `{climb?, hover?}`：飞行中修改序列的油门参数 |
 | `POST /vehicles/{id}/plan/cancel` | 控制者 | 取消正在执行的序列；空中的飞机原地悬停 |
 | `POST /vehicles/{id}/sequence` | 控制者 | `{sequence, confirm?, speed?, start_at?}`：执行 `.ars` 时间轴序列（见下） |
@@ -146,6 +175,13 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | `PUT /sims/{id}/airframe` | 控制者或操作员 | `{preset \| params, seed?}`：模拟机机体缺陷（见下） |
 | `GET /sims/{id}/airframe` | 控制者或操作员 | 机体缺陷的全部数值、取值范围与悬停油门 |
 | `PUT /sims/{id}/frame` | 控制者或操作员 | `{preset?, mass_kg?, ...}`：上锁且在地面时更换模拟机的物理机型（见[固件孪生](#固件孪生054)） |
+| `GET /plans/builtin` | – | 内置计划：`{plans: [{id, title, title_zh, description, description_zh, steps}]}`（`du7_box`） |
+| `POST /vehicles/{id}/model` | 操作员 | `{model: anet-du7 \| micro}` → `{id, model}`：真机按什么机型显示与飞行（[ANetDU7](#anetdu7-与限速飞行060)）；模拟机返回 `invalid_request` |
+| `GET /vehicles/{id}/gimbal` | – | 飞机的云台吊舱视图（`vehicle.gimbal`）；没有吊舱时 404 `gimbal_missing` |
+| `POST /vehicles/{id}/gimbal` | 控制者或操作员 | `{action, ...参数}` → `{id, gimbal}`：执行一个吊舱动作，任何飞行等级都允许（[云台吊舱](#云台吊舱060)） |
+| `POST /vehicles/{id}/gimbal/attach` | 操作员 | `{transport: tcp \| serial \| sim, host?, port?, device?, baud?}` → `{id, gimbal}`：接入吊舱 |
+| `DELETE /vehicles/{id}/gimbal` | 操作员 | 断开吊舱并关闭链路 → `{id, detached}` |
+| `GET /vehicles/{id}/gimbal/captures?limit=` | – | 拍照与录像记录，最新的在最后（`limit` 1–500，缺省 100）→ `{id, total, captures}` |
 
 ### 技能
 
@@ -153,16 +189,16 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 
 | 技能 | 所需能力 | 行为 |
 |---|---|---|
-| `takeoff {alt}` | althold | 模拟机按需自动解锁，爬升到起飞点上方 `alt` 米（0.2 m 至安全区高度）并保持。有位置估计时使用飞控自身的起飞（GUIDED / OFFBOARD）；没有位置估计时在 ALT_HOLD / ALTCTL 下以油门杆爬升，并按气压高度改平。地面上的真机须先解锁，或在调用中携带 `confirm: "ARM"` 并通过起飞前检查。已在空中时立即完成。 |
+| `takeoff {alt, speed?, settle_s?}` | althold | 模拟机按需自动解锁，爬升到起飞点上方 `alt` 米（0.2 m 至安全区高度）并保持。有位置估计时使用飞控自身的起飞（GUIDED / OFFBOARD）；没有位置估计时在 ALT_HOLD / ALTCTL 下以油门杆爬升，并按气压高度改平。带 `speed`，或 ANetDU7 缺省时，有位置估计的 PX4 先在 POSCTL 下解锁、再切到 OFFBOARD，以限速的机体系速度爬升（[见下](#anetdu7-与限速飞行060)）。地面上的真机须先解锁，或在调用中携带 `confirm: "ARM"` 并通过起飞前检查。已在空中时立即完成。 |
 | `land` | 任意 | 原地降落；飞机落地并上锁后完成。 |
 | `hold {seconds?}` | althold | 保持位置（LOITER / POSCTL）或高度（ALT_HOLD / ALTCTL）。带 `seconds` 时，到时报告 `done` 并继续保持。 |
-| `move {forward?, right?, up?}` | althold，须在空中 | 机体坐标系下的米数（负值为后、左、下）。有位置估计时：闭环 `goto` 到目标点。没有位置估计时：**开环**，按定时倾斜并推算距离（误差约 ±30%），每步水平距离不超过 2 m；`up` 使用气压高度。 |
-| `yaw {deg}` | althold，须在空中 | 按姿态航向转动 `deg` 度，顺时针为正；误差 3° 以内完成。 |
+| `move {forward?, right?, left?, up?, down? \| x?, y?, z?; frame?, speed?, settle_s?}` | althold，须在空中 | 机体坐标系下的米数。可以说出方向（`forward`、`right`、`left`、`up`、`down`，负值为反方向，各体系含义相同），也可以按控制坐标系给机体系位移 `x, y, z`（`flu`：前、左、上；`frd`：前、右、下），二者不能并用。有位置估计时：闭环 `goto` 到目标点，给了 `speed` 或为 ANetDU7 时用限速的机体系速度。没有位置估计时：**开环**，按定时倾斜并推算距离（误差约 ±30%），每步水平距离不超过 2 m；`up` 使用气压高度。 |
+| `yaw {deg, frame?}` | althold，须在空中 | 按姿态航向转动 `deg` 度；`flu`（缺省）下逆时针为正，`frd` 与 `relay` 下顺时针为正；误差 3° 以内完成。 |
 | `rtl` | position | 返回起飞点并降落。 |
-| `goto {x, y, z, yaw?}` | position | 飞往飞机位置坐标系中的目标点；距离 0.15 m 以内即完成。 |
+| `goto {x, y, z, yaw?, frame?, speed?, settle_s?}` | position | 飞往飞机位置坐标系中的本地点 `x, y, z`，按控制坐标系解释（`flu`：东、北、上；`frd`：北、东、下）；可选 `yaw` 是该体系的航向（`flu`：0 为正东、逆时针；`frd`：罗盘角）。距离 0.15 m 以内即完成；限速飞行时先转向 `yaw`，在 0.2 m 以内保持 `settle_s` 后完成。 |
 | `sticks {roll, pitch, yaw, throttle, seconds}` | manual，须已解锁 | 在手动类模式下保持一组杆量 `seconds` 秒（0.05–10 s），然后回中。适合大语言模型发出短促的手动输入。 |
 | `attitude {roll_deg, pitch_deg, yaw_rate_dps, thrust, seconds}` | manual，须已解锁 | 以 `SET_ATTITUDE_TARGET` 保持姿态与总推力 `seconds` 秒（ArduPilot 自动切到 GUIDED_NOGPS，PX4 为 OFFBOARD）。 |
-| `velocity {vx, vy, vz, yaw_rate_dps?, seconds}` | position | 以 ENU 速度（m/s）飞行 `seconds` 秒，然后悬停。 |
+| `velocity {vx, vy, vz, yaw_rate_dps?, seconds, reference?, frame?}` | position | 以速度（各轴 −2..2 m/s）飞行 `seconds` 秒，然后悬停。`reference: "body"`（缺省，`relay` 体系下缺省为 `"local"`）时数值沿机体轴，速度方向随机头转动（`flu`：前、左、上；`frd`：前、右、下）；`"local"` 沿本地轴（`flu`：东、北、上；`frd`：北、东、下）。`yaw_rate_dps`（−90..90）在 `flu` 下逆时针为正，在 `frd` 与 `relay` 下顺时针为正。 |
 
 技能运行或保持期间，Relay 持续发送中位杆量（油门 0.5）作为遥控保活，使飞控的遥控丢失保护保持静默；这依赖的失控保护设置见 `hardware.zh-CN.md`。
 
@@ -182,7 +218,9 @@ POST /api/v1/vehicles/sim-1/plan
 ]}
 ```
 
-可用动作：`takeoff {alt}`（缺省 1 m）、`hover {seconds}` / `hold {seconds}`（缺省 3 s）、`move {forward, right, up}`、`yaw {deg}`、`land`、`goto {x, y, z, yaw?}`、`rtl`，以及 `sticks`、`attitude`、`velocity`（参数同上表）。序列开始前会校验每一步（`invalid_request` 指出出错的步骤与字段；缺少能力的步骤返回 `capability_missing`）。不以 `takeoff` 开头的序列要求飞机已在空中（`not_airborne`）。真机从地面开始的序列需要 `confirm: "ARM"`。
+可用动作：`takeoff {alt, speed?, settle_s?}`（缺省 1 m）、`hover {seconds}` / `hold {seconds}`（缺省 3 s）、`move {forward, right, left, up, down \| x, y, z; frame?, speed?, settle_s?}`、`yaw {deg, frame?}`、`land`、`goto {x, y, z, yaw?, frame?, speed?, settle_s?}`、`rtl`，以及 `sticks`、`attitude`、`velocity {…, reference?, frame?}`（参数同上表）。每一步按自己的 `frame` 解释数值，缺省取设置 `control_frame`。序列开始前会校验每一步（`invalid_request` 指出出错的步骤与字段；缺少能力的步骤返回 `capability_missing`）。不以 `takeoff` 开头的序列要求飞机已在空中（`not_airborne`）。真机从地面开始的序列需要 `confirm: "ARM"`。
+
+**内置计划（0.6.0）。** `POST /vehicles/{id}/plan {"builtin": "du7_box"}` 飞 `GET /plans/builtin` 中的计划，代替 `steps`（二者给一个，否则 `invalid_request`；除非 `name` 另指定，序列以计划名命名）。`du7_box` 是 ANetDU7 机载测试节点 `u7_mavros_simple.py` 的航线：起飞到 2 m、前进 1 m 并返回、左移 1 m 并返回、降落，每步限速 0.5 m/s。它的方向都有名字，所以在任何控制坐标系下读法相同；2 m 的起飞要求安全区至少 2 m 高（缺省满足）。
 
 飞机的 `plan` 字段报告 `{id, name, state, index, count, steps, results, detail, tuning}`，`state` 为 `running`、`done`、`failed` 或 `cancelled`；事件 `plan_started`、`plan_step`、`plan_finished`、`plan_failed`、`plan_cancelled` 标记进度，`plan_tuned` 标记油门参数的修改。任一步失败、新的技能、控制者发送杆量、操作员拨杆或接管、急停，都会结束序列。`POST /plan/cancel` 主动结束序列（没有序列时返回 `no_plan`），空中的飞机原地悬停。
 
@@ -205,14 +243,7 @@ POST /api/v1/vehicles/sim-1/plan
 
 每个键开始一个操作块，持续到下一个键：`hold`（缺省）保持 `v`，`ramp` 线性过渡到下一个键的值。缺少的轨道居中：油门在定高与定点模式下为 0.5，在自稳模式下为 0。`trim` 叠加到每一帧（roll、pitch、yaw ±0.3，throttle ±0.2）：往前飘时调负的俯仰微调，不必改轨道。`end: "disarm"` 在飞机报告 `landed: ground` 后以零油门上锁；`hold` 保持悬停。着陆状态为 `unknown` 时按空中处理。时长 ≤ 600 s，每条轨道 ≤ 4000 个键；错误会指明字段，例如 `sequence tracks.throttle[1].t: keys must be in time order`。
 
-`POST /vehicles/{id}/sequence` 依次切换模式、在地面解锁、播放；真机解锁须带 `confirm: "ARM"`。飞机的 `skill` 为 `{name: "sequence", progress_s, duration_s, phase: mode | arm | play | end | hold}`。
-
-- `PATCH`：替换轨道和/或微调。尚未执行的操作块立即生效，模式不可改；没有正在执行的序列时返回 `no_sequence`。
-- `POST .../sequence/stop`：停止时间轴，不切断任何东西。
-- `POST .../sequence/record`：飞机解锁期间以 20 Hz 记录它收到的杆量，来源可以是操作员、动作序列、程序或时间轴，结束后简化为操作块返回。
-- `GET /history/sessions/{sid}/sequence`：对一条记录做同样的转换。
-
-限制：关闭悬停辅助的模拟机只能执行 `stabilize`；`poshold` 需要 `position` 能力；`sticks` 飞行等级下的会话只能执行 `stabilize`。事件：`sequence_started`、`sequence_edited`、`sequence_recording`。
+`POST /vehicles/{id}/sequence` 依次切换模式、在地面解锁、播放；真机解锁须带 `confirm: "ARM"`。飞机的 `skill` 为 `{name: "sequence", progress_s, duration_s, phase: mode | arm | play | end | hold}`。`PATCH` 替换轨道和/或微调：尚未执行的操作块立即生效，模式不可改；没有正在执行的序列时返回 `no_sequence`。`POST .../sequence/stop` 停止时间轴，不切断任何东西。`POST .../sequence/record` 在飞机解锁期间以 20 Hz 记录它收到的杆量，来源可以是操作员、动作序列、程序或时间轴，结束后简化为操作块返回；`GET /history/sessions/{sid}/sequence` 对一条记录做同样的转换。关闭悬停辅助的模拟机只能执行 `stabilize`；`poshold` 需要 `position` 能力；`sticks` 飞行等级下的会话只能执行 `stabilize`。事件：`sequence_started`、`sequence_edited`、`sequence_recording`。
 
 **解锁需要杆量输入。** PX4 与 ArduPilot 只有在看到飞手输入时才接受杆量模式下的解锁，否则分别报 "No manual control input" 和 "Throttle below failsafe"；模拟机现在也照此处理。没有任何杆量输入时，`POST /arm` 先发送居中的零油门杆量（来源 `relay`），等待 0.4 s 后再解锁。以 `arm` 部署的程序在上锁期间持续发送零油门杆量。
 
@@ -310,13 +341,13 @@ POST /api/v1/vehicles/sim-1/plan
 
 ### 穿环航线
 
-`course/start` 把航线放在飞机原点并返回，其中 `rings` 已换算到飞机坐标系：`c`（环心 `[x, y, z]`）、`yaw_deg`（环法向的罗盘朝向）与 `r`（半径）。计时从起飞开始。飞机按顺序在半径以内穿过环平面即计为通过。飞机的 `course` 字段报告 `next`、`total`、`splits`、`elapsed_s` 与 `best_s`；事件 `ring_passed` 与 `course_finished` 标记进度。`course_sim.py` 沿每个环的法向，在环前 0.35 m 与环后 0.35 m 各设一个航点。
+`course/start` 把航线放在飞机原点并返回，其中 `rings` 已换算到飞机坐标系：`c`（环心 `[x, y, z]`）、`yaw_deg`（环法向的罗盘朝向）与 `r`（半径）。计时从起飞开始。飞机按顺序在半径以内穿过环平面即计为通过。飞机的 `course` 字段报告 `next`、`total`、`splits`、`elapsed_s` 与 `best_s`；事件 `ring_passed` 与 `course_finished` 标记进度。`course_sim.py` 沿每个环的法向，在环前 0.35 m 与环后 0.35 m 各设一个航点。环的数值使用 Relay 自己的坐标轴（东北天、罗盘朝向）：用 `goto` 加 `frame: "relay"` 飞（该示例即如此），或先换算到控制坐标系。
 
 ### 模拟机悬停辅助
 
 每架模拟机有 `hover_assist`（缺省取设置 `sim_hover_assist`，开）。开：与以前相同，ALT_HOLD 保持高度、LOITER 保持位置，GUIDED、RTL、LAND 自主飞行。关：模拟一架没有气压计与定位源的穿越机，姿态自稳仍在，但油门就是推力（无定高、无倾斜与电压补偿，电压下降后悬停点升高），地效、电机响应、湍流（设置 `sim_turbulence`，0–1）与桨洗生效；飞机报告无气压计、无位置估计（`capabilities.althold` 与 `position` 为 false），请求 ALT_HOLD、LOITER、GUIDED、RTL、AUTO 被拒绝（`Mode requires hover assist`）。LAND 保留为失控保护，以开环推力下降。开关可在解锁与飞行中切换：关闭时空中的飞机转 STABILIZE，推力以 0.3 s 斜坡过渡；开启时以当前高度进入 ALT_HOLD。
 
-创建时用 `POST /sims {count, autopilot, position, hover_assist}` 设定；`POST /sims/{id}/assist {on}` 切换（操作员、控制该机的会话，或在无人控制该机且操作员允许应用控制时的任意会话）。快照携带 `vehicle.sim = {hover_assist, turbulence}`（真机为 null）；事件 `sim_assist_changed` 报告变化。MCP：`app_sim_assist`；SDK：`sim_assist(id, on)` 与 `add_sims(count, autopilot, hover_assist)`。
+创建时用 `POST /sims {count, autopilot, position, hover_assist, frame}` 设定；`POST /sims/{id}/assist {on}` 切换（操作员、控制该机的会话，或在无人控制该机且操作员允许应用控制时的任意会话）。快照携带 `vehicle.sim = {hover_assist, turbulence}`（真机为 null）；事件 `sim_assist_changed` 报告变化。MCP：`app_sim_assist`；SDK：`sim_assist(id, on)` 与 `add_sims(count, autopilot, hover_assist, frame)`。
 
 ### 模拟机机体缺陷
 
@@ -360,7 +391,7 @@ POST /api/v1/vehicles/sim-1/plan
 
 - **识别与匹配。** Relay 从 `AUTOPILOT_VERSION` 读取固件类型、版本、git 哈希与板型，并对已安装的运行包分级：`exact`（同版本且 git 相同）、`version`、`series`（同主次版本）、`nearest`、`none`。低于 `version` 时返回提示：控制回路与参数含义可能与真机不同。可手动选择同固件的任意运行包，跨固件不可选。快照中每架飞机带 `firmware_info: {family, vehicle, version, type, git, board}`（收到 `AUTOPILOT_VERSION` 前为 null）。
 - **孪生配置。** 抓取要求真机（否则 `real_only`）且参数表已读完（否则 `params_incomplete`，附 `detail.received/total`）。硬件相关参数（校准偏置、设备编号、串口、板载与输出接线，如 PX4 `CAL_*`、`SYS_AUTOSTART`，ArduPilot `INS_*OFFS*`、`SERIAL*` 等）不进入孪生，每条附中英文原因；增益、限幅、失控保护与悬停油门全部进入。未给 `frame` 时，4S 及以上或容量不小于 2000 mAh 取 `large-450`，否则取 `small-250`。
-- **机型。** 预设 `micro-120`（快速模拟缺省）、`small-250`、`large-450`，可调整质量、轴距、桨径、电池节数与容量。孪生按参数中的悬停油门换算电机推力，使其与真机以相同油门悬停。
+- **机型。** 预设 `anet-du7`（0.6.0 起新建快速模拟机的缺省）、`micro-120`（没有档案的孪生缺省）、`small-250`、`large-450`，可调整质量、轴距、桨径、电池节数与容量。孪生按参数中的悬停油门换算电机推力，使其与真机以相同油门悬停。
 - **启动。** `POST /sims` 在每个固件发出第一个心跳后返回；15 s 内未出现心跳则返回 `twin_start_failed`（`detail.reason`、`detail.lines` 为进程最后 40 行输出、`detail.added`）。同时运行的孪生数受设置 `twin_limit`（缺省 8）限制，超出返回 `twin_limit`。`engine: "relay"`（缺省）不接受 `profile`、`pack` 与 `home`；`frame` 对两种引擎都适用。
 - **复位与摔机。** `POST /sims/{id}/reset` 在后台以相同配置重启孪生的固件（事件 `twin_started`，`restart: true`；失败为 `twin_start_failed`），对已坠毁的模拟机同样适用。孪生坠毁后与快速模拟一样由接触模型继续翻滚，Relay 以组件号 25 向固件发送 `STATUSTEXT` 告知坠毁。
 - **孪生不支持。** 悬停辅助开关与狗斗（`twin_unsupported`，附 `detail.operation`）；`position: false`（`invalid_request`）。无头评测只使用快速模拟机。
@@ -381,6 +412,72 @@ Relay 也可以经 USB 串口连接飞机：飞控自带的 USB 口，或接在�
 - `state`：`idle`、`backing_up`、`writing`、`rebooting`、`running`、`restoring`、`verifying`、`restored`、`failed`。`steps`：`confirm`、`backup`、`write`、`reboot`、`run`、`restore`、`verify`，每步为 `pending`、`active`、`done`、`failed` 或 `skipped`，附中英文 `detail`。运行中 `run` 为 `{sensor_hz, gps_hz, actuator_frames, steps, since}`。任何一步失败都进入恢复。
 - `start` 要求 `confirm: "HITL"`（已拆下螺旋桨）、PX4、串口链路、已上锁，且操作员已附身；智能体会话仅在开启应用控制时可调用。未输入确认词时返回 `confirm_required`（400，`detail.expected: "HITL"`）；其他条件不满足时返回 `hitl_unavailable`（409），附 `detail.reason`、`detail.reason_zh` 与 `detail.cause`。若上次会话尚欠恢复（会话运行中 Relay 退出），该飞控下次经串口连接且处于上锁状态时自动恢复；`stop` 也会立即执行恢复。ArduPilot 固件早已移除 HIL，ArduPilot 飞机请使用固件孪生。Wi-Fi 数传带不动传感器数据流，因此 HITL 须经 USB。
 - 现状：PX4 协议编码、备份、恢复与核对已用模拟串口测试；真机全流程在大机到位后验证。
+
+### ANetDU7 与限速飞行（0.6.0）
+
+ANetDU7 是 0.6 的主力机型：起飞重量 2.5 kg 的四旋翼（轴距 500 mm，含保护架 684 × 684 × 211 mm，4S 5300 mAh，续航约 10 分钟），飞控为运行 PX4 的 CUAV X7+，带机载电脑与云台吊舱。`vehicle.model` 取 `anet-du7` 或 `micro`（0.5 的小机）。区分飞机靠机型，而不是靠飞控。
+
+| 场景 | 规则 |
+|---|---|
+| 新建模拟机 | `POST /sims` 不带 `frame` 时添加 ANetDU7：取设置 `sim_frame_default`（缺省 `anet-du7`；`micro-120`、`small-250`、`large-450` 选小机）。请求里的 `frame.preset` 优先。未指定 `autopilot` 的 `anet-du7` 模拟机飞 PX4 风格，小机预设飞 ArduPilot 风格。固件孪生（`engine: "sitl"`）沿用档案里的机型，没有则为 `micro-120` |
+| 模拟机的机型 | 物理预设为 `anet-du7` 时是 `anet-du7`，否则是 `micro`，随机型变化（`PUT /sims/{id}/frame`）。`anet-du7` 模拟机自带模拟云台吊舱 |
+| 真机 | 取设置 `real_model_default`（缺省 `anet-du7`），直到操作员设定：`POST /vehicles/{id}/model {"model": "anet-du7" \| "micro"}`（仅操作员，按机身标识记住，事件 `model_changed`） |
+| 狗斗、评测、内置程序 | 始终使用 `micro-120`，行为不变 |
+| `GET /capabilities` → `models` | `anet-du7`：外廓 0.684 m、高 0.211 m、轴距 0.5 m、2.5 kg、带云台；`micro`：0.166 m、0.045 m、0.25 m、0.12 kg、无云台。舞台按真实尺寸绘制 |
+
+**限速跟踪。** `takeoff`、`move`、`goto` 可带 `speed`（m/s，0.1–5）与 `settle_s`（0–10，缺省 2）。给了 `speed`，或飞机是有位置估计的 `anet-du7`（缺省 `speed` 0.5）时，它们不再发位置设定点，而是与机载测试节点一样飞：每 50 ms 令速度 = 0.8 × 位置误差，模长限制在 `speed`，速度矢量的变化率不超过 0.5 m/s²；转到机体系后以机体速度发送，偏航角速度为 0（不纠正机头，`goto` 带 `yaw` 时先原地转向）。水平与高度误差都在 0.2 m 以内并保持 `settle_s` 后完成。PX4 的起飞先在 POSCTL 下发零速度 2 s，然后解锁、切到 OFFBOARD，从解锁点开始爬升；ArduPilot 的起飞仍用 `NAV_TAKEOFF`，`move` 与 `goto` 在 GUIDED 下飞。没有位置估计时 `move` 仍是开环。其他技能带 `speed` 或 `settle_s` 返回 `invalid_request`；不是 `anet-du7` 的飞机只给 `settle_s` 不给 `speed` 也一样。技能超时为 `40 + 2·alt/speed` 秒（起飞）或 `30 + 2·距离/speed` 秒。
+
+监视项与测试节点相同：倾角超过 20°、位置跳变超过 0.25 m + 1.5 m/s × dt（估计器重置）、位置遥测超过 1 s 未更新（测试节点在机上用 0.3 s，Relay 经无线链路看到的位置更晚）、速度超过 `speed` + 0.5 m/s 持续 1 s，任一触发都会向飞控请求一次降落，技能失败，原因写入 `skill.detail`。模式被外部改走（遥控器接管）时技能失败，不再发任何设定点。
+
+### 云台吊舱（0.6.0）
+
+`vehicle.gimbal` 是飞机的云台吊舱，没有吊舱时为 `null`。每架 ANetDU7 模拟机自带模拟吊舱（`kind: "sim"`，与物理同一时钟，结果可复现）。ANetDU7 真机的吊舱（`kind: "dyt"`，DYT 吊舱；协议要点见 `vehicles/anet-du7/docs/gimbal-dyt.zh-CN.md`）由操作员通过 TCP（机载网络的 2000 端口）或串口接入。两者使用同一套动作。读取不需要鉴权；`POST /vehicles/{id}/gimbal` 面向操作员或正在控制该机的会话（附身或有效认领），**任何智能体飞行等级下都允许**，不需要确认词。接入与断开由操作员执行。
+
+角度是吊舱自身的框架角，**不**随 `control_frame` 变化：`yaw_deg` 向右为正，`pitch_deg` 向上为正（正下方是 −90），`roll_deg` 右倾为正。
+
+| `vehicle.gimbal` 字段 | 含义 |
+|---|---|
+| `kind`、`link`、`address` | `sim` 或 `dyt`；`ok`、`connecting` 或 `lost`；`"10.0.0.5:2000"` 或串口名，模拟吊舱为 null |
+| `yaw_deg`、`pitch_deg`、`roll_deg`、`yaw_dps`、`pitch_dps` | 框架角（度）与角速度 |
+| `mode` | `follow`、`lock`、`rate`、`angle`、`track`、`scan` 或 `off`（电机关） |
+| `lens`、`pip` | 主画面镜头：`visible1`（可见光变焦）、`visible2`（可见光广角）、`ir1`（红外变焦）、`ir2`（红外定焦）；画中画的镜头或 null |
+| `zoom`、`zoom_range`、`digital_zoom`、`fov_deg` | 当前镜头的倍数、范围、数字变焦开关、当前 `[水平, 垂直]` 视场角（DYT 为估算值） |
+| `palette`、`focus` | 红外色板 `white_hot`、`black_hot` 或 `pseudo`；`{mode: auto \| manual, position}` |
+| `tracking` | `{state: off \| searching \| locked, algorithm: auto \| person \| vehicle \| building, x_deg, y_deg, box_px}` |
+| `laser` | `{on, range_m}`（没有有效回波时为 null） |
+| `recording`、`photos` | 录像状态；本次会话拍照张数 |
+| `motors`、`enhance`、`osd`、`low_light`、`selftest` | 各开关与自检 `{done, gyro_ok, servo_ok, image_ok}` |
+| `target`、`debug`、`age_s` | 吊舱解算的目标位置 `{lat, lon, alt}` 或 null；DYT 吊舱的链路计数；距吊舱上次状态的秒数 |
+
+各镜头的视场角（16:9）：`visible1` 1× 时水平 60°，N 倍时按 2·atan(tan 30° / N) 收窄，1–30×；`visible2` 固定 90°；`ir1` 1× 时 40°，1–8×（电子变倍）；`ir2` 固定 24°。模拟吊舱为每个镜头各记一个倍数，并以约每秒 2 倍的速度变焦，所以视图里的 `zoom` 会滞后于 `zoom` 指令。
+
+`POST /vehicles/{id}/gimbal {"action": ..., ...}` 返回 `{id, gimbal}`，即指令执行后吊舱的视图。某个动作未列出的参数会被忽略。
+
+| `action` | 参数 | 效果 |
+|---|---|---|
+| `rate` | `yaw_dps`、`pitch_dps`（−100..100，缺省 0；向右、向上为正） | 以角速度转动，直到 `stop` 或新指令 |
+| `stop` | – | 停止转动 |
+| `angle` | `yaw_deg`（−180..180）、`pitch_deg`（−120..90）、`space`：`frame`（缺省，相对机头）或 `earth`（罗盘方位与仰角，pitch −90..90） | 转到指定方向 |
+| `center` | – | 回中 |
+| `follow`、`lock`、`motors` | `on` | 方位跟随机头；保持地理指向（姿态锁定）；电机开关 |
+| `zoom` | `level`（倍） | 当前镜头变焦：`visible1` 1–30、`ir1` 1–8（超出范围 `invalid_request`；定焦镜头 `gimbal_unsupported`） |
+| `zoom_rate` | `rate`（−100..100，0 停止） | 连续变焦（定焦镜头 `gimbal_unsupported`） |
+| `digital_zoom` | `on` | 数字变焦开关 |
+| `lens` | `lens`、`pip`（可选，画中画的镜头；省略或 null 为取消） | 切换主画面 |
+| `palette` | `palette` | 红外色板 |
+| `photo` | – | 拍照（事件 `gimbal_capture`，记录进拍照列表） |
+| `record` | `on` | 开始或停止录像（事件 `gimbal_record`） |
+| `track` | `x`、`y`（距 1280 × 720 画面中心的像素，x 向右、y 向下；±640、±360）、`algorithm`（可选） | 跟踪该点处的目标；`track_stop` 结束 |
+| `laser` | `on` | 激光测距 |
+| `focus` | `mode`：`auto` 或 `manual`，`position`（手动，4090..49152） | 对焦 |
+| `enhance`、`osd`、`low_light` | `on` | 图像增强、屏显、低照度模式 |
+| `scan`、`scan_stop` | `yaw_deg`、`pitch_deg`、`speed_dps`（0.2..51） | 扫描 |
+| `geo_track` | `lat`、`lon`、`alt`（−6000..6000 m，海拔），或 `mode`：`center` 或 `exit` | 对准并跟随一个地理位置 |
+| `look_at` | `x`、`y`、`z`：**控制坐标系下的本地点**，`frame`（`flu` 或 `frd`；缺省取设置；不接受 `relay`） | Relay 按飞机位姿解算角度，以地理空间的 `angle` 下发 |
+
+运动类动作（`rate`、`angle`、`center`、`follow`、`lock`、`track`、`scan`、`geo_track`）在电机关闭或自检未完成时返回 `gimbal_busy`。没有姿态与位置估计，或目标点与飞机重合时，`look_at` 返回 `invalid_request`。吊舱不再应答时返回 `gimbal_offline`。
+
+`POST /vehicles/{id}/gimbal/attach`（操作员）：真机用 `{"transport": "tcp", "host": "10.0.0.5", "port": 2000}` 或 `{"transport": "serial", "device": "/dev/ttyUSB0", "baud": 115200}`，模拟机用 `{"transport": "sim"}`（模拟机只能接 `sim`，真机只能接 `tcp` 或 `serial`，否则 `gimbal_unsupported`）；它会替换飞机原有的吊舱。`GET /vehicles/{id}/gimbal/captures` 列出最近 500 次拍照与录像变化，最新的在最后：`{seq, kind: photo \| record_start \| record_stop, t, nav, gimbal: {yaw_deg, pitch_deg, roll_deg}, lens, zoom, laser_range_m, target}`，其中 `nav` 是当时飞机的位姿（`frame`、`position`、`yaw_deg`、`roll_deg`、`pitch_deg`、`heading_deg`、`lat`、`lon`、`alt`）。事件：`gimbal_attached`、`gimbal_detached`、`gimbal_link`、`gimbal_capture`、`gimbal_record`、`gimbal_lens`（第 7 节）；错误：`gimbal_missing`、`gimbal_offline`、`gimbal_unsupported`、`gimbal_busy`。0.6.0 不解码吊舱的视频流。MCP：`relay_gimbal_status`、`relay_gimbal_control`、`relay_gimbal_captures`、`app_gimbal_attach`、`app_gimbal_detach`；SDK：`gimbal`、`gimbal_do` 及其快捷方法。
 
 ### 机载程序
 
@@ -531,6 +628,7 @@ SDK：`dogfight_start(...)`、`dogfight_stop()`、`dogfight_status()`、`leaderb
 | `refly_started` / `refly_finished` / `refly_failed` | 再飞 |
 | `sim_assist_changed` | 模拟机悬停辅助已切换（`data.hover_assist`） |
 | `sim_airframe_changed` | 模拟机机体缺陷已设置（`data.preset`、`data.seed`、`data.by`） |
+| `model_changed` | 操作员设定了真机的机型（`data.model`）；`sim_added` 也带 `data.model` |
 | `judge_finished` | 题目或对抗评测任务结束（`data.job`、`data.kind`、`data.state`、`data.score`、`data.passed`） |
 | `peer_joined` / `peer_left` / `arena_hit` / `arena_down` | 局域网联机：终端加入或离开、我方命中或被命中、模拟机被击落 |
 | `collision` | 两架飞机，或飞机与环、地面发生接触（`data.a`、`data.b`、`data.crashed`、`data.kind`；局域网接触带 `data.remote`） |
@@ -542,6 +640,11 @@ SDK：`dogfight_start(...)`、`dogfight_stop()`、`dogfight_status()`、`leaderb
 | `twin_started` / `twin_exited` / `twin_start_failed` | 固件孪生：已启动（`data.family`、`version`、`pack`、`match`、`restart`、`pid`、`boot_s`）、固件进程退出（`data.code`、`lines`）、复位后重启失败（`data.reason_en`、`reason_zh`、`lines`）；`sim_added` 增加 `engine` 与 `firmware` |
 | `autopilot_pack_imported` | 导入了运行包（`data.pack`、`family`、`version`） |
 | `hitl_started` / `hitl_restored` / `hitl_failed` | 硬件在环：开始运行（`data.vehicle`、`family`、`version`、`backup`）、参数已恢复（`data.restored`、`mismatches`）、某一步失败（`data.step`、`reason_en`、`reason_zh`） |
+| `gimbal_attached` / `gimbal_detached` | 云台吊舱已接入（`data.transport`、`data.address`）或已断开 |
+| `gimbal_link` | 吊舱链路变化（`data.link`：`ok`、`connecting`、`lost`；`data.error`） |
+| `gimbal_capture` | 拍了一张照片（`data.seq`、`kind`、`index`、`t`、`gimbal`、`lens`、`zoom`、`target`） |
+| `gimbal_record` | 录像开始或停止（`data.on`、`data.capture`：对应拍照记录的 `seq`） |
+| `gimbal_lens` | 镜头已切换（`data.lens`、`data.pip`） |
 
 完整列表见 `web/src/api/schema.json`（`EventKind`）。错误使用统一结构，`code` 在各版本间保持稳定：
 
@@ -554,8 +657,8 @@ SDK：`dogfight_start(...)`、`dogfight_stop()`、`dogfight_status()`、`leaderb
 | 400 | `invalid_request`、`confirm_required`、`outside_safety_volume`、`unknown_mode`、`command_not_allowed` |
 | 401 | `auth_required`、`session_expired`（重新打开会话） |
 | 403 | `operator_required`、`session_required`、`untrusted_host`、`app_control_disabled` |
-| 404 | `vehicle_not_found`、`course_not_found`、`unknown_skill`、`param_not_found`、`record_not_found`、`procedure_unknown`、`procedure_not_found`、`test_run_not_found`、`challenge_not_found`、`job_not_found`、`trace_not_found` |
-| 409 | `not_claimed`、`claimed_by_other`、`possessed_by_human`、`claim_suspended`、`preflight_blocked`、`arm_rejected`、`mode_rejected`、`not_armed`、`crashed`、`capability_missing`、`no_position_estimate`、`not_airborne`、`no_plan`、`must_be_disarmed`、`message_not_seen`、`refly_unavailable`、`ui_action_failed`、`procedure_running`、`no_procedure`、`procedure_step_mismatch`、`procedure_not_waiting`、`arena_off`、`arena_down` |
+| 404 | `vehicle_not_found`、`course_not_found`、`unknown_skill`、`param_not_found`、`record_not_found`、`procedure_unknown`、`procedure_not_found`、`test_run_not_found`、`challenge_not_found`、`job_not_found`、`trace_not_found`、`gimbal_missing` |
+| 409 | `not_claimed`、`claimed_by_other`、`possessed_by_human`、`claim_suspended`、`preflight_blocked`、`arm_rejected`、`mode_rejected`、`not_armed`、`crashed`、`capability_missing`、`no_position_estimate`、`not_airborne`、`no_plan`、`must_be_disarmed`、`message_not_seen`、`refly_unavailable`、`ui_action_failed`、`procedure_running`、`no_procedure`、`procedure_step_mismatch`、`procedure_not_waiting`、`arena_off`、`arena_down`、`gimbal_offline`、`gimbal_unsupported`、`gimbal_busy` |
 | 429 | `rate_limited`、`judge_queue_full` |
 | 503 | `link_not_ready`、`backend_busy`、`ui_unavailable`、`judge_unavailable` |
 | 504 | `ui_timeout` |
@@ -564,19 +667,21 @@ SDK：`dogfight_start(...)`、`dogfight_stop()`、`dogfight_status()`、`leaderb
 
 固件孪生、串口链路与硬件在环（0.5.4）新增：400 `pack_unsupported`（`detail.reason`）、`serial_unavailable`（`detail.device`、`detail.cause`：`busy`、`not_found`、`permission`、`no_heartbeat`、`pyserial_missing`、`invalid`、`io`，并附 `detail.reason` 与 `detail.reason_zh`；串口被占用时为 409）；404 `pack_missing`、`profile_not_found`；409 `twin_limit`、`frame_unsupported`、`twin_unsupported`（`detail.operation`、`detail.operation_zh`）、`params_incomplete`（`detail.received`、`detail.total`）、`real_only`、`hitl_unavailable`（`detail.reason`、`detail.reason_zh`、`detail.cause`）；503 `twin_start_failed`。`hitl_restore_mismatch` 在 HITL 状态与 `hitl_restored` 事件中报告，恢复流程仍会完成。
 
+控制坐标系、机型与云台（0.6.0）新增：404 `gimbal_missing`；409 `gimbal_offline`、`gimbal_unsupported`、`gimbal_busy`（消息里写明原因）。`frame` 或 `reference` 取值不对、`move` 同时给了 `x, y, z` 与有名字的方向、`speed` 或 `settle_s` 超出范围或用在不带它们的技能上，以及云台动作的参数缺失或不合法，都是 400 `invalid_request`，消息里指出字段。
+
 ## 8. MCP 服务
 
 Relay 提供三套基于 stdio 的 Model Context Protocol 服务（JSON-RPC 2.0，只用标准库；支持协议版本 2024-11-05 至 2025-11-25），可以单独接入，也可以同时接入：
 
 | 服务 | 文件 | 工具 | 面向 |
 |---|---|---|---|
-| `anet-relay` | `mcp/anet_relay_mcp.py` | 34 个 `relay_*`（`sticks` 等级下 26 个） | 飞行：机群、认领、解锁、模式、技能、动作序列及其油门参数、时间轴序列（`relay_timeline_*`，含 `acro`）、短时杆量、再飞、穿环航线、急停；固件孪生：`relay_autopilots_list`、`relay_firmware_identify`、`relay_twin_profiles_list`、`relay_twin_profile_get`、`relay_twin_profile_capture`、`relay_twin_start`、`relay_twin_status`、`relay_sim_frame`（孪生是模拟机，各等级均可用） |
-| `anet-relay-device` | `mcp/anet_relay_device_mcp.py` | 36 个 `device_*` | 设备级：设备总览、MAVLink 消息、参数读写、原始指令、单电机测试、执行器、遥控覆盖、消息频率、重启、校准、home、姿态与速度控制、飞行终止、标定流程与报告 |
-| `anet-relay-app` | `mcp/anet_relay_app_mcp.py` | 42 个 `app_*`、`relay_serial_ports`、`relay_hitl`、19 个程序工具与 4 个狗斗工具 | 应用控制：应用与窗口状态、手柄、语言、工作区、选择飞机、检查器、对话框、截图、扫描网络、连接（`app_connect_address {host}` 或 `{serial: {device, baud}}`）与移除飞机、串口列表、模拟机（`app_sims_add {engine: relay \| sitl, profile, pack, frame, home}`；`app_sim_reset` 也可恢复已坠毁的模拟机，并重启孪生的固件）、PX4 硬件在环（`relay_hitl {vehicle, action: status \| start \| stop, confirm: "HITL"}`）、设置、告警、记录与导出、再飞来源、附身、Copilot 窗口、全部急停；机载程序：`program_guide`、`program_*`、`challenge_list`、`challenge_submit`、`job_status`、`duel_run`、`ladder`、`airframe_set`；狗斗：`dogfight_start`、`dogfight_stop`、`dogfight_status`、`leaderboard` |
+| `anet-relay` | `mcp/anet_relay_mcp.py` | 38 个 `relay_*`（`sticks` 等级下 29 个） | 飞行：机群（含 `model`、`nav` 与云台摘要）、认领、解锁、模式、技能（`relay_takeoff`、`relay_move`、`relay_yaw`、`relay_goto` 在适用处带 `frame`、`speed`、`settle_s`）、动作序列（`steps` 或 `builtin`；`relay_plans_builtin` 列出内置计划）及其油门参数、时间轴序列（`relay_timeline_*`，含 `acro`）、短时杆量、再飞、穿环航线、急停；云台吊舱：`relay_gimbal_status`、`relay_gimbal_control {action, ...}`、`relay_gimbal_captures`（各等级对已认领的飞机都可用）；固件孪生：`relay_autopilots_list`、`relay_firmware_identify`、`relay_twin_profiles_list`、`relay_twin_profile_get`、`relay_twin_profile_capture`、`relay_twin_start`、`relay_twin_status`、`relay_sim_frame`（孪生是模拟机，各等级均可用） |
+| `anet-relay-device` | `mcp/anet_relay_device_mcp.py` | 36 个 `device_*` | 设备级：设备总览、MAVLink 消息、参数读写、原始指令、单电机测试、执行器、遥控覆盖、消息频率、重启、校准、home、姿态与速度控制（`device_velocity` 带 `frame` 与 `reference`）、飞行终止、标定流程与报告 |
+| `anet-relay-app` | `mcp/anet_relay_app_mcp.py` | 45 个 `app_*`、`relay_serial_ports`、`relay_hitl`、19 个程序工具与 4 个狗斗工具 | 应用控制：应用与窗口状态、手柄、语言、工作区、选择飞机、检查器、对话框、截图、扫描网络、连接（`app_connect_address {host}` 或 `{serial: {device, baud}}`）与移除飞机、串口列表、模拟机（`app_sims_add {engine: relay \| sitl, profile, pack, frame, home}`：不带 `frame` 为 ANetDU7，`frame.preset` 取 `micro-120`、`small-250`、`large-450` 为小机；`app_sim_reset` 也可恢复已坠毁的模拟机，并重启孪生的固件）、PX4 硬件在环（`relay_hitl {vehicle, action: status \| start \| stop, confirm: "HITL"}`）、设置（`app_settings_set {settings: {control_frame, sim_frame_default, ...}}`）、告警、记录与导出、再飞来源、附身、Copilot 窗口、全部急停；操作员动作 `app_set_model`、`app_gimbal_attach`、`app_gimbal_detach`；机载程序：`program_guide`、`program_*`、`challenge_list`、`challenge_submit`、`job_status`、`duel_run`、`ladder`、`airframe_set`；狗斗：`dogfight_start`、`dogfight_stop`、`dogfight_status`、`leaderboard` |
 
 每套服务在启动时打开一个智能体会话，名称取 `--name`（缺省分别为 `mcp`、`mcp-device`、`mcp-app`），自动续租，并在客户端断开时关闭会话；Relay 重启后，服务在下一次调用时重新打开会话，此时需要重新认领。认领属于会话：用某一套服务控制飞机时，请用同一套服务的认领工具（`relay_claim` 或 `device_claim`）。工具参数在发往 Relay 之前校验，缺少或多余的参数以 `invalid arguments` 返回。失败以 `isError: true` 的工具结果返回，并附错误码，模型可据此应对（例如遇到 `possessed_by_human` 时等待）。
 
-应用控制服务的工具在 `agents_app_control` 开启时即可使用，不需要操作员令牌。`--operator-token`（或环境变量 `RELAY_OPERATOR_TOKEN`）只在需要以操作员身份调用时提供，一般不需要。
+应用控制服务的工具在 `agents_app_control` 开启时即可使用，不需要操作员令牌。`--operator-token`（或环境变量 `RELAY_OPERATOR_TOKEN`）只在需要以操作员身份调用时提供，一般不需要；`app_set_model`、`app_gimbal_attach`、`app_gimbal_detach` 是操作员动作，没有它时返回 `operator_required`。
 
 应用控制服务中作用于飞机的程序工具（`program_deploy`、`program_stop`、`program_resume`、`program_params`）会以该服务的会话认领飞机；若飞行服务的会话已持有认领，请先在那里释放（`relay_release_claim`）。`program_deploy` 带 `arm: true` 时会先切换到手动类模式并解锁再部署（真机还需 `confirm: "ARM"`）。
 
@@ -636,12 +741,14 @@ Relay 不在 8765 端口运行时，追加 `"--base", "http://127.0.0.1:<port>"`
 | `stream(timeout=None)` | WebSocket 消息生成器（`hello`、`fleet`、`event`） |
 | `claim(id)` · `unclaim(id)` | 控制权 |
 | `sticks(id, roll, pitch, yaw, throttle)` · `arm(id, confirm=None)` · `disarm(id)` · `mode(id, name)` | 直接控制 |
-| `takeoff(id, alt)` · `land(id)` · `hold(id, seconds=0)` · `rtl(id)` · `goto(id, x, y, z, yaw=None)` · `move(id, forward=0, right=0, up=0)` · `yaw(id, deg)` | 技能；`wait=True` 阻塞到完成，失败时抛出异常 |
-| `plan(id, steps, name=None, confirm=None, wait=True)` · `cancel_plan(id)` | 动作序列；等待时若序列失败或被取消，抛出 `plan_failed` |
+| `takeoff(id, alt, speed=None, settle_s=None)` · `land(id)` · `hold(id, seconds=0)` · `rtl(id)` · `goto(id, x, y, z, yaw=None, frame=None, speed=None, settle_s=None)` · `move(id, forward=0, right=0, up=0, *, left, down, x, y, z, frame, speed, settle_s)` · `yaw(id, deg, frame=None)` | 技能；`wait=True` 阻塞到完成，失败时抛出异常。`frame` 取 `"flu"`、`"frd"` 或 `"relay"`，`None` 跟随服务器的 `control_frame`；文档字符串写明每个数值如何解释（`move` 的有名字的方向与体系无关）。缺省超时随 `speed` 变化 |
+| `plan(id, steps=None, name=None, confirm=None, wait=True, tuning=None, builtin=None)` · `plans_builtin()` · `cancel_plan(id)` | 动作序列，来自 `steps` 或内置计划（`builtin="du7_box"`）；步骤可带 `frame`、`speed`、`settle_s`；等待时若序列失败或被取消，抛出 `plan_failed` |
 | `skill(id, name, params, wait)` · `wait_skill(id, skill_id)` | 通用技能调用与等待 |
 | `course_start(id, course_id)` · `course_stop(id)` · `stop(id)` | 航线与急停 |
-| `sticks_for(id, roll, pitch, yaw, throttle, seconds)` · `attitude(id, roll_deg, pitch_deg, yaw_rate_dps, thrust, seconds)` · `velocity(id, vx, vy, vz, yaw_rate_dps, seconds)` | 短时手动、姿态与速度控制（技能） |
+| `sticks_for(id, roll, pitch, yaw, throttle, seconds)` · `attitude(id, roll_deg, pitch_deg, yaw_rate_dps, thrust, seconds)` · `velocity(id, vx, vy, vz, yaw_rate_dps, seconds, reference=None, frame=None)` | 短时手动、姿态与速度控制（技能）；`attitude` 与杆量不随控制坐标系变化，`velocity` 随之变化 |
 | `refly_options(session_id)` · `refly(id, session_id, mode="auto", speed=None, confirm=None, wait=True)` | 再飞 |
+| `gimbal(id)` · `gimbal_do(id, action, **params)` · `gimbal_angle(id, yaw_deg, pitch_deg, space=None)` · `gimbal_rate(id, yaw_dps, pitch_dps)` · `gimbal_zoom(id, level)` · `gimbal_lens(id, lens, pip=None)` · `gimbal_photo(id)` · `gimbal_record(id, on=True)` · `gimbal_look_at(id, x, y, z, frame=None)` · `gimbal_captures(id, limit=None)` | 云台吊舱：视图、任意动作（`gimbal_do` 返回 `{id, gimbal}`）、快捷方法与拍照记录 |
+| `gimbal_attach(id, transport="tcp", host=None, port=None, device=None, baud=None)` · `gimbal_detach(id)` · `set_model(id, model)` | 操作员令牌：接入或断开吊舱、设置真机机型（`anet-du7` 或 `micro`） |
 | `device(id)` · `message(id, name)` · `param(id, name)` · `params_read(id, names)` · `set_param(id, name, value)` · `commands()` | 设备读取与写参数 |
 | `command(id, command, params, frame, use_int, confirm, timeout_s)` · `motor_test(id, motor, throttle_pct, seconds, confirm)` · `motors_stop(id)` · `actuator(id, index, value, pwm, seconds, confirm)` · `rc(id, channels, axes)` | 原始指令、电机、执行器、遥控覆盖 |
 | `message_interval(id, message, hz)` · `request_message(id, message)` · `reboot(id, confirm)` · `calibrate(id, sensor, confirm)` · `set_home(id, here, lat, lon, alt)` · `terminate(id, confirm)` | 消息频率、重启、校准、home、飞行终止 |
@@ -657,9 +764,9 @@ Relay 不在 8765 端口运行时，追加 `"--base", "http://127.0.0.1:<port>"`
 | `start_twin(profile=None, pack=None, frame=None, home=None, count=1)` · `twin(id)` · `set_frame(id, preset, mass_kg, wheelbase_m, prop_in, cells, capacity_mah)` | 启动固件孪生（返回新编号）、读取孪生详情、更换模拟机机型；`home` 为 `{lat, lon, alt_m}` 或 `(lat, lon[, alt_m])` |
 | `serial_ports()` · `serial_ports_status()` · `connect(host=None, port=None, serial=None, baud=None)` · `hitl(id, action="status", confirm=None)` | 串口列表、经 UDP 或串口连接、PX4 硬件在环（`start` 须 `confirm="HITL"`） |
 | `app()` · `ui_state()` · `gamepads()` · `app_actions()` · `ui(action, **args)` | 应用与窗口状态、界面动作 |
-| `scan_network(networks)` · `connect_vehicle(host, port)` · `remove_vehicle(id)` · `add_sims(count, autopilot, hover_assist)` · `remove_sims(ids)` · `sim_assist(id, on)` · `settings()` · `update_settings(**patch)` · `ack_alert(id)` · `stop_all()` | 应用操作：打开会话时以会话身份调用，否则使用操作员令牌 |
+| `scan_network(networks)` · `connect_vehicle(host, port)` · `remove_vehicle(id)` · `add_sims(count, autopilot=None, hover_assist=None, frame=None)` · `remove_sims(ids)` · `sim_assist(id, on)` · `settings()` · `update_settings(**patch)`（例如 `control_frame="frd"`）· `ack_alert(id)` · `stop_all()` | 应用操作：打开会话时以会话身份调用，否则使用操作员令牌。`add_sims` 不带 `frame`（预设名或机型对象）时添加 ANetDU7 |
 
-`sdk/python/examples/device_tour.py` 在模拟机上演示设备级接口：读取设备总览与原始指令目录，测试单个电机并读回输出 PWM，起飞后用 `attitude` 保持一个姿态，然后降落。
+`sdk/python/examples/du7_box_and_gimbal.py` 飞完内置的方框计划并操作云台吊舱。`sdk/python/examples/device_tour.py` 在模拟机上演示设备级接口：读取设备总览与原始指令目录，测试单个电机并读回输出 PWM，起飞后用 `attitude` 保持一个姿态，然后降落。
 
 错误抛出 `RelayError`，带 `code`、`status`、`message`、`message_zh` 与 `detail`。等待技能时，技能失败（例如操作员接管）抛出 `skill_failed`，被其他技能替换抛出 `skill_superseded`。HTTP 429 会按 `Retry-After` 间隔自动重试两次。
 
@@ -669,6 +776,7 @@ Relay 不在 8765 端口运行时，追加 `"--base", "http://127.0.0.1:<port>"`
 2. 在 Relay 窗口完成操作员步骤：无桨确认杆量方向，确认桨叶与防护网，通过全部阻断类起飞前检查。
 3. 在代码中替换飞机 ID。解锁需要 `confirm: "ARM"`。位置类技能（`goto`、`rtl`、航线）需要本地定位源；没有定位源时，在定高类模式下使用 `takeoff`、`hold`、`yaw`、`land` 与开环 `move`，并预期飞机悬停时会缓慢漂移。
 4. 窗口前始终保留操作员。附身与急停随时优先于任何智能体。
+5. ANetDU7（见 `hardware.zh-CN.md` 的 ANetDU7 一节与 `vehicles/anet-du7/README.md`）：机载 MAVROS 要把 MAVLink 发到 Relay 所在主机的 UDP 14550，并使用唯一的 `MAV_SYS_ID`；吊舱用 `gimbal_attach` 接入（TCP 2000 端口）。操作员设为 `micro` 之前，真机按 `anet-du7` 显示，只要有位置估计，起飞、`move`、`goto` 就以限速的机体系速度（0.5 m/s）飞行，并带上文的监视项。首飞请用 `du7_box`，窗口前留有操作员。
 
 ## 11. Copilot（内置智能体）
 
@@ -683,4 +791,15 @@ Relay 不在 8765 端口运行时，追加 `"--base", "http://127.0.0.1:<port>"`
 - **安全：** 对真机的每个运动指令与设备级写入（起飞、平移、转向、悬停、降落、动作序列、再飞、电机测试、执行器、重启、校准、终止等），聊天中都会出现审批卡片，操作员批准前不会发送任何指令（120 秒未处理视为拒绝）；需要审批时浮动窗口会自动显示并提示。确认词由审批代替，Copilot 不会自行填写。接管和急停对 Copilot 与其他智能体同样有效。
 - **全部允许（0.5.2）：** 审批卡片上的**全部允许**按钮（或 设置 → Copilot → **全部允许**）批准当前命令，之后真机上的命令都不再询问。每条命令仍在对话中记录为“已自动批准”；开启期间 Copilot 标题栏始终显示红框的**全部允许**标记，点击即可关闭。Relay 自身的保护不变：预检、操作员的**允许在这架飞机上运行程序**开关、附身与急停。硬件在环例外：`relay_hitl` 的 start 与 stop 始终需要审批（0.5.4）。
 - **固件孪生与硬件在环（0.5.4）：** 在任何工具范围与两种控制等级下，Copilot 都具备孪生工具（`relay_autopilots_list`、`relay_firmware_identify`、`relay_twin_profiles_list`、`relay_twin_profile_get`、`relay_twin_profile_capture`、`relay_twin_start`、`relay_twin_status`、`relay_sim_frame`）；孪生是模拟机，这些工具无需审批。工具范围为 `all` 时另有 `relay_serial_ports`、`app_connect {serial}` 与 `relay_hitl`。`relay_hitl` 的 start 与 stop 无论对哪架飞机、即使开启了**全部允许**，都会显示审批卡片：卡片上没有**全部允许**按钮，并提示操作员确认已拆下螺旋桨。`relay_hitl` 的 status 无需审批。
+- **ANetDU7、控制坐标系与云台（0.6.0）：** 飞行工具在适用处带 `frame`、`speed`、`settle_s`（`relay_takeoff`、可用有名字的方向或 `x, y, z` 的 `relay_move`、`relay_yaw`、含 `goto` 的 `relay_plan` 步骤、带 `reference` 的 `device_velocity`）；`relay_plan {builtin: "du7_box"}` 与 `relay_plans_builtin` 飞内置计划（`full` 等级）；`relay_gimbal_status`、`relay_gimbal_control`、`relay_gimbal_captures` 在任何工具范围与两种控制等级下操作吊舱（Copilot 会先认领飞机；转动吊舱不弹审批卡片，真机也一样）。系统提示教它缺省使用 `flu`、各轴的正负号，以及何时传 `frame`；`app_add_sim` 可选机型预设。仅操作员可做的调用（设置真机机型、接入吊舱）不是 Copilot 工具。
 - **程序与控制等级：** Copilot 在每条消息前读取 `agent_flight_level`。在 `sticks`（缺省）等级下，它没有起飞、平移、转向、悬停、动作序列与再飞工具，系统提示会说明高层飞行不可用、稳定飞行需要编写程序；在 `full` 等级下这些工具恢复。在任何工具范围内它都具备程序工具（`program_list`、`program_get`、`program_create`、`program_update`、`program_validate`、`program_test`、`program_deploy`、`program_stop`、`program_resume`、`program_params`、`program_status`、`program_log`、`challenge_list`、`challenge_submit`、`job_status`、`duel_run`、`ladder`、`airframe_set`）以及 `relay_arm`、`relay_disarm`、`relay_mode`，系统提示末尾附有 [`programs-guide.md`](programs-guide.md)。编写与修改程序无需审批；在真机上部署或恢复程序、解锁与切换模式，与其他运动指令一样需要操作员批准。`program_deploy {arm: true}` 随部署一并解锁；在 `full` 等级下，动作序列工具接受 `tuning`，`relay_plan_tune` 可在飞行中调整序列油门，Copilot 因此能完成编写、测试、试飞与调参的完整流程。
+
+## 12. 从 0.5 升级
+
+0.6.0 的行为变化，以及如何恢复旧行为：
+
+1. **缺省模拟机是 ANetDU7。** 不带 frame 的 `POST /sims`（以及 **Add sim**、SDK `add_sims`、MCP `app_sims_add`、Copilot `app_add_sim`）添加的是 ANetDU7：2.5 kg、PX4 风格、带模拟云台吊舱，起飞、`move`、`goto` 以 0.5 m/s 限速的机体系速度飞行。要 0.5 的 ArduPilot 小机，请传 `frame: {preset: "micro-120"}`（`add_sims(frame="micro-120")`），或把 `sim_frame_default` 设为 `micro-120`。狗斗、评测题目与内置程序始终使用 `micro-120`，不受影响。
+2. **没有名字的轴缺省按 `flu` 解释。** `move {x, y, z}`（新增）、`velocity {vx, vy, vz, yaw_rate_dps}`、`goto {x, y, z, yaw}`、`yaw {deg}` 使用控制坐标系：向左与逆时针为正（以前 `yaw {deg}` 与 `goto yaw` 是顺时针与罗盘角；`velocity` 是 ENU，现在除非 `reference: "local"`，否则速度方向随机头）。有名字的方向（`forward`、`right`、`up`，新增 `left`、`down`）与 `flu` 下的 `goto x, y, z`（东、北、上）含义不变。要让某次调用与以前完全一致，传 `frame: "relay"`（SDK `frame="relay"`，MCP 与 Copilot 的 `frame`）；设置项 `control_frame` 只有 `flu` 与 `frd`，所以 `relay` 只能逐次请求使用。`skill_started` 的 params 总是以 `relay` 轴回显。
+3. **真机缺省按 `anet-du7` 处理**（`real_model_default`），因此有位置估计时起飞、`move`、`goto` 以 0.5 m/s 限速的机体系速度飞行，并带跟踪监视项。要沿用飞控自身的设定点，把飞机设为 `micro`（`POST /vehicles/{id}/model`、`set_model`、`app_set_model`）或把 `real_model_default` 设为 `micro`，或显式传 `speed`。
+4. **SDK：** `add_sims` 不再缺省发送 `autopilot="ardupilot"`（ANetDU7 由服务器选 PX4）；`takeoff`、`move`、`goto` 按 `speed` 计算等待超时；`plan(steps=None, ..., builtin=)`；`__version__` 为 0.6.0。
+5. **新增：** 云台吊舱（`vehicle.gimbal`、`/vehicles/{id}/gimbal`、飞行与应用 MCP 服务中的云台工具、SDK 的 `gimbal_*`、Copilot 工具）、`vehicle.model` 与 `vehicle.nav`、`GET /plans/builtin` 与 `du7_box`、事件 `gimbal_*` 与 `model_changed`、错误 `gimbal_*`、设置项 `control_frame`、`sim_frame_default`、`real_model_default`、`vehicle_models`。飞行 MCP 服务现有 38 个工具（`sticks` 等级 29 个，原为 34 与 26），应用 MCP 服务 70 个（原为 67）。

@@ -34,7 +34,7 @@ const UI = [
     "open_settings",
     "Open settings",
     "Open the settings dialog, optionally on a section.",
-    Type.Object({ section: opt(lit("general", "safety", "controllers", "copilot", "network", "autopilots", "data", "about")) }),
+    Type.Object({ section: opt(lit("general", "aircraft", "safety", "controllers", "copilot", "network", "autopilots", "data", "about")) }),
   ],
   ["app_open_connect", "open_connect", "Open connect dialog", "Open the connection dialog on its scan, address, serial or bridge tab.", Type.Object({ tab: opt(lit("scan", "address", "serial", "bridge")) })],
   ["app_close_dialogs", "close_dialogs", "Close dialogs", "Close every open dialog, popover and sheet.", empty],
@@ -133,7 +133,7 @@ export function appTools(relay) {
     defineTool(
       "app_add_sim",
       "Add simulators",
-      "Add simulated aircraft: count, autopilot px4 or ardupilot, with or without a position estimate, with or without hover assist (omitted: the sim_hover_assist setting), and a frame. engine relay (default) is Relay's fast simulator; engine sitl starts firmware twins (the official firmware against Relay's physics) from a profile or a pack, as relay_twin_start does.",
+      "Add simulated aircraft: count, autopilot px4 or ardupilot (omitted: px4 for an ANetDU7, ardupilot for the small presets), with or without a position estimate, with or without hover assist (omitted: the sim_hover_assist setting), and a frame. Without a frame they are ANetDU7s (the sim_frame_default setting: 2.5 kg, a simulated gimbal pod); frame.preset micro-120, small-250 or large-450 adds the small aircraft. Dogfights and judged challenges always use micro-120. engine relay (default) is Relay's fast simulator; engine sitl starts firmware twins (the official firmware against Relay's physics) from a profile or a pack, as relay_twin_start does.",
       Type.Object({
         count: opt(Type.Integer({ minimum: 1, maximum: 8 })),
         autopilot: opt(lit("px4", "ardupilot")),
@@ -173,11 +173,11 @@ export function appTools(relay) {
       Type.Object({ vehicle: Type.String(), on: Type.Boolean() }),
       (p) => call("POST", `/sims/${enc(p.vehicle)}/assist`, { on: p.on }),
     ),
-    defineTool("app_settings_get", "Read settings", "The persistent Relay settings (safety volume, interface preferences, agent control switch).", empty, () => call("GET", "/settings")),
+    defineTool("app_settings_get", "Read settings", "The persistent Relay settings (safety volume, control_frame, sim_frame_default, real_model_default, interface preferences, agent control switch).", empty, () => call("GET", "/settings")),
     defineTool(
       "app_settings_set",
       "Write settings",
-      "Merge a partial settings object into the Relay settings (for example {retention_days: 30}). Only the keys you pass change. agents_app_control belongs to the operator and cannot be changed here.",
+      "Merge a partial settings object into the Relay settings (for example {retention_days: 30}). Only the keys you pass change. control_frame (flu default | frd) is the convention of every flight tool that does not pass frame; sim_frame_default (anet-du7 default | micro-120 | small-250 | large-450) is what app_add_sim adds without a frame. agents_app_control belongs to the operator and cannot be changed here.",
       Type.Object({ patch: Type.Record(Type.String(), Type.Any()) }),
       (p) => call("PUT", "/settings", p.patch),
     ),

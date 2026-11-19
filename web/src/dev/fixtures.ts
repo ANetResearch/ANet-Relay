@@ -17,6 +17,8 @@ import { startLabFixture } from './labFixture'
 import { busyBoard, startDogfightFixture } from './dogfightFixture'
 // 11: firmware twins, runtime packs, USB serial and hardware in the loop
 import { startTwinFixture } from './twinFixture'
+// 12: the ANetDU7 mixed fleet (?fixture=du7), gimbal, model and ready-made plan routes
+import { du7Vehicles, startDu7Fixture } from './du7Fixture'
 
 type V = Vehicle
 
@@ -96,6 +98,9 @@ function base(over: Partial<V> & Pick<V, 'id' | 'label' | 'kind'>): V {
     transport: sim ? 'sim' : 'udp', // 11 §7.1
     serial: null,
     hitl: null,
+    model: 'micro', // 12 §2.2
+    nav: null,
+    gimbal: null,
     ...over,
   }
 }
@@ -190,6 +195,19 @@ function alertsFor(name: FixtureName, now: number): Alert[] {
 
 function history(name: FixtureName, now: number): RelayEvent[] {
   if (name === 'empty' || name === 'dogfight') return []
+  if (name === 'du7') {
+    let n = 1000
+    const TEXT: Record<string, [string, string]> = {
+      sim_added: ['{v} simulator added.', '已添加模拟机 {v}。'], vehicle_online: ['{v} is online.', '{v} 已上线。'],
+      gimbal_attached: ['{v} gimbal pod attached: tcp 10.0.0.5:2000.', '{v} 已接入云台吊舱：tcp 10.0.0.5:2000。'], armed: ['{v} armed.', '{v} 已解锁。'],
+    }
+    const label = (id: string | null) => ({ 'sim-1': 'SIM-1', 'sim-2': 'SIM-2', 'sim-3': 'SIM-3', 'du7-01': 'DU7-01', 'du7-02': 'DU7-02', q03: 'Quad 03' })[id ?? ''] ?? ''
+    const ev = (dt: number, kind: RelayEvent['kind'], vehicle: string | null, data: Record<string, unknown> = {}): RelayEvent => {
+      const [en, zh] = TEXT[kind] ?? [kind, kind]
+      return { seq: ++n, t: now - dt, kind, vehicle, session: null, text_en: en.replace('{v}', label(vehicle)), text_zh: zh.replace('{v}', label(vehicle)), data }
+    }
+    return [ev(200, 'sim_added', 'sim-1'), ev(199, 'sim_added', 'sim-2'), ev(198, 'sim_added', 'sim-3'), ev(190, 'vehicle_online', 'du7-01'), ev(188, 'gimbal_attached', 'du7-01'), ev(150, 'vehicle_online', 'du7-02'), ev(140, 'vehicle_online', 'q03'), ev(97, 'armed', 'sim-1')]
+  }
   let seq = 1000
   const ev = (dt: number, kind: RelayEvent['kind'], vehicle: string | null, data: Record<string, unknown> = {}): RelayEvent => ({
     seq: ++seq, t: now - dt, kind, vehicle, session: (data.name as string | undefined) ?? null, text_en: kind, text_zh: kind, data,
@@ -221,16 +239,16 @@ function history(name: FixtureName, now: number): RelayEvent[] {
 }
 
 function makeFleet(name: FixtureName, now: number): Fleet {
-  const vehicles = name === 'empty' || name === 'dogfight' ? [] : busyVehicles(now)
+  const vehicles = name === 'empty' || name === 'dogfight' ? [] : name === 'du7' ? du7Vehicles(base, now) : busyVehicles(now)
   return {
     t: now,
     version: '0.1.0',
     listen: name === 'alerts' ? { port: 14550, ok: false, error: 'address in use' } : { port: 14550, ok: true, error: null },
     scan: { running: false, done: 0, total: 0, networks: ['10.7.7.0/24'], found: 0, error: null },
-    sessions: name === 'empty' ? [] : [{ session_id: 's-7f3a', name: 'harness-a', expires_in_s: 12, vehicles: name === 'dogfight' ? ['sim-4'] : ['q02', 'q04', 'sim-2'] }],
+    sessions: name === 'empty' || name === 'du7' ? [] : [{ session_id: 's-7f3a', name: 'harness-a', expires_in_s: 12, vehicles: name === 'dogfight' ? ['sim-4'] : ['q02', 'q04', 'sim-2'] }],
     safety_volume: { x: 3, y: 3, z: 2 },
     vehicles,
-    alerts: name === 'dogfight' ? [] : alertsFor(name, now),
+    alerts: name === 'dogfight' || name === 'du7' ? [] : alertsFor(name, now),
   }
 }
 
@@ -291,8 +309,21 @@ export function startFixture(name: FixtureName): () => void {
     base,
   })
 
+  // 12: gimbal pods, models and ready-made plans (every fixture; ?fixture=du7 also flies SIM-1)
+  const du7 = startDu7Fixture({ now: () => now, vehicles: () => fleet.vehicles, mutate, emit: (kind, vehicle, data) => emit(kind as RelayEvent['kind'], vehicle, data) }, name === 'du7')
+  // backend settings for the settings dialog (GET /settings answers them, PUT merges)
+  let settings: Record<string, unknown> = {
+    safety_volume: { x: 3, y: 3, z: 2 }, cell_warn_v: 3.6, cell_crit_v: 3.4, possess_mode: 'auto', airborne_alert: true, auto_params: true,
+    agents_app_control: true, agent_flight_level: 'sticks', retention_days: 30, listen_port: 14550, bridge_port: 14555, stick_timeout_s: 0.8,
+    sim_hover_assist: true, sim_turbulence: 0.3, sim_airframe_default: 'typical', control_frame: 'flu', sim_frame_default: 'anet-du7', real_model_default: 'anet-du7',
+    restart_fields: [], data_dir: null, ui: {},
+  }
+
   const transport: RestTransport = {
     async request(method, path, body) {
+      const gimballed = du7.handle(method, path, body) // 12
+      if (gimballed !== undefined) return gimballed
+      if (path === '/settings' && method === 'GET') return settings
       const twinned = twin.handle(method, path, body) // 11
       if (twinned !== undefined) return twinned
       const labbed = lab.handle(method, path, body) // WP-3
@@ -307,7 +338,8 @@ export function startFixture(name: FixtureName): () => void {
       // WP-D: the arena toggle and settings
       if (path === '/settings' && method === 'PUT') {
         arena.settings(body)
-        return { ok: true }
+        settings = { ...settings, ...(body as Record<string, unknown>) }
+        return settings
       }
       const m = path.match(/^\/vehicles\/([^/]+)\/(\w+)/)
       if (path === '/health') return { ok: true, version: '0.1.0-fixture', uptime_s: 1 }
@@ -380,6 +412,7 @@ export function startFixture(name: FixtureName): () => void {
     // ring numbers are 1-based as the backend sends them (course.py): the second ring
     if (name !== 'dogfight' && name !== 'empty' && k % 40 === 0) emit('ring_touch' as RelayEvent['kind'], 'sim-2', { vehicle: 'sim-2', ring: 2, point: [0.4, 1.2, 1.1] })
     const w = Math.sin(k / 9)
+    du7.tick(0.1, k / 10) // 12: pods and SIM-1's circle
     fleet = {
       ...fleet,
       t: now,

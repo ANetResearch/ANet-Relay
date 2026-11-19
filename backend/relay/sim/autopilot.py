@@ -518,6 +518,7 @@ class SimAutopilot:
         )
         self.att_t: float | None = None
         self.vel_target: list[float] | None = None  # ENU m/s
+        self.vel_body: tuple[float, float, float] | None = None  # (forward, right, up) of a body setpoint
         self.vel_yaw_rate: float | None = None
         self.vel_t: float | None = None
         self.pos_sp_t: float | None = None
@@ -739,11 +740,14 @@ class SimAutopilot:
             self._set_mode(name, now)
 
     def _on_set_position_target_local_ned(self, msg, now):
-        if msg.coordinate_frame not in (M.MAV_FRAME_LOCAL_NED,):
+        body = msg.coordinate_frame in (M.MAV_FRAME_BODY_NED, M.MAV_FRAME_BODY_OFFSET_NED)
+        if msg.coordinate_frame != M.MAV_FRAME_LOCAL_NED and not body:
             return
         mask = msg.type_mask
         if mask & 0b111 == 0b111 and not mask & 0b111000:  # velocity setpoint
-            self._velocity_setpoint(msg, now)
+            self._velocity_setpoint(msg, now, body)
+            return
+        if body:  # body-frame positions are not modelled
             return
         if mask & 0b111:  # position ignored: other combinations are not modelled
             return
@@ -762,7 +766,8 @@ class SimAutopilot:
                 self.target = target
                 self.target_yaw = yaw
 
-    def _velocity_setpoint(self, msg, now):
+    def _velocity_setpoint(self, msg, now, body=False):
+        """``body`` (12 §3.2): x forward, y right, z down; the velocity turns with the heading."""
         if self.flavour == PX4:
             self.offboard_t = now
             self.pos_sp_t = now
@@ -770,6 +775,7 @@ class SimAutopilot:
                 return
         elif self.mode != "GUIDED" or not self.armed:
             return
+        self.vel_body = (msg.vx, msg.vy, -msg.vz) if body else None
         self.vel_target = [msg.vy, msg.vx, -msg.vz]
         self.vel_yaw_rate = None if msg.type_mask & 2048 else msg.yaw_rate
         self.vel_t = now
@@ -1965,6 +1971,10 @@ class SimAutopilot:
         s = self.quad.s
         cmd = Command()
         assert self.vel_target is not None
+        if self.vel_body is not None:  # body setpoint: forward / right follow the heading every step
+            forward, right, up_v = self.vel_body
+            sy, cy = math.sin(s.yaw), math.cos(s.yaw)
+            self.vel_target = [forward * sy + right * cy, forward * cy - right * sy, up_v]
         vx, vy, vz = self.vel_target
         if s.on_ground and vz <= 0.0:
             cmd.throttle = SPIN_ARM

@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
-VERSION = "0.5.4"
+VERSION = "0.6.0"
 APP_NAME = "ANet Relay"
 API_PREFIX = "/api/v1"
 
@@ -109,6 +109,16 @@ class Settings:
     sim_airframe_default: str = "typical"
     # Firmware twins (11 §6.3): how many may run at once (each is one firmware process), at most SIM_LIMIT.
     twin_limit: int = 8
+    # 12 §3: the coordinate convention of the control API ("flu" forward-left-up with ENU and
+    # counter-clockwise yaw, or "frd" forward-right-down with NED and clockwise yaw); a request's
+    # ``frame`` overrides it.
+    control_frame: str = "flu"
+    # 12 §2.2: the frame preset a new simulator takes when the request names none, and the model a real
+    # aircraft is shown as until the operator sets it.
+    sim_frame_default: str = "anet-du7"
+    real_model_default: str = "anet-du7"
+    # vehicle id -> model, for real aircraft the operator set by hand (POST /vehicles/{id}/model)
+    vehicle_models: dict[str, str] = field(default_factory=dict)
 
     RESTART_FIELDS: ClassVar[tuple[str, ...]] = ("listen_port",)
     READ_ONLY: ClassVar[dict[str, float]] = {"stick_timeout_s": STICK_TIMEOUT_S}
@@ -141,6 +151,11 @@ class Settings:
                 if not isinstance(value, dict) or len(json.dumps(value)) > 16384:
                     raise ValueError("ui")
                 out.ui = dict(value)
+                continue
+            if key == "vehicle_models":  # 12 §2.2: replaced whole; validate() checks the entries
+                if not isinstance(value, dict):
+                    raise ValueError("vehicle_models")
+                out.vehicle_models = dict(value)
                 continue
             if not hasattr(out, key) or key.startswith("_"):
                 raise ValueError(key)
@@ -175,6 +190,16 @@ class Settings:
             return "agent_flight_level"
         if self.sim_airframe_default not in ("ideal", "typical", "rough"):  # WP-2a
             return "sim_airframe_default"
+        if self.control_frame not in ("flu", "frd"):  # 12 §3
+            return "control_frame"
+        if self.sim_frame_default not in ("anet-du7", "micro-120", "small-250", "large-450"):  # 12 §2.2
+            return "sim_frame_default"
+        if self.real_model_default not in ("anet-du7", "micro"):
+            return "real_model_default"
+        if not isinstance(self.vehicle_models, dict) or any(
+            not isinstance(k, str) or m not in ("anet-du7", "micro") for k, m in self.vehicle_models.items()
+        ):
+            return "vehicle_models"
         if not 1 <= self.twin_limit <= SIM_LIMIT:  # 11 §6.3
             return "twin_limit"
         if not 1 <= self.retention_days <= 3650:

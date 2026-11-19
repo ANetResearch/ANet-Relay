@@ -167,15 +167,15 @@ def test_prefixes_and_counts(stub):
         device_mcp: [t.name for t in device_mcp.build_tools()],
         app_mcp: [t.name for t in app_mcp.build_tools()],
     }
-    assert len(names[flight_mcp]) == 34 and {"relay_sticks_for", "relay_refly"} <= set(names[flight_mcp])
-    assert len(flight_mcp.STICKS_TOOL_NAMES) == 26 and TWIN_TOOLS <= flight_mcp.STICKS_TOOL_NAMES
+    assert len(names[flight_mcp]) == 38 and {"relay_sticks_for", "relay_refly"} <= set(names[flight_mcp])
+    assert len(flight_mcp.STICKS_TOOL_NAMES) == 29 and TWIN_TOOLS <= flight_mcp.STICKS_TOOL_NAMES
     assert all(n.startswith("relay_") for n in names[flight_mcp])
     assert all(n.startswith("device_") for n in names[device_mcp])
     # WP-4b: the program tools keep the names of the 06 §6 table
     # WP-B: and the dogfight tools of 07 §3
     extra = set(programs_mcp.PROGRAM_TOOL_NAMES) | set(match_mcp.MATCH_TOOL_NAMES)
     extra |= {"relay_hitl", "relay_serial_ports"}  # 11 §12: named like the Copilot tools
-    assert len(names[app_mcp]) == 67 and extra - set(names[app_mcp]) == set()
+    assert len(names[app_mcp]) == 70 and extra - set(names[app_mcp]) == set()
     assert not {"relay_hitl", "relay_serial_ports"} & set(names[flight_mcp])  # HITL: app server only
     assert all(n.startswith("app_") or n in extra for n in names[app_mcp])
     ui = {
@@ -540,6 +540,47 @@ APP_REST = [
         {"action": "stop"},
         None,
     ),
+    (
+        "app_sims_add",
+        {"count": 1, "frame": {"preset": "micro-120"}},
+        "POST",
+        "/sims",
+        {"count": 1, "frame": {"preset": "micro-120"}},
+        None,
+    ),
+    (
+        "app_settings_set",
+        {"settings": {"control_frame": "frd", "sim_frame_default": "micro-120"}},
+        "PUT",
+        "/settings",
+        {"control_frame": "frd", "sim_frame_default": "micro-120"},
+        None,
+    ),
+    (
+        "app_set_model",
+        {"vehicle": "real-1", "model": "anet-du7"},
+        "POST",
+        "/vehicles/real-1/model",
+        {"model": "anet-du7"},
+        "op",
+    ),
+    (
+        "app_gimbal_attach",
+        {"vehicle": "real-1", "transport": "tcp", "host": "10.0.0.5"},
+        "POST",
+        "/vehicles/real-1/gimbal/attach",
+        {"transport": "tcp", "host": "10.0.0.5"},
+        "op",
+    ),
+    (
+        "app_gimbal_attach",
+        {"vehicle": "real-1", "transport": "serial", "device": "/dev/ttyUSB0", "baud": 115200},
+        "POST",
+        "/vehicles/real-1/gimbal/attach",
+        {"transport": "serial", "device": "/dev/ttyUSB0", "baud": 115200},
+        "op",
+    ),
+    ("app_gimbal_detach", {"vehicle": "real-1"}, "DELETE", "/vehicles/real-1/gimbal", None, "op"),
     ("app_sim_reset", {"vehicle": "sim-1"}, "POST", "/sims/sim-1/reset", {}, None),
     ("app_sim_assist", {"vehicle": "sim-1", "on": False}, "POST", "/sims/sim-1/assist", {"on": False}, None),
     ("app_settings_get", {}, "GET", "/settings", None, None),
@@ -720,6 +761,222 @@ def test_flight_new_tools(stub):
     result = call(server, "relay_refly", {"vehicle": "sim-1", "session_id": 4, "mode": "path", "wait": False})
     assert result["isError"] is False and text(result)["plan"]["id"] == 9
     assert last(stub)["body"] == {"session_id": 4, "mode": "path"}
+
+
+def test_operator_only_app_tools_need_the_operator_token(stub):
+    server = make(app_mcp, stub)  # no --operator-token
+    for tool, args in (
+        ("app_set_model", {"vehicle": "real-1", "model": "micro"}),
+        ("app_gimbal_attach", {"vehicle": "real-1", "transport": "sim"}),
+        ("app_gimbal_detach", {"vehicle": "real-1"}),
+    ):
+        before = len(stub.requests)
+        result = call(server, tool, args)
+        assert result["isError"] is True and text(result)["error"] == "operator_required"
+        assert len(stub.requests) == before  # nothing reached Relay
+
+
+def test_flight_control_frame_arguments(stub):
+    server = make(flight_mcp, stub)
+    skill = {"skill": {"id": 3, "name": "x", "state": "running"}}
+    for name in ("takeoff", "move", "yaw", "goto"):
+        stub.responses[f"/vehicles/sim-1/skills/{name}"] = skill
+    call(server, "relay_takeoff", {"vehicle": "sim-1", "alt": 2, "speed": 0.5, "settle_s": 1, "wait": False})
+    assert last(stub)["path"] == "/vehicles/sim-1/skills/takeoff"
+    assert last(stub)["body"] == {"alt": 2.0, "speed": 0.5, "settle_s": 1}
+    # a named direction: frame-independent, only what was asked for goes out
+    call(server, "relay_move", {"vehicle": "sim-1", "left": 1, "speed": 0.5, "wait": False})
+    assert last(stub)["body"] == {"forward": 0.0, "left": 1, "speed": 0.5}
+    call(server, "relay_move", {"vehicle": "sim-1", "forward": 1, "wait": False})
+    assert last(stub)["body"] == {"forward": 1.0, "right": 0.0, "up": 0.0}  # the pre-0.6 call, unchanged
+    # x / y / z are body offsets in the frame; the named ones stay out of the request
+    call(server, "relay_move", {"vehicle": "sim-1", "x": 1, "y": -0.5, "frame": "frd", "wait": False})
+    assert last(stub)["body"] == {"x": 1, "y": -0.5, "frame": "frd"}
+    both = call(server, "relay_move", {"vehicle": "sim-1", "forward": 1, "x": 1, "wait": False})
+    assert both["isError"] is True and "not both" in both["content"][0]["text"]
+    call(server, "relay_yaw", {"vehicle": "sim-1", "deg": 30, "wait": False})
+    assert last(stub)["body"] == {"deg": 30}  # no frame: the server's control_frame decides
+    call(server, "relay_yaw", {"vehicle": "sim-1", "deg": 30, "frame": "relay", "wait": False})
+    assert last(stub)["body"] == {"deg": 30, "frame": "relay"}
+    call(
+        server,
+        "relay_goto",
+        {"vehicle": "sim-1", "x": 1, "y": 2, "z": 1, "yaw": 90, "speed": 1, "wait": False},
+    )
+    assert last(stub)["body"] == {"x": 1.0, "y": 2.0, "z": 1.0, "yaw": 90, "speed": 1}
+
+
+def test_flight_descriptions_state_the_convention(stub):
+    """No description may contradict the server: tools with frame-dependent numbers say how they are read."""
+    by_name = {t["name"]: t for t in flight_mcp.TOOLS}
+    for name in ("relay_move", "relay_yaw", "relay_goto", "relay_plan"):
+        text_ = by_name[name]["description"]
+        assert "flu" in text_ and "frd" in text_ and "relay" in text_, name
+    assert "counter-clockwise" in by_name["relay_yaw"]["description"]
+    assert "clockwise" not in by_name["relay_move"]["inputSchema"]["properties"]["y"]["description"]
+    assert "LEFT" in by_name["relay_move"]["inputSchema"]["properties"]["y"]["description"]
+    every = " ".join(json.dumps(t) for t in flight_mcp.TOOLS) + flight_mcp.INSTRUCTIONS
+    assert "positive clockwise" not in by_name["relay_yaw"]["description"].replace(
+        "flu (default) positive is", ""
+    )
+    assert "East-North-Up frame (x east" not in every
+    assert "heading in degrees, 0 north, clockwise" not in every
+    device = {t.name: t for t in device_mcp.build_tools()}
+    assert "east, m/s" not in json.dumps(device["device_velocity"].properties)
+    assert (
+        "frame" in device["device_velocity"].properties
+        and "reference" in device["device_velocity"].properties
+    )
+
+
+def test_flight_builtin_plans(stub):
+    server = make(flight_mcp, stub)
+    stub.responses["/plans/builtin"] = {"plans": [{"id": "du7_box", "steps": []}]}
+    assert text(call(server, "relay_plans_builtin"))["plans"][0]["id"] == "du7_box"
+    assert (last(stub)["method"], last(stub)["path"]) == ("GET", "/plans/builtin")
+    stub.responses["/vehicles/sim-1/plan"] = {"plan": {"id": 5, "name": "du7_box", "state": "running"}}
+    stub.responses["/vehicles/sim-1"] = {
+        "id": "sim-1",
+        "plan": {"id": 5, "name": "du7_box", "state": "done", "index": 5, "count": 6},
+    }
+    result = call(server, "relay_plan", {"vehicle": "sim-1", "builtin": "du7_box"})
+    assert result["isError"] is False and text(result)["plan"]["state"] == "done"
+    post = next(r for r in stub.requests if r["method"] == "POST" and r["path"] == "/vehicles/sim-1/plan")
+    assert post["body"] == {"builtin": "du7_box", "name": "t"}
+    for args in (
+        {"vehicle": "sim-1"},
+        {"vehicle": "sim-1", "builtin": "du7_box", "steps": [{"action": "land"}]},
+    ):
+        assert call(server, "relay_plan", args)["isError"] is True
+    call(
+        server,
+        "relay_plan",
+        {
+            "vehicle": "sim-1",
+            "steps": [{"action": "takeoff", "alt": 1}, {"action": "move", "left": 1, "frame": "flu"}],
+        },
+    )
+    post = [r for r in stub.requests if r["method"] == "POST" and r["path"] == "/vehicles/sim-1/plan"][-1]
+    assert post["body"]["steps"][1] == {"action": "move", "left": 1, "frame": "flu"}
+
+
+def test_gimbal_tools(stub):
+    server = make(flight_mcp, stub)
+    view = {"kind": "sim", "link": "ok", "yaw_deg": 0.0, "pitch_deg": -30.0, "lens": "visible1", "zoom": 1.0}
+    stub.responses["/vehicles/sim-1/gimbal"] = view
+    assert text(call(server, "relay_gimbal_status", {"vehicle": "sim-1"})) == view
+    assert (last(stub)["method"], last(stub)["path"]) == ("GET", "/vehicles/sim-1/gimbal")
+    cases = [
+        (
+            {"action": "angle", "yaw_deg": 20, "pitch_deg": -45},
+            {"action": "angle", "yaw_deg": 20, "pitch_deg": -45},
+        ),
+        ({"action": "rate", "yaw_dps": 10}, {"action": "rate", "yaw_dps": 10}),
+        ({"action": "zoom", "level": 5}, {"action": "zoom", "level": 5}),
+        (
+            {"action": "lens", "lens": "ir1", "pip": "visible2"},
+            {"action": "lens", "lens": "ir1", "pip": "visible2"},
+        ),
+        ({"action": "photo"}, {"action": "photo"}),
+        ({"action": "record", "on": False}, {"action": "record", "on": False}),
+        (
+            {"action": "look_at", "x": 3, "y": 0, "z": 0, "frame": "flu"},
+            {"action": "look_at", "x": 3, "y": 0, "z": 0, "frame": "flu"},
+        ),
+        ({"action": "track", "x": -40, "y": 10}, {"action": "track", "x": -40, "y": 10}),
+    ]
+    for args, body in cases:
+        stub.responses["/vehicles/sim-1/gimbal"] = {"id": "sim-1", "gimbal": view}
+        result = call(server, "relay_gimbal_control", {"vehicle": "sim-1", **args})
+        assert result["isError"] is False and text(result)["gimbal"] == view
+        assert (last(stub)["method"], last(stub)["path"], last(stub)["body"]) == (
+            "POST",
+            "/vehicles/sim-1/gimbal",
+            body,
+        )
+    stub.responses["/vehicles/sim-1/gimbal/captures"] = {"id": "sim-1", "total": 1, "captures": []}
+    call(server, "relay_gimbal_captures", {"vehicle": "sim-1", "limit": 5})
+    assert last(stub)["path"] == "/vehicles/sim-1/gimbal/captures" and last(stub)["query"] == {"limit": ["5"]}
+    call(server, "relay_gimbal_captures", {"vehicle": "sim-1"})
+    assert last(stub)["query"] == {}
+    # the schema is the server's: unknown actions and arguments never reach Relay
+    unknown = call(server, "relay_gimbal_control", {"vehicle": "sim-1", "action": "photo", "zoom": 3})
+    assert unknown["isError"] is True and "unknown argument" in unknown["content"][0]["text"]
+    stub.fail["/vehicles/sim-2/gimbal"] = (
+        404,
+        {"code": "gimbal_missing", "message_en": "sim-2 has no gimbal pod."},
+    )
+    missing = call(server, "relay_gimbal_status", {"vehicle": "sim-2"})
+    assert missing["isError"] is True and text(missing)["error"] == "gimbal_missing"
+    actions = flight_mcp.TOOLS[[t["name"] for t in flight_mcp.TOOLS].index("relay_gimbal_control")]
+    assert set(actions["inputSchema"]["properties"]["action"]["enum"]) == set(flight_mcp.GIMBAL_ACTIONS)
+    assert len(flight_mcp.GIMBAL_ACTIONS) == 25
+    for action in flight_mcp.GIMBAL_ACTIONS:
+        assert action in actions["description"], action
+
+
+def test_gimbal_tools_work_at_the_sticks_level(stub):
+    server = make(flight_mcp, stub)
+    stub.responses["/settings"] = {"agent_flight_level": "sticks"}
+    names = {t["name"] for t in rpc(server, "tools/list")["result"]["tools"]}
+    assert {"relay_gimbal_status", "relay_gimbal_control", "relay_gimbal_captures"} <= names
+    assert "relay_plans_builtin" not in names and "relay_goto" not in names
+    assert (
+        "relay_gimbal"
+        in rpc(server, "initialize", {"protocolVersion": "2025-06-18"})["result"]["instructions"]
+    )
+
+
+def test_fleet_shows_model_nav_and_a_gimbal_summary(stub):
+    server = make(flight_mcp, stub)
+    vehicle = {
+        "id": "sim-1",
+        "kind": "sim",
+        "label": "SIM-1",
+        "autopilot": "PX4",
+        "armed": False,
+        "mode": "POSCTL",
+        "landed": "ground",
+        "crashed": False,
+        "position": {"x": 0, "y": 0, "z": 0},
+        "altitude_m": 0.0,
+        "heading_deg": 0.0,
+        "model": "anet-du7",
+        "nav": {"frame": "flu", "position": [0.0, 0.0, 0.0], "yaw_deg": 90.0},
+        "gimbal": {
+            "kind": "sim",
+            "link": "ok",
+            "yaw_deg": 0.0,
+            "pitch_deg": -30.0,
+            "lens": "visible1",
+            "zoom": 1.0,
+            "recording": False,
+            "photos": 2,
+            "fov_deg": [60.0, 36.0],
+            "tracking": {},
+        },
+        "link": {"state": "ok"},
+        "battery": {"voltage": 16.0, "remaining_pct": 90, "level": "ok"},
+    }
+    stub.responses["/fleet"] = {"safety_volume": {}, "sessions": [], "alerts": [], "vehicles": [vehicle]}
+    out = text(call(server, "relay_fleet"))["vehicles"][0]
+    assert out["model"] == "anet-du7" and out["nav"]["frame"] == "flu"
+    assert out["gimbal"] == {
+        "kind": "sim", "link": "ok", "yaw_deg": 0.0, "pitch_deg": -30.0, "lens": "visible1", "zoom": 1.0,
+        "recording": False, "photos": 2,
+    }  # fmt: skip
+    vehicle["gimbal"] = None
+    assert text(call(server, "relay_fleet"))["vehicles"][0]["gimbal"] is None
+
+
+def test_device_velocity_frame_and_reference(stub):
+    server = make(device_mcp, stub)
+    call(
+        server,
+        "device_velocity",
+        {"vehicle": "sim-1", "vy": 0.5, "seconds": 1, "reference": "body", "frame": "flu", "wait": False},
+    )
+    assert last(stub)["body"] == {"vy": 0.5, "seconds": 1, "reference": "body", "frame": "flu"}
 
 
 def test_flight_tools_follow_the_agent_flight_level(stub):

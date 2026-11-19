@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "anet-relay-backend"
-version = "0.5.4"
+version = "0.6.0"
 description = "ANet Relay backend: MAVLink fleet link, human/agent control authority, simulator, ring courses and the local agent API."
 requires-python = ">=3.12,<3.13"
 license = { text = "ANet Open Source License (see LICENSE)" }
@@ -40,7 +40,10 @@ include = ["relay*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
-markers = ["sticks_level: run the fleet at the default agent flight level (06 §5)"]
+markers = [
+    "sticks_level: run the fleet at the default agent flight level (06 §5)",
+    "product_defaults: new simulators are the product default, the ANetDU7 (12 §2.2)",
+]
 filterwarnings = ["ignore::DeprecationWarning", "ignore:Using `httpx`"]
 
 [tool.ruff]

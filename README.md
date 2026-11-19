@@ -65,7 +65,7 @@ When the person lets go, control is relayed back to the agent that held it. Real
 ## Quick start
 
 1. [Download](https://github.com/ANetResearch/ANet-Relay/releases/latest) and open the app (macOS builds are signed and notarized).
-2. Click **Add sim**, press **P** to possess it, arm from the **Control** tab and fly with `W A S D` / `R F` / `Q E`, or a gamepad.
+2. Click **Add sim** (an ANetDU7, the main aircraft since 0.6.0), press **P** to possess it, arm from the **Control** tab and fly with `W A S D` / `R F` / `Q E`, or a gamepad.
 3. Open **Copilot** (`Ctrl+J` / `⌘J`), add any OpenAI- or Anthropic-compatible endpoint, and ask for a dogfight.
 
 ### Plug in your own agent
@@ -85,20 +85,21 @@ with RelayClient() as relay:                          # http://127.0.0.1:8765
 claude mcp add anet-relay-app -- python3 /path/to/ANet-Relay/mcp/anet_relay_app_mcp.py --name claude-code-app   # or any MCP client
 ```
 
-Three MCP servers cover flight and firmware twins (34 tools), device level down to single motors (36) and the whole application, including hardware in the loop (67). See [MCP Servers](https://github.com/ANetResearch/ANet-Relay/wiki/MCP-Servers).
+Three MCP servers cover flight, the gimbal pod and firmware twins (38 tools), device level down to single motors (36) and the whole application, including hardware in the loop (70). See [MCP Servers](https://github.com/ANetResearch/ANet-Relay/wiki/MCP-Servers).
 
 ## What is inside
 
 | | |
 |---|---|
 | **Fleet link** | MAVLink 2 over UDP 14550 or a USB serial port (baud rate detected automatically), subnet scan, live/degraded/lost links, full telemetry, parameters and a raw message inspector |
-| **Control** | Possession, claims and sessions, sticks at 50 Hz, skills and sequences (at level Full), Stop and Stop all that override everything |
-| **Simulator** | Up to 8 aircraft, ArduPilot- or PX4-style autopilots, hover assist, frame presets (120 g, 250 mm, 450 mm), acro mode (body rates, flips, inverted flight), rigid-body ground contact so a crash bounces, rolls and comes to rest, seeded airframe defects (CG offset, unequal motors, damaged props) |
+| **Control** | Possession, claims and sessions, sticks at 50 Hz, skills and sequences (at level Full), Stop and Stop all that override everything. Skills read their numbers in a control frame, FLU by default (forward-left-up body, east-north-up local, counter-clockwise yaw), with FRD and Relay's own axes one `frame` argument away |
+| **Simulator** | Up to 8 aircraft; a new one is an ANetDU7 (2.5 kg, PX4 style), with the small aircraft optional; ArduPilot- or PX4-style autopilots, hover assist, frame presets (ANetDU7, 120 g, 250 mm, 450 mm), acro mode (body rates, flips, inverted flight), rigid-body ground contact so a crash bounces, rolls and comes to rest, seeded airframe defects (CG offset, unequal motors, damaged props) |
+| **ANetDU7 and gimbal pod** | The ANetDU7 is the main aircraft: speed-limited velocity flight like its onboard test node (0.5 m/s, with tilt, position-jump, stale-telemetry and overspeed monitors) and the built-in `du7_box` test plan. Its gimbal pod is simulated, and a real DYT pod attaches over TCP or serial: angle, rate, zoom, lens (visible, wide, infrared), photo, record, look-at, with a capture log, for people, agents and Copilot ([hardware](docs/hardware.zh-CN.md), [`vehicles/anet-du7`](vehicles/anet-du7/README.md)) |
 | **Firmware twins** | The official ArduCopter (4.3.8 to 4.7.2) and PX4 (1.14.4 to 1.17.0) SITL firmware ships with the installer and flies against Relay's physics with a real aircraft's version and parameters: identify its firmware, capture a twin profile, start the twin. 1.7 to 2.6 MB compressed per pack (Windows about 4.4 MB with its Cygwin DLLs), 16 to 22 MB per installer; Windows carries ArduPilot only ([runtime packs](docs/autopilot-packs.md)) |
 | **Hardware in the loop** | PX4 over USB: Relay backs up the flight controller's parameters, switches it to HITL, feeds it sensor data from its physics while the firmware keeps the motors locked, then restores and verifies every parameter. ArduPilot removed HIL support; use a firmware twin |
 | **Programs and Lab** | Restricted Python at 50 Hz, unit tests, 10 judged challenges, duels with Elo, trace replay with every round and explosion |
 | **Arena** | Virtual rounds, collisions, matches, dogfights and a leaderboard across the LAN |
-| **Real aircraft** | PX4 or ArduPilot behind an ESP8266 bridge, preflight with confirm words, bench procedures, flight-health diagnostics, FPV picture-in-picture |
+| **Real aircraft** | PX4 or ArduPilot behind an ESP8266 bridge, or an ANetDU7 over MAVROS, preflight with confirm words, bench procedures, flight-health diagnostics, FPV picture-in-picture |
 | **Records** | Every flight in local SQLite: charts, event and control tracks, 3D replay, CSV and JSON |
 | **External SITL** | PX4 + Gazebo or ArduPilot SITL run by hand connect as ordinary MAVLink aircraft ([guide](docs/simulation.md)) |
 

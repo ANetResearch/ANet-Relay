@@ -52,6 +52,7 @@ POSITIONS = ("none", "uwb", "gps")
 ENTRANT_TEXT = 16
 SENSORS = {"baro": True, "position": "none", "contacts": True}
 SESSION_NAME = "dogfight"
+ARENA_FRAME = {"preset": "micro-120"}  # 12 §2.2: dogfights fly the small aircraft, whatever the default
 SPAWN_MARGIN_M = 3.0  # spawns 3 m inside the edge: room to climb and turn before the boundary
 BOOT_S = 2.5  # a new simulator's link settles before it is armed
 ARM_RETRY_S = 2.0
@@ -363,7 +364,9 @@ class Dogfights:
 
         chosen = fleet.call(pick)
         if len(chosen) < n:
-            chosen += fleet.add_sims(n - len(chosen), hover_assist=config.hover_assist)
+            chosen += fleet.add_sims(
+                n - len(chosen), hover_assist=config.hover_assist, frame=dict(ARENA_FRAME)
+            )
         chosen = sorted(chosen, key=_sim_order)
         opened = fleet.open_session(SESSION_NAME)
         session = fleet.sessions.get(opened["session_id"])

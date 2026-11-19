@@ -65,7 +65,7 @@
 ## 快速开始
 
 1. [下载](https://github.com/ANetResearch/ANet-Relay/releases/latest)并打开应用（macOS 版本已签名并公证）。
-2. 点击 **添加模拟机**，按 **P** 接管，在 **控制** 页解锁，用 `W A S D` / `R F` / `Q E` 或手柄飞行。
+2. 点击 **添加模拟机**（0.6.0 起新模拟机是主力机型 ANetDU7），按 **P** 接管，在 **控制** 页解锁，用 `W A S D` / `R F` / `Q E` 或手柄飞行。
 3. 打开 **Copilot**（`Ctrl+J` / `⌘J`），填入任意兼容 OpenAI 或 Anthropic 的接口，然后让它开一场狗斗。
 
 ### 接入你自己的 Agent
@@ -85,20 +85,21 @@ with RelayClient() as relay:                          # http://127.0.0.1:8765
 claude mcp add anet-relay-app -- python3 /path/to/ANet-Relay/mcp/anet_relay_app_mcp.py --name claude-code-app   # 或任意 MCP 客户端
 ```
 
-三个 MCP 服务器分别覆盖飞行与固件孪生（34 个工具）、直到单个电机的设备层（36 个）和包括硬件在环在内的整个应用（67 个）。详见 [MCP Servers](https://github.com/ANetResearch/ANet-Relay/wiki/MCP-Servers)。
+三个 MCP 服务器分别覆盖飞行、云台吊舱与固件孪生（38 个工具）、直到单个电机的设备层（36 个）和包括硬件在环在内的整个应用（70 个）。详见 [MCP Servers](https://github.com/ANetResearch/ANet-Relay/wiki/MCP-Servers)。
 
 ## 包含什么
 
 | | |
 |---|---|
 | **机队链路** | UDP 14550 或 USB 串口上的 MAVLink 2（波特率自动识别），子网扫描，在线 / 降级 / 丢失状态，完整遥测、参数与原始消息检查器 |
-| **控制** | 接管、认领与会话，50 Hz 摇杆，技能与序列（Full 级别），可覆盖一切的急停与全部急停 |
-| **仿真** | 最多 8 架，ArduPilot 或 PX4 风格自驾仪，悬停辅助，机型预设（120 g、250 mm、450 mm），特技模式（给定机体角速度，可翻滚、倒飞），刚体触地使摔机后弹起、翻滚并停在最终姿态，带种子的机体缺陷（重心偏移、电机不均、桨叶损伤） |
+| **控制** | 接管、认领与会话，50 Hz 摇杆，技能与序列（Full 级别），可覆盖一切的急停与全部急停。技能的数值按控制坐标系解释，缺省 FLU（机体前左上、本地东北天、逆时针偏航），FRD 与 Relay 自己的坐标轴只差一个 `frame` 参数 |
+| **仿真** | 最多 8 架，新建的是 ANetDU7（2.5 kg，PX4 风格），小机可选；ArduPilot 或 PX4 风格自驾仪，悬停辅助，机型预设（ANetDU7、120 g、250 mm、450 mm），特技模式（给定机体角速度，可翻滚、倒飞），刚体触地使摔机后弹起、翻滚并停在最终姿态，带种子的机体缺陷（重心偏移、电机不均、桨叶损伤） |
+| **ANetDU7 与云台吊舱** | ANetDU7 是主力机型：与机载测试节点相同的限速速度飞法（0.5 m/s，带倾角、位置跳变、遥测过期与超速监视）和内置的 `du7_box` 测试计划。吊舱在模拟机上是模拟的，真机的 DYT 吊舱经 TCP 或串口接入：角度、角速度、变焦、镜头（可见光、广角、红外）、拍照、录像、指向某点，并有拍照记录，人、Agent 与 Copilot 都能操作（[硬件](docs/hardware.zh-CN.md)、[`vehicles/anet-du7`](vehicles/anet-du7/README.md)） |
 | **固件孪生** | 官方 ArduCopter（4.3.8 至 4.7.2）与 PX4（1.14.4 至 1.17.0）SITL 固件随安装包分发，以真机的版本与参数在 Relay 的物理中飞行：识别固件、生成孪生配置、启动孪生。每个运行包压缩后 1.7 至 2.6 MB（Windows 连同 Cygwin 运行库约 4.4 MB），每个安装包增加 16 至 22 MB；Windows 只含 ArduPilot（[飞控运行包](docs/autopilot-packs.md)） |
 | **硬件在环** | PX4，经 USB：Relay 备份飞控参数，切换到 HITL，由物理模型向飞控提供传感器数据（电机由固件锁死），结束后恢复并逐项核对全部参数。ArduPilot 已移除 HIL，请使用固件孪生 |
 | **程序与 Lab** | 50 Hz 受限 Python、单元测试、10 个评测挑战、Elo 对决，以及包含每发子弹与爆炸的轨迹回放 |
 | **竞技场** | 虚拟子弹、碰撞、比赛、狗斗与跨局域网排行榜 |
-| **真实飞机** | ESP8266 桥接后的 PX4 或 ArduPilot，带确认词的飞前检查、台架流程、飞行健康诊断、FPV 画中画 |
+| **真实飞机** | ESP8266 桥接后的 PX4 或 ArduPilot，或经 MAVROS 接入的 ANetDU7，带确认词的飞前检查、台架流程、飞行健康诊断、FPV 画中画 |
 | **记录** | 每次飞行存入本地 SQLite：曲线、事件与控制轨道、三维回放、CSV 与 JSON |
 | **外部 SITL** | 自行运行的 PX4 + Gazebo 或 ArduPilot SITL 作为普通 MAVLink 飞机接入（[说明](docs/simulation.zh-CN.md)） |
 

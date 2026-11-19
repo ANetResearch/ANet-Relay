@@ -3,7 +3,7 @@
 // stick by more than the pilot-override threshold takes over and stops the running skill or sequence.
 import * as React from 'react'
 import { api, RelayApiError, type PlanAction, type PlanStep, type PlanTuning, type SkillName, type Vehicle } from '@/api'
-import { useLang } from '@/i18n'
+import { useLang, useT } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { notifyError } from '@/shell/notify'
 import { Button } from '@/ui/components/ui/button'
@@ -13,6 +13,7 @@ import { Slider } from '@/ui/components/ui/slider'
 import { Icon, type IconKey } from '@/ui/icons'
 import { Group, TypeToConfirm } from '@/ui/relay'
 import { useCT, type ControlKey } from './strings'
+import { relayPlan, relaySkillArgs } from './frames'
 
 const PLAN_KEY = 'relay.plan.steps'
 const TUNING_KEY = 'relay.plan.tuning'
@@ -169,7 +170,8 @@ export function ActionsBlock({ v }: { v: Vehicle }) {
   const airborne = v.armed && (v.landed === 'air' || v.landed === 'takeoff' || v.landed === 'landing')
   const off = !human || busy !== null
 
-  const skill = (name: SkillName, args?: Record<string, number | string>) => run(name, () => api.skill(v.id, name, args))
+  // 12 §3.1: the buttons mean what their labels say (clockwise is clockwise) in any control frame
+  const skill = (name: SkillName, args?: Record<string, number | string>) => run(name, () => api.skill(v.id, name, relaySkillArgs(name, args)))
   const takeoff = () => {
     if (v.kind === 'real' && !v.armed) {
       setError(null)
@@ -304,6 +306,7 @@ function defaultsFor(action: PlanAction): PlanStep {
 
 export function PlanBlock({ v }: { v: Vehicle }) {
   const ct = useCT()
+  const t = useT()
   const lang = useLang()
   const { busy, run } = useRun()
   const [steps, setSteps] = React.useState<PlanStep[]>(loadPlan)
@@ -321,7 +324,7 @@ export function PlanBlock({ v }: { v: Vehicle }) {
   }
   const sticksFlown = !v.capabilities.position // the tuning reaches the stick variants only
   const start = async (confirm?: string) => {
-    await api.plan(v.id, steps, { name: 'operator', ...(confirm ? { confirm } : {}), ...(sticksFlown ? { tuning } : {}) })
+    await api.plan(v.id, relayPlan(steps), { name: 'operator', ...(confirm ? { confirm } : {}), ...(sticksFlown ? { tuning } : {}) })
   }
   const tune = (next: Required<PlanTuning>, commit: boolean) => {
     setTuning(next)
@@ -367,7 +370,7 @@ export function PlanBlock({ v }: { v: Vehicle }) {
                 <Icon icon={state === 'done' ? 'check' : ACTION_ICON[step.action]} className="size-3.5 flex-none" />
                 {running ? (
                   <span className="flex-1 truncate">
-                    {ct(`plan.action.${step.action}` as ControlKey)} {describe(step, ct)}
+                    {ct(`plan.action.${step.action}` as ControlKey)} {describe(step, ct, t('plan.field.left'))}
                     {result ? <span className="ml-1.5 text-[var(--g500)]">{result}</span> : null}
                   </span>
                 ) : (
@@ -511,7 +514,7 @@ function TuningPanel({ v, tuning, onChange, disabled }: {
   )
 }
 
-function describe(step: PlanStep, ct: (k: ControlKey) => string): string {
+function describe(step: PlanStep, ct: (k: ControlKey) => string, left: string): string {
   const m = ct('plan.unit.m')
   switch (step.action) {
     case 'takeoff':
@@ -523,6 +526,7 @@ function describe(step: PlanStep, ct: (k: ControlKey) => string): string {
       const parts = []
       if (step.forward) parts.push(`${ct('plan.field.forward')} ${step.forward} ${m}`)
       if (step.right) parts.push(`${ct('plan.field.right')} ${step.right} ${m}`)
+      if (step.left) parts.push(`${left} ${step.left} ${m}`)
       if (step.up) parts.push(`${ct('plan.field.up')} ${step.up} ${m}`)
       return parts.join(' · ')
     }

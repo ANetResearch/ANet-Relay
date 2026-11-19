@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from .. import flight_level
+from .. import flight_level, plans
 from ..errors import err
 from . import schemas
 from .deps import actor, require_app_control, require_operator, service
@@ -176,11 +176,28 @@ def skill(request: Request, vid: str, name: str, body: schemas.SkillBody | None 
 @router.post("/vehicles/{vid}/plan", tags=["control"], responses=ERRORS)
 def plan(request: Request, vid: str, body: schemas.PlanBody) -> dict[str, Any]:
     """Fly a sequence of skills: takeoff, hover, move, yaw, land, goto, rtl (03 §5.8)."""
-    steps = [step.model_dump(exclude_none=True) for step in body.steps]
+    if (body.steps is None) == (body.builtin is None):
+        raise err("invalid_request", reason="give steps or builtin")
+    name = body.name
+    if body.builtin is not None:  # 12 §4: a ready-made plan
+        steps = [dict(step) for step in plans.builtin(body.builtin)["steps"]]
+        name = name or body.builtin
+    else:
+        steps = [step.model_dump(exclude_none=True) for step in body.steps or []]
     tuning = body.tuning.model_dump(exclude_none=True) if body.tuning else None
-    return service(request).run_plan(
-        vid, actor(request, "control"), steps, body.name, body.confirm, tuning=tuning
-    )
+    return service(request).run_plan(vid, actor(request, "control"), steps, name, body.confirm, tuning=tuning)
+
+
+@router.get("/plans/builtin", tags=["control"])
+def plans_builtin() -> dict[str, Any]:
+    """Ready-made plans (12 §4): ``du7_box`` is the ANetDU7 box test."""
+    return {"plans": [{"id": pid, **plan} for pid, plan in plans.BUILTIN.items()]}
+
+
+@router.post("/vehicles/{vid}/model", tags=["fleet"], dependencies=OPERATOR, responses=ERRORS)
+def vehicle_model(request: Request, vid: str, body: schemas.ModelBody) -> dict[str, Any]:
+    """What a real aircraft is shown and flown as: anet-du7 or micro (12 §2.2). Operator only."""
+    return service(request).set_model(vid, body.model)
 
 
 @router.patch("/vehicles/{vid}/plan/tuning", tags=["control"], responses=ERRORS)

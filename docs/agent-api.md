@@ -8,7 +8,7 @@ ANet Relay exposes the fleet it flies to external programs: scripts, autonomous 
 
 ## 1. Quick start (no hardware)
 
-1. Start Relay. In the desktop app, click **Add sim** at the bottom of the fleet bar. From a source checkout you can run the backend alone: `.venv/bin/python -m relay --dev` (the operator token is printed once on stderr).
+1. Start Relay. In the desktop app, click **Add sim** at the bottom of the fleet bar: a new simulator is an ANetDU7 (PX4, 2.5 kg, with a simulated gimbal pod); the small aircraft of 0.5 stay available through `frame.preset` ([ANetDU7](#anetdu7-and-speed-limited-flight-060)). From a source checkout you can run the backend alone: `.venv/bin/python -m relay --dev` (the operator token is printed once on stderr).
 2. Fly a simulator with the Python SDK (standard library only, Python 3.10 or later):
 
 ```python
@@ -28,7 +28,7 @@ with RelayClient() as relay:                # http://127.0.0.1:8765, or $RELAY_A
 
 3. Or connect a language model through MCP (section 8): one server each for flight, device-level and application control.
 
-The six examples in `sdk/python/examples/` run against simulators:
+The seven examples in `sdk/python/examples/` run against simulators:
 
 | Example | What it does |
 |---|---|
@@ -38,6 +38,7 @@ The six examples in `sdk/python/examples/` run against simulators:
 | `swarm_square.py` | Four simulators take off together, fly a synchronised square rotation and land |
 | `bench_routine.py` | Take off, hover, forward 1 m, back 1 m, turn 45° and land as one plan |
 | `device_tour.py` | Device overview, raw command catalogue, single-motor tests and an `attitude` hold |
+| `du7_box_and_gimbal.py` | Fly the built-in `du7_box` plan on an ANetDU7 simulator, then point the gimbal, zoom, switch the lens, take a photo and print the capture record |
 
 Each example accepts `--base` and `--name`. With `--operator-token` (or `$RELAY_OPERATOR_TOKEN`) the examples add missing simulators themselves; otherwise add them in the app (**Add sim**).
 
@@ -76,15 +77,43 @@ Setting `agent_flight_level` (design 06 §5) decides what agent sessions may fly
 | `sticks` (default) | Push sticks (WebSocket stream, `POST /vehicles/{id}/sticks`, the `sticks` skill), arm and disarm, switch to a manual mode (ArduPilot STABILIZE / ACRO, PX4 MANUAL / STABILIZED / ACRO; not DRIFT, which assists), switch a simulator's hover assist off (not on), fire, deploy and run onboard programs, and the safety actions: emergency stop and `land` (its events carry `safety`) |
 | `full` | Everything in this guide, as in 0.3 |
 
-At `sticks` the skills `takeoff`, `hold`, `move`, `yaw`, `goto`, `rtl`, `velocity` and `attitude`, plans that contain them, re-fly as a plan or a path, altitude, position and automatic modes, the flight commands of the device interface and RC overrides above channel 4 return 403 `sticks_only` with `detail.level = "sticks"` and `detail.action`. The flight MCP server lists only the tools that still work (26 of 34; it reads the setting on every `tools/list`), and Copilot drops the same tools and tells its model to write programs. Stable flight at this level is the job of an onboard program: the agent works at its own pace on the program, its parameters and its results, and the program closes the 50 Hz loop.
+At `sticks` the skills `takeoff`, `hold`, `move`, `yaw`, `goto`, `rtl`, `velocity` and `attitude`, plans that contain them, re-fly as a plan or a path, altitude, position and automatic modes, the flight commands of the device interface and RC overrides above channel 4 return 403 `sticks_only` with `detail.level = "sticks"` and `detail.action`. The flight MCP server lists only the tools that still work (29 of 38; it reads the setting on every `tools/list`), and Copilot drops the same tools and tells its model to write programs. Stable flight at this level is the job of an onboard program: the agent works at its own pace on the program, its parameters and its results, and the program closes the 50 Hz loop.
+
+The gimbal pod is not a flight action: its actions (and the reads) work at both levels for the session that controls the aircraft, see [Gimbal pod](#gimbal-pod-060).
 
 ## 3. Frames and units
 
 - **Position:** metres, East-North-Up: `x` east, `y` north, `z` up. All simulators share the frame `sim` (each spawns at a different grid point). Each real aircraft reports its own `local` frame, with its origin where the autopilot initialised its estimator.
 - **Attitude:** radians; roll right-wing-down positive, pitch nose-up positive, yaw as a NED heading (0 north, clockwise positive). `heading_deg` is in degrees.
 - **Sticks:** roll right +, pitch forward +, yaw clockwise +, each −1..1; throttle 0..1. In altitude-hold modes 0.5 holds altitude.
-- **goto yaw and ring headings:** compass degrees (0 north, clockwise).
+- **goto yaw:** degrees in the control frame ([Control frames](#control-frames-060); `flu`: 0 along east, counter-clockwise positive). **Ring headings** (`yaw_deg` of a ring) are compass degrees (0 north, clockwise).
 - **Safety volume:** a box, 3 × 3 × 2 m by default (`safety_volume` in the fleet snapshot), centred horizontally on the aircraft's origin with its floor at the origin. The origin is the spawn point for a simulator and the first arming point for a real aircraft. `goto` targets outside it fail with `outside_safety_volume`; ring courses are scaled to fit it.
+
+### Control frames (0.6.0)
+
+The numbers of skills and plan steps that have a direction are read in a **control frame**. The default is `flu`, the convention of ROS and of the ANetDU7's onboard stack. A request names another one with `frame`; the operator changes the default with the setting `control_frame` (`flu` or `frd`, `PUT /settings`).
+
+| Frame | Body x / y / z | Local x / y / z | Heading `yaw` | Positive yaw rate and `yaw` turn |
+|---|---|---|---|---|
+| `flu` (default) | forward / **left** / up | east / north / up (ENU: MAVROS `local_position`, ROS `map`) | 0° along +x (east), counter-clockwise positive | counter-clockwise |
+| `frd` | forward / **right** / **down** | north / east / **down** (NED: PX4's local frame) | 0° north (compass), clockwise positive | clockwise |
+| `relay` | forward / right / up | east / north / up | 0° north (compass), clockwise positive | clockwise |
+
+`relay` is Relay's own set of axes and the meaning every release before 0.6 gave these parameters (see the echo rule below). The parameters read in the frame:
+
+| Skill or step | Read in the frame | Not affected |
+|---|---|---|
+| `move` | `x, y, z`: body offsets in metres | the named directions `forward`, `right`, `left`, `up`, `down`: the same in every frame, so prefer them |
+| `velocity` | `vx, vy, vz` (m/s) and `yaw_rate_dps`; `reference` `body` (the default, `local` in the `relay` frame) reads the three along the aircraft's axes, so the direction follows the nose; `local` reads them along the local axes | `seconds` |
+| `goto` | `x, y, z`: local coordinates; `yaw`: heading in degrees | |
+| `yaw` | `deg`: the turn, positive as in the last column | |
+| `takeoff`, `land`, `hold`, `rtl`, `sticks`, `attitude` | | everything: `alt` is metres above the take-off point; `attitude` keeps roll right +, pitch nose-up + and `yaw_rate_dps` clockwise + |
+
+`move` takes `x, y, z` or named directions, not both (`invalid_request`), and not `left` with `right` or `down` with `up`. The request body (or plan step) carries `frame` (`flu`, `frd` or `relay`; omitted: the setting) and, for `velocity` only, `reference` (`body` or `local`); anything else is `invalid_request`. A body-frame `velocity` is sent as `SET_POSITION_TARGET_LOCAL_NED` in `MAV_FRAME_BODY_NED` with the velocity and the yaw rate only, the frame MAVROS sends for `FRAME_BODY_NED`; the safety-volume look-ahead turns it to the local frame with the current heading.
+
+**The echo rule.** The `skill_started` event carries `data.params` in the `relay` frame with `frame: "relay"` (a body velocity as forward, right, up with `reference: "body"`), whatever the setting or the request was. A recorded skill read back from the events therefore flies the same route under any setting, and the plans Relay builds itself (bench procedures, re-fly) use `relay`. What is not a command keeps its axes: `position`, `attitude`, `heading_deg`, the stick values and the ring course (`c` east-north-up, `yaw_deg` compass) are as before.
+
+**`vehicle.nav`** reports the pose in the control frame of the setting, for agents that think in `flu` or `frd`: `{frame, position: [x, y, z] (local, metres; null without a local position), velocity: [vx, vy, vz] (local, m/s), body_velocity: [vx, vy, vz] (along the body axes, by heading only), yaw_deg, yaw_rate_dps}`. `GET /capabilities` carries `control_frame`, `control_frames` (the table above for `flu` and `frd`: `body` and `local` axis names, `yaw`, `yaw_rate`), `models` and `sim_frame_default`.
 
 ## 4. Authentication
 
@@ -97,9 +126,9 @@ Read-only endpoints need no token. The API binds 127.0.0.1 only and answers only
 
 | Level | Caller | Covers |
 |---|---|---|
-| Controller | The session that claimed the aircraft; the operator | Sticks, arm, mode, skills, plans, re-fly, courses, stop, device commands (motors, actuators, RC override, raw commands, reboot, calibration, termination), parameter writes |
+| Controller | The session that claimed the aircraft; the operator | Sticks, arm, mode, skills, plans, re-fly, courses, gimbal actions, stop, device commands (motors, actuators, RC override, raw commands, reboot, calibration, termination), parameter writes |
 | App operation | The operator; any session while the `agents_app_control` setting is on (the default) | Network scan, connect by address, remove aircraft, add, remove and reset simulators, stop-all, bridge retry and setup, alert acknowledgement, course edits, settings changes, interface actions (`POST /app/ui`) |
-| Operator only | The Relay window only | Possess and release over REST, stick-direction and propeller attestations, granting or withdrawing `agents_app_control` |
+| Operator only | The Relay window only | Possess and release over REST, stick-direction and propeller attestations, granting or withdrawing `agents_app_control`, setting a real aircraft's model, attaching and detaching a gimbal pod |
 
 With `agents_app_control` off, app operations from a session fail with 403 `app_control_disabled`; a session that tries to change the setting itself gets 403 `operator_required`. Every interface action a session runs shows a notice in the window and is logged as an `app_command` event.
 
@@ -112,7 +141,7 @@ All paths are under `/api/v1`. Bodies are JSON.
 | Method and path | Auth | Purpose |
 |---|---|---|
 | `GET /health` | – | `{ok, version, uptime_s}` |
-| `GET /capabilities` | – | Frames, limits, skills and their parameters, mode names, confirm words |
+| `GET /capabilities` | – | Frames, `control_frame` and `control_frames`, aircraft `models`, `sim_frame_default`, limits, skills and their parameters, mode names, confirm words |
 | `GET /fleet` | – | Fleet snapshot: vehicles, sessions, alerts, safety volume |
 | `GET /vehicles/{id}` | – | One vehicle, plus a `detail` object (home, safety origin, cell voltages, preflight items). `health` carries the flight diagnostics (§5) |
 | `GET /vehicles/{id}/preflight` | – | Preflight check items |
@@ -128,8 +157,8 @@ All paths are under `/api/v1`. Bodies are JSON.
 | `POST /vehicles/{id}/sticks` | controller | `{roll, pitch, yaw, throttle}`; repeat at 10–50 Hz |
 | `POST /vehicles/{id}/arm` | controller | `{arm: true}` (real aircraft: `{arm: true, confirm: "ARM"}`) or `{arm: false}` |
 | `POST /vehicles/{id}/mode` | controller | `{name}`, for example `LOITER`, `ALT_HOLD`, `POSCTL` |
-| `POST /vehicles/{id}/skills/{name}` | controller | `takeoff {alt}`, `land`, `hold {seconds?}`, `move {forward?, right?, up?}`, `yaw {deg}`, `rtl`, `goto {x, y, z, yaw?}` |
-| `POST /vehicles/{id}/plan` | controller | `{steps, name?, confirm?, tuning?}`: run a sequence of skills (below) |
+| `POST /vehicles/{id}/skills/{name}` | controller | `takeoff {alt, speed?, settle_s?}`, `land`, `hold {seconds?}`, `move {forward? \| right? \| left? \| up? \| down? \| x?, y?, z?; frame?, speed?, settle_s?}`, `yaw {deg, frame?}`, `rtl`, `goto {x, y, z, yaw?, frame?, speed?, settle_s?}`, `velocity {vx, vy, vz, yaw_rate_dps?, seconds, reference?, frame?}` |
+| `POST /vehicles/{id}/plan` | controller | `{steps \| builtin, name?, confirm?, tuning?}`: run a sequence of skills or a ready-made plan (below) |
 | `PATCH /vehicles/{id}/plan/tuning` | controller | `{climb?, hover?}`: change the plan's throttle tuning while it flies |
 | `POST /vehicles/{id}/plan/cancel` | controller | Cancel the running plan; an airborne aircraft holds where it is |
 | `POST /vehicles/{id}/sequence` | controller | `{sequence, confirm?, speed?, start_at?}`: fly an `.ars` stick timeline (below) |
@@ -146,6 +175,13 @@ All paths are under `/api/v1`. Bodies are JSON.
 | `PUT /sims/{id}/airframe` | controller or operator | `{preset \| params, seed?}`: airframe defects of a simulated aircraft (below) |
 | `GET /sims/{id}/airframe` | controller or operator | The full airframe values, their limits and the hover throttle |
 | `PUT /sims/{id}/frame` | controller or operator | `{preset?, mass_kg?, ...}`: the physics frame of a disarmed simulator on the ground ([firmware twins](#firmware-twins-054)) |
+| `GET /plans/builtin` | – | Ready-made plans: `{plans: [{id, title, title_zh, description, description_zh, steps}]}` (`du7_box`) |
+| `POST /vehicles/{id}/model` | operator | `{model: anet-du7 \| micro}` → `{id, model}`: what a real aircraft is shown and flown as ([ANetDU7](#anetdu7-and-speed-limited-flight-060)); `invalid_request` for a simulator |
+| `GET /vehicles/{id}/gimbal` | – | The aircraft's gimbal pod view (`vehicle.gimbal`); 404 `gimbal_missing` without one |
+| `POST /vehicles/{id}/gimbal` | controller or operator | `{action, ...parameters}` → `{id, gimbal}`: run a pod action, at every flight level ([Gimbal pod](#gimbal-pod-060)) |
+| `POST /vehicles/{id}/gimbal/attach` | operator | `{transport: tcp \| serial \| sim, host?, port?, device?, baud?}` → `{id, gimbal}`: attach a pod |
+| `DELETE /vehicles/{id}/gimbal` | operator | Detach the pod and close its link → `{id, detached}` |
+| `GET /vehicles/{id}/gimbal/captures?limit=` | – | Photo and recording log, newest last (`limit` 1–500, default 100) → `{id, total, captures}` |
 
 ### Skills
 
@@ -153,16 +189,16 @@ A skill call returns at once with `{"skill": {"id", "name", "state": "running", 
 
 | Skill | Requires | Behaviour |
 |---|---|---|
-| `takeoff {alt}` | althold | Arms a simulator if needed, climbs to `alt` metres above the take-off point (0.2 m to the safety-volume height) and holds. With a position estimate it uses the autopilot's take-off (GUIDED / OFFBOARD); without one it climbs in ALT_HOLD / ALTCTL on the throttle stick and levels off on the barometer altitude. A real aircraft on the ground must be armed first, or the call must carry `confirm: "ARM"` and pass preflight. Already airborne: finishes immediately. |
+| `takeoff {alt, speed?, settle_s?}` | althold | Arms a simulator if needed, climbs to `alt` metres above the take-off point (0.2 m to the safety-volume height) and holds. With a position estimate it uses the autopilot's take-off (GUIDED / OFFBOARD); without one it climbs in ALT_HOLD / ALTCTL on the throttle stick and levels off on the barometer altitude. With `speed`, or by default on an ANetDU7, PX4 with a position estimate arms in POSCTL, switches to OFFBOARD and climbs on speed-limited body velocity ([below](#anetdu7-and-speed-limited-flight-060)). A real aircraft on the ground must be armed first, or the call must carry `confirm: "ARM"` and pass preflight. Already airborne: finishes immediately. |
 | `land` | any | Lands in place; finishes when the aircraft is on the ground and disarmed. |
 | `hold {seconds?}` | althold | Holds position (LOITER / POSCTL) or altitude (ALT_HOLD / ALTCTL). With `seconds`, reports `done` after that time and keeps holding. |
-| `move {forward?, right?, up?}` | althold, airborne | Metres in the aircraft's body frame (negative values go back, left, down). With a position estimate: a closed-loop `goto` to the target. Without one: **open loop**, a timed tilt with a dead-reckoned distance estimate (about ±30 %), horizontal distance at most 2 m per step; `up` uses the barometer altitude. |
-| `yaw {deg}` | althold, airborne | Turns by `deg` degrees, positive clockwise, on the attitude heading; finishes within 3°. |
+| `move {forward?, right?, left?, up?, down? \| x?, y?, z?; frame?, speed?, settle_s?}` | althold, airborne | Metres in the aircraft's body frame. Name the direction (`forward`, `right`, `left`, `up`, `down`; negative values go the other way; the same in every frame) or give body offsets `x, y, z` in the control frame (`flu`: forward, left, up; `frd`: forward, right, down), not both. With a position estimate: a closed-loop `goto` to the target, on speed-limited body velocity when `speed` is given or on an ANetDU7. Without one: **open loop**, a timed tilt with a dead-reckoned distance estimate (about ±30 %), horizontal distance at most 2 m per step; `up` uses the barometer altitude. |
+| `yaw {deg, frame?}` | althold, airborne | Turns by `deg` degrees on the attitude heading; positive is counter-clockwise in `flu` (the default) and clockwise in `frd` and `relay`; finishes within 3°. |
 | `rtl` | position | Returns to the launch point and lands. |
-| `goto {x, y, z, yaw?}` | position | Flies to the target in the vehicle's position frame; finishes within 0.15 m. |
+| `goto {x, y, z, yaw?, frame?, speed?, settle_s?}` | position | Flies to the local point `x, y, z` of the vehicle's position frame, read in the control frame (`flu`: east, north, up; `frd`: north, east, down); the optional `yaw` is a heading in that frame (`flu`: 0 east, counter-clockwise; `frd`: compass). Finishes within 0.15 m; on speed-limited flight within 0.2 m held for `settle_s`, after turning to `yaw` first. |
 | `sticks {roll, pitch, yaw, throttle, seconds}` | manual, armed | Holds one stick position for `seconds` (0.05–10 s) in a manual mode, then centres the sticks. Lets a language model give short manual inputs. |
 | `attitude {roll_deg, pitch_deg, yaw_rate_dps, thrust, seconds}` | manual, armed | Holds an attitude and collective thrust with `SET_ATTITUDE_TARGET` for `seconds` (ArduPilot switches to GUIDED_NOGPS, PX4 to OFFBOARD). |
-| `velocity {vx, vy, vz, yaw_rate_dps?, seconds}` | position | Flies an ENU velocity (m/s) for `seconds`, then holds. |
+| `velocity {vx, vy, vz, yaw_rate_dps?, seconds, reference?, frame?}` | position | Flies a velocity (each −2..2 m/s) for `seconds`, then holds. `reference: "body"` (the default; `"local"` in the `relay` frame) reads the numbers along the aircraft's axes so the direction follows the nose (`flu`: forward, left, up; `frd`: forward, right, down); `"local"` along the local axes (`flu`: east, north, up; `frd`: north, east, down). `yaw_rate_dps` (−90..90) is counter-clockwise positive in `flu`, clockwise in `frd` and `relay`. |
 
 While a skill runs or holds, Relay streams neutral sticks (throttle 0.5) as an RC keep-alive so the autopilot's RC-loss failsafe stays quiet; see `hardware.zh-CN.md` for the failsafe settings this relies on.
 
@@ -182,7 +218,9 @@ POST /api/v1/vehicles/sim-1/plan
 ]}
 ```
 
-Actions: `takeoff {alt}` (default 1 m), `hover {seconds}` / `hold {seconds}` (default 3 s), `move {forward, right, up}`, `yaw {deg}`, `land`, `goto {x, y, z, yaw?}`, `rtl`, and `sticks`, `attitude` and `velocity` (parameters as in the table above). Every step is validated before the plan starts (`invalid_request` names the step and field; a step whose capability is missing fails with `capability_missing`). A plan that does not start with `takeoff` needs the aircraft in the air (`not_airborne`). On a real aircraft a plan that starts on the ground needs `confirm: "ARM"`.
+Actions: `takeoff {alt, speed?, settle_s?}` (default 1 m), `hover {seconds}` / `hold {seconds}` (default 3 s), `move {forward, right, left, up, down \| x, y, z; frame?, speed?, settle_s?}`, `yaw {deg, frame?}`, `land`, `goto {x, y, z, yaw?, frame?, speed?, settle_s?}`, `rtl`, and `sticks`, `attitude` and `velocity {…, reference?, frame?}` (parameters as in the table above). Each step reads its numbers in its own `frame`, omitted: the setting `control_frame`. Every step is validated before the plan starts (`invalid_request` names the step and field; a step whose capability is missing fails with `capability_missing`). A plan that does not start with `takeoff` needs the aircraft in the air (`not_airborne`). On a real aircraft a plan that starts on the ground needs `confirm: "ARM"`.
+
+**Ready-made plans (0.6.0).** `POST /vehicles/{id}/plan {"builtin": "du7_box"}` flies a plan of `GET /plans/builtin` instead of `steps` (give one of the two, else `invalid_request`; the plan is named after it unless `name` says otherwise). `du7_box` is the route of the ANetDU7's onboard test node `u7_mavros_simple.py`: take off to 2 m, 1 m forward and back, 1 m left and back, land, every step at 0.5 m/s. Its directions are named, so it reads the same in every control frame; the 2 m take-off needs a safety volume at least 2 m high (the default).
 
 The vehicle's `plan` field reports `{id, name, state, index, count, steps, results, detail, tuning}` with `state` `running`, `done`, `failed` or `cancelled`; events `plan_started`, `plan_step`, `plan_finished`, `plan_failed` and `plan_cancelled` mark progress, `plan_tuned` a change of the tuning. A step that fails, a new skill, sticks from the controller, an operator moving a stick or possessing the aircraft, and a stop all end the plan. `POST /plan/cancel` ends it on purpose (`no_plan` if none is running) and leaves an airborne aircraft holding.
 
@@ -303,13 +341,13 @@ Stick frames older than 0.8 s stop being sent, so the aircraft never flies on st
 
 ### Ring courses
 
-`course/start` places the course at the vehicle's origin and returns it, including `rings` in the vehicle's frame: `c` (centre `[x, y, z]`), `yaw_deg` (compass heading of the ring normal) and `r` (radius). The clock starts at take-off. A ring counts when the aircraft crosses its plane inside the radius, in order. The vehicle's `course` field reports `next`, `total`, `splits`, `elapsed_s` and `best_s`; events `ring_passed` and `course_finished` mark progress. `course_sim.py` flies 0.35 m before and after each ring along its normal.
+`course/start` places the course at the vehicle's origin and returns it, including `rings` in the vehicle's frame: `c` (centre `[x, y, z]`), `yaw_deg` (compass heading of the ring normal) and `r` (radius). The clock starts at take-off. A ring counts when the aircraft crosses its plane inside the radius, in order. The vehicle's `course` field reports `next`, `total`, `splits`, `elapsed_s` and `best_s`; events `ring_passed` and `course_finished` mark progress. `course_sim.py` flies 0.35 m before and after each ring along its normal. The ring numbers are in Relay's own axes (east-north-up, compass headings): fly them with `goto` and `frame: "relay"`, as that example does, or convert them to the control frame.
 
 ### Simulator hover assist
 
 Every simulated aircraft has `hover_assist` (default: setting `sim_hover_assist`, on). On, it flies as before: ALT_HOLD holds height, LOITER holds position, GUIDED, RTL and LAND are autonomous. Off, it is a racing quad without barometer or position source: the attitude still self-levels, but the throttle is thrust (no height hold, no tilt or voltage compensation, the hover point rises as the battery sags), ground effect, motor lag, turbulence (setting `sim_turbulence`, 0–1) and propeller wake act, the aircraft reports no barometer and no position estimate (`capabilities.althold` and `position` false), and ALT_HOLD, LOITER, GUIDED, RTL and AUTO are refused with `Mode requires hover assist`. LAND stays as the failsafe and descends open loop. The switch is allowed armed and in flight: off moves an airborne aircraft to STABILIZE with a 0.3 s thrust ramp; on enters ALT_HOLD at the present height.
 
-`POST /sims {count, autopilot, position, hover_assist}` sets it at creation; `POST /sims/{id}/assist {on}` switches it (the operator, the controlling session, or any session while nobody controls the aircraft and the operator allows app control). The snapshot carries `vehicle.sim = {hover_assist, turbulence}` (null on real aircraft); event `sim_assist_changed` reports a change. MCP: `app_sim_assist`; SDK: `sim_assist(id, on)` and `add_sims(count, autopilot, hover_assist)`.
+`POST /sims {count, autopilot, position, hover_assist, frame}` sets it at creation; `POST /sims/{id}/assist {on}` switches it (the operator, the controlling session, or any session while nobody controls the aircraft and the operator allows app control). The snapshot carries `vehicle.sim = {hover_assist, turbulence}` (null on real aircraft); event `sim_assist_changed` reports a change. MCP: `app_sim_assist`; SDK: `sim_assist(id, on)` and `add_sims(count, autopilot, hover_assist, frame)`.
 
 ### Simulator airframe defects
 
@@ -353,7 +391,7 @@ A firmware twin is a simulator whose brain is the official firmware: the desktop
 
 - **Identification and matching.** Relay reads the firmware family, version, git hash and board from `AUTOPILOT_VERSION` and ranks the installed packs: `exact` (same version and git), `version`, `series` (same major and minor), `nearest`, `none`. Below `version` the answer carries a warning that the control loop and parameter meanings may differ. Any pack of the same firmware can be chosen; another firmware cannot. The snapshot gives every aircraft `firmware_info: {family, vehicle, version, type, git, board}` (null until `AUTOPILOT_VERSION` arrives).
 - **Profiles.** Capturing needs a real aircraft (`real_only` otherwise) whose parameter table is read completely (`params_incomplete` with `detail.received/total`). Hardware-specific parameters (calibration offsets, device ids, serial ports, board and output wiring, PX4 `CAL_*`, `SYS_AUTOSTART`, ArduPilot `INS_*OFFS*`, `SERIAL*` and similar) stay out, each with an English and Chinese reason; gains, limits, failsafes and hover throttle go in. Without `frame` Relay guesses `large-450` for 4S or 2000 mAh and above, `small-250` otherwise.
-- **Frames.** Presets `micro-120` (the fast simulator's default), `small-250` and `large-450`, with mass, wheelbase, propeller, cells and capacity adjustable. A twin derives the motor thrust from the hover throttle in its parameters, so it hovers at the same throttle as the real aircraft.
+- **Frames.** Presets `anet-du7` (the default of new fast simulators since 0.6.0), `micro-120` (the default of a twin without a profile), `small-250` and `large-450`, with mass, wheelbase, propeller, cells and capacity adjustable. A twin derives the motor thrust from the hover throttle in its parameters, so it hovers at the same throttle as the real aircraft.
 - **Starting.** `POST /sims` returns once each firmware sends its first heartbeat; after 15 s the request fails with `twin_start_failed` (`detail.reason`, `detail.lines` with the last 40 lines of output, `detail.added`). `twin_limit` caps concurrent twins (setting `twin_limit`, default 8). With `engine: "relay"` (the default) `profile`, `pack` and `home` are refused; `frame` applies to both engines.
 - **Reset and crashes.** `POST /sims/{id}/reset` restarts a twin's firmware with the same configuration in the background (event `twin_started` with `restart: true`, or `twin_start_failed`); it also recovers any crashed simulator. A twin that crashes keeps tumbling under the contact model like a fast simulator, and Relay tells the firmware with a `STATUSTEXT` from component 25.
 - **Not on a twin.** The hover-assist switch and dogfights (`twin_unsupported`, `detail.operation`), `position: false` (`invalid_request`). Headless judging uses fast simulators only.
@@ -374,6 +412,72 @@ Hardware in the loop (HITL) runs a real PX4 flight controller against Relay's ph
 - `state`: `idle`, `backing_up`, `writing`, `rebooting`, `running`, `restoring`, `verifying`, `restored`, `failed`. `steps`: `confirm`, `backup`, `write`, `reboot`, `run`, `restore`, `verify`, each `pending`, `active`, `done`, `failed` or `skipped` with an English and Chinese `detail`. `run`: `{sensor_hz, gps_hz, actuator_frames, steps, since}` while running. Any failed step goes to the restore.
 - `start` needs `confirm: "HITL"` (the propellers are removed), a PX4 aircraft on a serial link, disarmed, and the operator's possession; an agent session may run it only while app control is on. Without the word, `confirm_required` (400, `detail.expected: "HITL"`); otherwise `hitl_unavailable` (409) with `detail.reason`, `detail.reason_zh` and `detail.cause`. A restore owed by an earlier session (Relay quit while it ran) runs on its own the next time the board connects over serial, and only while it is disarmed; `stop` also runs it at once. ArduPilot removed HIL from its firmware; for an ArduPilot aircraft use a firmware twin. A Wi-Fi telemetry link cannot carry the sensor stream, so HITL needs USB.
 - Status: the PX4 protocol (encoding, backup, restore and verification) is tested against a simulated serial port; the whole flow on a real board is verified once the larger PX4 aircraft is available.
+
+### ANetDU7 and speed-limited flight (0.6.0)
+
+The ANetDU7 is the main aircraft of 0.6: a 2.5 kg quadcopter (500 mm wheelbase, 684 × 684 × 211 mm with its guard frame, 4S 5300 mAh, about 10 minutes) with a CUAV X7+ flight controller running PX4, an onboard computer and a gimbal pod. `vehicle.model` is `anet-du7` or `micro` (the small aircraft of 0.5). The aircraft is told apart by its model, not by its autopilot.
+
+| Where | Rule |
+|---|---|
+| New simulator | `POST /sims` without `frame` adds ANetDU7s: the setting `sim_frame_default` (default `anet-du7`; `micro-120`, `small-250`, `large-450` choose the small aircraft). A request's `frame.preset` overrides it. An `anet-du7` simulator without an `autopilot` named flies the PX4 flavour, the small presets ArduPilot. Firmware twins (`engine: "sitl"`) keep their profile's frame, else `micro-120` |
+| Simulator model | `anet-du7` when its physics preset is `anet-du7`, else `micro`; it follows the frame (`PUT /sims/{id}/frame`). An `anet-du7` simulator carries a simulated gimbal pod |
+| Real aircraft | The setting `real_model_default` (default `anet-du7`), until the operator sets it: `POST /vehicles/{id}/model {"model": "anet-du7" \| "micro"}` (operator only, remembered per airframe, event `model_changed`) |
+| Dogfights, challenges, built-in programs | Always `micro-120`, unchanged |
+| `GET /capabilities` → `models` | `anet-du7`: span 0.684 m, height 0.211 m, wheelbase 0.5 m, 2.5 kg, gimbal; `micro`: 0.166 m, 0.045 m, 0.25 m, 0.12 kg, no gimbal. The stage draws them at real size |
+
+**Speed-limited tracking.** `takeoff`, `move` and `goto` take `speed` (m/s, 0.1–5) and `settle_s` (0–10, default 2). With `speed`, or by default on an `anet-du7` aircraft with a position estimate (`speed` 0.5), they fly the way the onboard test node does instead of sending position setpoints. Every 50 ms the velocity is 0.8 × the position error, capped at `speed`, with its change limited to 0.5 m/s²; it is turned to the body frame and sent as a body velocity with a zero yaw rate (the nose is not corrected, and a `goto` with `yaw` turns on the spot first). The step is done when the aircraft has stayed within 0.2 m horizontally and vertically for `settle_s`. A PX4 take-off sends zero velocities in POSCTL for 2 s, arms, switches to OFFBOARD and climbs from the arming point; ArduPilot keeps `NAV_TAKEOFF` and flies `move` and `goto` in GUIDED. Without a position estimate `move` stays open loop. `speed` or `settle_s` on any other skill is `invalid_request`, and `settle_s` without `speed` on an aircraft that is not an `anet-du7`. The skill times out after `40 + 2·alt/speed` s (take-off) or `30 + 2·distance/speed` s.
+
+Monitors, as in the test node: a tilt over 20°, a position jump over 0.25 m + 1.5 m/s × dt (an estimator reset), position telemetry older than 1 s (the test node allows 0.3 s onboard; Relay sees the position over the radio link), or a speed over `speed` + 0.5 m/s for 1 s ask the autopilot to land once and fail the skill with the reason in `skill.detail`. When the mode is changed from outside (the pilot's radio), the skill fails and no more setpoints are sent.
+
+### Gimbal pod (0.6.0)
+
+`vehicle.gimbal` is the aircraft's gimbal pod, `null` on an aircraft without one. Every ANetDU7 simulator carries a simulated pod (`kind: "sim"`, same clock as the physics, deterministic). A real ANetDU7's pod (`kind: "dyt"`, the DYT pod; protocol notes in `vehicles/anet-du7/docs/gimbal-dyt.zh-CN.md`) is attached by the operator over TCP (port 2000 of the onboard network) or a serial port. One set of actions drives both. Reads are anonymous; `POST /vehicles/{id}/gimbal` is for the operator or the session that controls the aircraft (possession or a live claim), **at every agent flight level**, and needs no confirm word. Attaching and detaching are the operator's.
+
+Angles are the pod's own frame angles and do **not** follow `control_frame`: `yaw_deg` right positive, `pitch_deg` up positive (looking straight down is −90), `roll_deg` right positive.
+
+| Field of `vehicle.gimbal` | Meaning |
+|---|---|
+| `kind`, `link`, `address` | `sim` or `dyt`; `ok`, `connecting` or `lost`; `"10.0.0.5:2000"` or the serial device, null for the simulated pod |
+| `yaw_deg`, `pitch_deg`, `roll_deg`, `yaw_dps`, `pitch_dps` | Frame angles (degrees) and rates |
+| `mode` | `follow`, `lock`, `rate`, `angle`, `track`, `scan` or `off` (motors off) |
+| `lens`, `pip` | Main picture `visible1` (zoom), `visible2` (wide), `ir1` (infrared zoom), `ir2` (infrared fixed); the small picture's lens or null |
+| `zoom`, `zoom_range`, `digital_zoom`, `fov_deg` | Magnification of the current lens, its range, the digital-zoom switch, current `[horizontal, vertical]` field of view (estimated for a DYT pod) |
+| `palette`, `focus` | Infrared palette `white_hot`, `black_hot` or `pseudo`; `{mode: auto \| manual, position}` |
+| `tracking` | `{state: off \| searching \| locked, algorithm: auto \| person \| vehicle \| building, x_deg, y_deg, box_px}` |
+| `laser` | `{on, range_m}` (null without a valid return) |
+| `recording`, `photos` | Recording state; photos taken this session |
+| `motors`, `enhance`, `osd`, `low_light`, `selftest` | Switches and the self-test `{done, gyro_ok, servo_ok, image_ok}` |
+| `target`, `debug`, `age_s` | The target position the pod solved `{lat, lon, alt}` or null; link counters of a DYT pod; seconds since the pod's last state |
+
+Lens fields of view (16:9): `visible1` 60° horizontal at 1×, narrowing as 2·atan(tan 30° / N), 1–30×; `visible2` fixed 90°; `ir1` 40° at 1×, 1–8× (electronic); `ir2` fixed 24°. The simulated pod keeps a zoom per lens and zooms at about 2× per second, so `zoom` in the view follows a `zoom` command with a delay.
+
+`POST /vehicles/{id}/gimbal {"action": ..., ...}` returns `{id, gimbal}` with the pod's view right after. Parameters not listed for an action are ignored.
+
+| `action` | Parameters | Effect |
+|---|---|---|
+| `rate` | `yaw_dps`, `pitch_dps` (−100..100, default 0; right and up positive) | Turn at a rate until `stop` or a new command |
+| `stop` | – | Stop turning |
+| `angle` | `yaw_deg` (−180..180), `pitch_deg` (−120..90), `space`: `frame` (default, relative to the nose) or `earth` (compass azimuth and elevation, pitch −90..90) | Point the pod |
+| `center` | – | Back to the centre position |
+| `follow`, `lock`, `motors` | `on` | Follow the nose; hold the geographic pointing (attitude lock); motors on or off |
+| `zoom` | `level` (times) | Zoom the current lens: `visible1` 1–30, `ir1` 1–8 (outside: `invalid_request`; fixed lenses: `gimbal_unsupported`) |
+| `zoom_rate` | `rate` (−100..100, 0 stops) | Zoom continuously (fixed lenses: `gimbal_unsupported`) |
+| `digital_zoom` | `on` | Digital zoom switch |
+| `lens` | `lens`, `pip` (optional lens of the small picture; omitted or null cancels it) | Switch the main picture |
+| `palette` | `palette` | Infrared palette |
+| `photo` | – | Take a photo (event `gimbal_capture`, record in the captures) |
+| `record` | `on` | Start or stop recording (event `gimbal_record`) |
+| `track` | `x`, `y` (pixels from the centre of the 1280 × 720 picture; x right, y down; ±640, ±360), `algorithm` (optional) | Track the object at that point; `track_stop` ends it |
+| `laser` | `on` | Laser rangefinder |
+| `focus` | `mode`: `auto` or `manual`, `position` (manual, 4090..49152) | Focus |
+| `enhance`, `osd`, `low_light` | `on` | Image enhancement, on-screen display, low-light mode |
+| `scan`, `scan_stop` | `yaw_deg`, `pitch_deg`, `speed_dps` (0.2..51) | Sweep scan |
+| `geo_track` | `lat`, `lon`, `alt` (−6000..6000 m above sea level), or `mode`: `center` or `exit` | Point at and follow a geographic position |
+| `look_at` | `x`, `y`, `z`: a **local point in the control frame**, `frame` (`flu` or `frd`; omitted: the setting; not `relay`) | Relay solves the angles from the aircraft's pose and sends an `angle` in earth space |
+
+Motion actions (`rate`, `angle`, `center`, `follow`, `lock`, `track`, `scan`, `geo_track`) fail with `gimbal_busy` while the motors are off or the self-test runs. `look_at` fails with `invalid_request` without an attitude and position estimate or for a point at the aircraft. A pod that stopped answering gives `gimbal_offline`.
+
+`POST /vehicles/{id}/gimbal/attach` (operator): `{"transport": "tcp", "host": "10.0.0.5", "port": 2000}`, `{"transport": "serial", "device": "/dev/ttyUSB0", "baud": 115200}` for a real aircraft, `{"transport": "sim"}` for a simulator (a simulator takes only `sim` and a real aircraft only `tcp` or `serial`, else `gimbal_unsupported`); it replaces the pod the aircraft has. `GET /vehicles/{id}/gimbal/captures` lists the last 500 photos and recording changes, newest last: `{seq, kind: photo \| record_start \| record_stop, t, nav, gimbal: {yaw_deg, pitch_deg, roll_deg}, lens, zoom, laser_range_m, target}`, where `nav` is the aircraft's pose at that moment (`frame`, `position`, `yaw_deg`, `roll_deg`, `pitch_deg`, `heading_deg`, `lat`, `lon`, `alt`). Events: `gimbal_attached`, `gimbal_detached`, `gimbal_link`, `gimbal_capture`, `gimbal_record`, `gimbal_lens` (section 7); errors `gimbal_missing`, `gimbal_offline`, `gimbal_unsupported`, `gimbal_busy`. The pod's video stream is not decoded in 0.6.0. MCP: `relay_gimbal_status`, `relay_gimbal_control`, `relay_gimbal_captures`, `app_gimbal_attach`, `app_gimbal_detach`; SDK: `gimbal`, `gimbal_do` and its shortcuts.
 
 ### Onboard programs
 
@@ -524,6 +628,7 @@ Each event is `{seq, t, kind, vehicle, session, text_en, text_zh, data}`. The ki
 | `refly_started` / `refly_finished` / `refly_failed` | Re-fly |
 | `sim_assist_changed` | Hover assist of a simulated aircraft switched (`data.hover_assist`) |
 | `sim_airframe_changed` | Airframe defects of a simulated aircraft set (`data.preset`, `data.seed`, `data.by`) |
+| `model_changed` | The operator set what a real aircraft is (`data.model`); `sim_added` carries `data.model` too |
 | `judge_finished` | A challenge or duel job ended (`data.job`, `data.kind`, `data.state`, `data.score`, `data.passed`) |
 | `peer_joined` / `peer_left` / `arena_hit` / `arena_down` | LAN arena: a terminal joined or left, a hit scored or taken, a simulator shot down |
 | `collision` | Two aircraft, or an aircraft and a ring or the ground, touched (`data.a`, `data.b`, `data.crashed`, `data.kind`, `data.remote` for a LAN contact) |
@@ -535,6 +640,11 @@ Each event is `{seq, t, kind, vehicle, session, text_en, text_zh, data}`. The ki
 | `twin_started` / `twin_exited` / `twin_start_failed` | Firmware twins: started (`data.family`, `version`, `pack`, `match`, `restart`, `pid`, `boot_s`), the firmware process exited (`data.code`, `lines`), a restart after a reset failed (`data.reason_en`, `reason_zh`, `lines`); `sim_added` carries `engine` and `firmware` |
 | `autopilot_pack_imported` | A runtime pack was imported (`data.pack`, `family`, `version`) |
 | `hitl_started` / `hitl_restored` / `hitl_failed` | Hardware in the loop: running (`data.vehicle`, `family`, `version`, `backup`), parameters restored (`data.restored`, `mismatches`), a step failed (`data.step`, `reason_en`, `reason_zh`) |
+| `gimbal_attached` / `gimbal_detached` | A gimbal pod was attached (`data.transport`, `data.address`) or detached |
+| `gimbal_link` | The pod's link changed (`data.link`: `ok`, `connecting`, `lost`; `data.error`) |
+| `gimbal_capture` | A photo was taken (`data.seq`, `kind`, `index`, `t`, `gimbal`, `lens`, `zoom`, `target`) |
+| `gimbal_record` | Recording started or stopped (`data.on`, `data.capture`: the capture's `seq`) |
+| `gimbal_lens` | The lens changed (`data.lens`, `data.pip`) |
 
 The full list is in `web/src/api/schema.json` (`EventKind`). Errors share one body and keep their `code` stable across versions:
 
@@ -547,8 +657,8 @@ The full list is in `web/src/api/schema.json` (`EventKind`). Errors share one bo
 | 400 | `invalid_request`, `confirm_required`, `outside_safety_volume`, `unknown_mode`, `command_not_allowed` |
 | 401 | `auth_required`, `session_expired` (open a new session) |
 | 403 | `operator_required`, `session_required`, `untrusted_host`, `app_control_disabled` |
-| 404 | `vehicle_not_found`, `course_not_found`, `unknown_skill`, `param_not_found`, `record_not_found`, `procedure_unknown`, `procedure_not_found`, `test_run_not_found`, `challenge_not_found`, `job_not_found`, `trace_not_found` |
-| 409 | `not_claimed`, `claimed_by_other`, `possessed_by_human`, `claim_suspended`, `preflight_blocked`, `arm_rejected`, `mode_rejected`, `not_armed`, `crashed`, `capability_missing`, `no_position_estimate`, `not_airborne`, `no_plan`, `must_be_disarmed`, `message_not_seen`, `refly_unavailable`, `ui_action_failed`, `procedure_running`, `no_procedure`, `procedure_step_mismatch`, `procedure_not_waiting`, `arena_off`, `arena_down` |
+| 404 | `vehicle_not_found`, `course_not_found`, `unknown_skill`, `param_not_found`, `record_not_found`, `procedure_unknown`, `procedure_not_found`, `test_run_not_found`, `challenge_not_found`, `job_not_found`, `trace_not_found`, `gimbal_missing` |
+| 409 | `not_claimed`, `claimed_by_other`, `possessed_by_human`, `claim_suspended`, `preflight_blocked`, `arm_rejected`, `mode_rejected`, `not_armed`, `crashed`, `capability_missing`, `no_position_estimate`, `not_airborne`, `no_plan`, `must_be_disarmed`, `message_not_seen`, `refly_unavailable`, `ui_action_failed`, `procedure_running`, `no_procedure`, `procedure_step_mismatch`, `procedure_not_waiting`, `arena_off`, `arena_down`, `gimbal_offline`, `gimbal_unsupported`, `gimbal_busy` |
 | 429 | `rate_limited`, `judge_queue_full` |
 | 503 | `link_not_ready`, `backend_busy`, `ui_unavailable`, `judge_unavailable` |
 | 504 | `ui_timeout` |
@@ -557,19 +667,21 @@ Onboard programs and the agent flight level add: 403 `sticks_only`; 400 `program
 
 Firmware twins, the serial link and hardware in the loop (0.5.4) add: 400 `pack_unsupported` (`detail.reason`), `serial_unavailable` (`detail.device`, `detail.cause`: `busy`, `not_found`, `permission`, `no_heartbeat`, `pyserial_missing`, `invalid`, `io`, with `detail.reason` and `detail.reason_zh`; 409 when the port is busy); 404 `pack_missing`, `profile_not_found`; 409 `twin_limit`, `frame_unsupported`, `twin_unsupported` (`detail.operation`, `detail.operation_zh`), `params_incomplete` (`detail.received`, `detail.total`), `real_only`, `hitl_unavailable` (`detail.reason`, `detail.reason_zh`, `detail.cause`); 503 `twin_start_failed`. `hitl_restore_mismatch` is reported in the HITL status and the `hitl_restored` event; the restore still completes.
 
+Control frames, models and the gimbal (0.6.0) add 404 `gimbal_missing` and 409 `gimbal_offline`, `gimbal_unsupported` and `gimbal_busy` (the message names the reason). A wrong `frame` or `reference`, `move` with both `x, y, z` and named directions, `speed` or `settle_s` out of range or on a skill that takes neither, and a gimbal action with a bad or missing parameter are 400 `invalid_request` with the field in the message.
+
 ## 8. MCP servers
 
 Relay ships three stdio Model Context Protocol servers (JSON-RPC 2.0, standard library only; protocol versions 2024-11-05 to 2025-11-25). Connect any one of them or all three:
 
 | Server | File | Tools | Scope |
 |---|---|---|---|
-| `anet-relay` | `mcp/anet_relay_mcp.py` | 34 `relay_*` (26 at the `sticks` level) | Flight: fleet, claims, arm, mode, skills, plans and their throttle tuning, stick timelines (`relay_timeline_*`, also in `acro`), timed sticks, re-fly, courses, stop; firmware twins: `relay_autopilots_list`, `relay_firmware_identify`, `relay_twin_profiles_list`, `relay_twin_profile_get`, `relay_twin_profile_capture`, `relay_twin_start`, `relay_twin_status`, `relay_sim_frame` (available at every level: a twin is a simulator) |
-| `anet-relay-device` | `mcp/anet_relay_device_mcp.py` | 36 `device_*` | Device level: overview, MAVLink messages, parameter reads and writes, raw commands, single-motor tests, actuators, RC override, message rates, reboot, calibration, home, attitude and velocity control, flight termination, bench procedures and their reports |
-| `anet-relay-app` | `mcp/anet_relay_app_mcp.py` | 42 `app_*`, `relay_serial_ports`, `relay_hitl`, 19 program tools and 4 dogfight tools | Application control: app and window state, controllers, language, workspace, selection, inspector, dialogs, screenshots, network scan, connecting (`app_connect_address {host}` or `{serial: {device, baud}}`) and removing aircraft, serial ports, simulators (`app_sims_add {engine: relay \| sitl, profile, pack, frame, home}`; `app_sim_reset` also recovers crashed simulators and restarts a twin's firmware), PX4 hardware in the loop (`relay_hitl {vehicle, action: status \| start \| stop, confirm: "HITL"}`), settings, alerts, records and export, re-fly sources, possession, the Copilot window, stop-all; onboard programs: `program_guide`, `program_*`, `challenge_list`, `challenge_submit`, `job_status`, `duel_run`, `ladder`, `airframe_set`; dogfights: `dogfight_start`, `dogfight_stop`, `dogfight_status`, `leaderboard` |
+| `anet-relay` | `mcp/anet_relay_mcp.py` | 38 `relay_*` (29 at the `sticks` level) | Flight: fleet (with `model`, `nav` and a gimbal summary), claims, arm, mode, skills (`relay_takeoff`, `relay_move`, `relay_yaw`, `relay_goto` take `frame`, `speed`, `settle_s` where they apply), plans (`steps` or `builtin`; `relay_plans_builtin` lists the ready-made ones) and their throttle tuning, stick timelines (`relay_timeline_*`, also in `acro`), timed sticks, re-fly, courses, stop; the gimbal pod: `relay_gimbal_status`, `relay_gimbal_control {action, ...}`, `relay_gimbal_captures` (available at every level for the aircraft you claimed); firmware twins: `relay_autopilots_list`, `relay_firmware_identify`, `relay_twin_profiles_list`, `relay_twin_profile_get`, `relay_twin_profile_capture`, `relay_twin_start`, `relay_twin_status`, `relay_sim_frame` (available at every level: a twin is a simulator) |
+| `anet-relay-device` | `mcp/anet_relay_device_mcp.py` | 36 `device_*` | Device level: overview, MAVLink messages, parameter reads and writes, raw commands, single-motor tests, actuators, RC override, message rates, reboot, calibration, home, attitude and velocity control (`device_velocity` takes `frame` and `reference`), flight termination, bench procedures and their reports |
+| `anet-relay-app` | `mcp/anet_relay_app_mcp.py` | 45 `app_*`, `relay_serial_ports`, `relay_hitl`, 19 program tools and 4 dogfight tools | Application control: app and window state, controllers, language, workspace, selection, inspector, dialogs, screenshots, network scan, connecting (`app_connect_address {host}` or `{serial: {device, baud}}`) and removing aircraft, serial ports, simulators (`app_sims_add {engine: relay \| sitl, profile, pack, frame, home}`: without `frame` an ANetDU7, `frame.preset` `micro-120`, `small-250` or `large-450` for the small aircraft; `app_sim_reset` also recovers crashed simulators and restarts a twin's firmware), PX4 hardware in the loop (`relay_hitl {vehicle, action: status \| start \| stop, confirm: "HITL"}`), settings (`app_settings_set {settings: {control_frame, sim_frame_default, ...}}`), alerts, records and export, re-fly sources, possession, the Copilot window, stop-all; operator actions `app_set_model`, `app_gimbal_attach`, `app_gimbal_detach`; onboard programs: `program_guide`, `program_*`, `challenge_list`, `challenge_submit`, `job_status`, `duel_run`, `ladder`, `airframe_set`; dogfights: `dogfight_start`, `dogfight_stop`, `dogfight_status`, `leaderboard` |
 
 Each server opens an agent session named by `--name` (defaults `mcp`, `mcp-device` and `mcp-app`) at start, renews its lease and closes it when the client disconnects. After a Relay restart it opens a new session on the next call; claims must then be made again. Claims belong to a session: fly an aircraft with the claim tool of the same server (`relay_claim` or `device_claim`). Arguments are checked before anything reaches Relay; missing or unknown ones come back as `invalid arguments`. Failures come back as tool results with `isError: true` and the error code, so a model can react (for example, wait on `possessed_by_human`).
 
-The application server's tools work while `agents_app_control` is on; they need no operator token. `--operator-token` (or `RELAY_OPERATOR_TOKEN`) is only for calls made as the operator and is normally not needed.
+The application server's tools work while `agents_app_control` is on; they need no operator token. `--operator-token` (or `RELAY_OPERATOR_TOKEN`) is only for calls made as the operator and is normally not needed; `app_set_model`, `app_gimbal_attach` and `app_gimbal_detach` are operator actions and fail with `operator_required` without it.
 
 The application server's program tools that act on an aircraft (`program_deploy`, `program_stop`, `program_resume`, `program_params`) claim it for that server's session; if the flight server's session holds the claim, release it there first (`relay_release_claim`). `program_deploy` with `arm: true` switches to a manual mode and arms before it deploys (a real aircraft also needs `confirm: "ARM"`).
 
@@ -629,12 +741,14 @@ If Relay is not on port 8765, add `"--base", "http://127.0.0.1:<port>"`. The des
 | `stream(timeout=None)` | Generator over WebSocket messages (`hello`, `fleet`, `event`) |
 | `claim(id)` · `unclaim(id)` | Authority |
 | `sticks(id, roll, pitch, yaw, throttle)` · `arm(id, confirm=None)` · `disarm(id)` · `mode(id, name)` | Direct control |
-| `takeoff(id, alt)` · `land(id)` · `hold(id, seconds=0)` · `rtl(id)` · `goto(id, x, y, z, yaw=None)` · `move(id, forward=0, right=0, up=0)` · `yaw(id, deg)` | Skills; `wait=True` blocks until done and raises on failure |
-| `plan(id, steps, name=None, confirm=None, wait=True)` · `cancel_plan(id)` | Plans; waiting raises `plan_failed` when the plan fails or is cancelled |
+| `takeoff(id, alt, speed=None, settle_s=None)` · `land(id)` · `hold(id, seconds=0)` · `rtl(id)` · `goto(id, x, y, z, yaw=None, frame=None, speed=None, settle_s=None)` · `move(id, forward=0, right=0, up=0, *, left, down, x, y, z, frame, speed, settle_s)` · `yaw(id, deg, frame=None)` | Skills; `wait=True` blocks until done and raises on failure. `frame` `"flu"`, `"frd"` or `"relay"`; `None` follows the server's `control_frame`, and the docstrings state how each number is read (named directions of `move` are frame independent). The default timeouts follow `speed` |
+| `plan(id, steps=None, name=None, confirm=None, wait=True, tuning=None, builtin=None)` · `plans_builtin()` · `cancel_plan(id)` | Plans, from `steps` or a ready-made plan (`builtin="du7_box"`); a step may carry `frame`, `speed`, `settle_s`; waiting raises `plan_failed` when the plan fails or is cancelled |
 | `skill(id, name, params, wait)` · `wait_skill(id, skill_id)` | Generic skill call and wait |
 | `course_start(id, course_id)` · `course_stop(id)` · `stop(id)` | Courses and emergency stop |
-| `sticks_for(id, roll, pitch, yaw, throttle, seconds)` · `attitude(id, roll_deg, pitch_deg, yaw_rate_dps, thrust, seconds)` · `velocity(id, vx, vy, vz, yaw_rate_dps, seconds)` | Timed manual, attitude and velocity control (skills) |
+| `sticks_for(id, roll, pitch, yaw, throttle, seconds)` · `attitude(id, roll_deg, pitch_deg, yaw_rate_dps, thrust, seconds)` · `velocity(id, vx, vy, vz, yaw_rate_dps, seconds, reference=None, frame=None)` | Timed manual, attitude and velocity control (skills); `attitude` and sticks do not follow the control frame, `velocity` does |
 | `refly_options(session_id)` · `refly(id, session_id, mode="auto", speed=None, confirm=None, wait=True)` | Re-fly |
+| `gimbal(id)` · `gimbal_do(id, action, **params)` · `gimbal_angle(id, yaw_deg, pitch_deg, space=None)` · `gimbal_rate(id, yaw_dps, pitch_dps)` · `gimbal_zoom(id, level)` · `gimbal_lens(id, lens, pip=None)` · `gimbal_photo(id)` · `gimbal_record(id, on=True)` · `gimbal_look_at(id, x, y, z, frame=None)` · `gimbal_captures(id, limit=None)` | Gimbal pod: view, any action (`gimbal_do` returns `{id, gimbal}`), shortcuts and the capture log |
+| `gimbal_attach(id, transport="tcp", host=None, port=None, device=None, baud=None)` · `gimbal_detach(id)` · `set_model(id, model)` | Operator token: attach or detach a pod, set a real aircraft's model (`anet-du7` or `micro`) |
 | `device(id)` · `message(id, name)` · `param(id, name)` · `params_read(id, names)` · `set_param(id, name, value)` · `commands()` | Device reads and parameter writes |
 | `command(id, command, params, frame, use_int, confirm, timeout_s)` · `motor_test(id, motor, throttle_pct, seconds, confirm)` · `motors_stop(id)` · `actuator(id, index, value, pwm, seconds, confirm)` · `rc(id, channels, axes)` | Raw commands, motors, actuators, RC override |
 | `message_interval(id, message, hz)` · `request_message(id, message)` · `reboot(id, confirm)` · `calibrate(id, sensor, confirm)` · `set_home(id, here, lat, lon, alt)` · `terminate(id, confirm)` | Message rates, reboot, calibration, home, flight termination |
@@ -650,9 +764,9 @@ If Relay is not on port 8765, add `"--base", "http://127.0.0.1:<port>"`. The des
 | `start_twin(profile=None, pack=None, frame=None, home=None, count=1)` · `twin(id)` · `set_frame(id, preset, mass_kg, wheelbase_m, prop_in, cells, capacity_mah)` | Start firmware twins (returns the new ids), read a twin, change a simulator's frame; `home` is `{lat, lon, alt_m}` or `(lat, lon[, alt_m])` |
 | `serial_ports()` · `serial_ports_status()` · `connect(host=None, port=None, serial=None, baud=None)` · `hitl(id, action="status", confirm=None)` | Serial ports, connecting over UDP or a serial port, PX4 hardware in the loop (`start` needs `confirm="HITL"`) |
 | `app()` · `ui_state()` · `gamepads()` · `app_actions()` · `ui(action, **args)` | App and window state, interface actions |
-| `scan_network(networks)` · `connect_vehicle(host, port)` · `remove_vehicle(id)` · `add_sims(count, autopilot, hover_assist)` · `remove_sims(ids)` · `sim_assist(id, on)` · `settings()` · `update_settings(**patch)` · `ack_alert(id)` · `stop_all()` | App operations: made as the session when one is open, otherwise with the operator token |
+| `scan_network(networks)` · `connect_vehicle(host, port)` · `remove_vehicle(id)` · `add_sims(count, autopilot=None, hover_assist=None, frame=None)` · `remove_sims(ids)` · `sim_assist(id, on)` · `settings()` · `update_settings(**patch)` (for example `control_frame="frd"`) · `ack_alert(id)` · `stop_all()` | App operations: made as the session when one is open, otherwise with the operator token. `add_sims` adds ANetDU7s unless `frame` (a preset name or a frame object) says otherwise |
 
-`sdk/python/examples/device_tour.py` shows the device-level interface on a simulator: the device overview and raw command catalogue, single-motor tests with the output PWM read back, then an `attitude` hold after take-off and a landing.
+`sdk/python/examples/du7_box_and_gimbal.py` flies the built-in box plan and drives the gimbal pod. `sdk/python/examples/device_tour.py` shows the device-level interface on a simulator: the device overview and raw command catalogue, single-motor tests with the output PWM read back, then an `attitude` hold after take-off and a landing.
 
 Errors raise `RelayError` with `code`, `status`, `message`, `message_zh` and `detail`. Waiting on a skill raises `skill_failed` when it fails (for example, when an operator takes over) and `skill_superseded` when another skill replaced it. HTTP 429 is retried twice after the `Retry-After` delay.
 
@@ -662,6 +776,7 @@ Errors raise `RelayError` with `code`, `status`, `message`, `message_zh` and `de
 2. Complete the operator steps in the Relay window: verify stick directions without propellers, confirm propellers and the safety net, pass every blocking preflight item.
 3. Replace the vehicle id in your code. Arming needs `confirm: "ARM"`. Position skills (`goto`, `rtl`, courses) need a local position source; without one, use `takeoff`, `hold`, `yaw`, `land` and open-loop `move` in altitude-hold modes, and expect the aircraft to drift slowly while it holds.
 4. Keep an operator at the window. Possession and the stop button override any agent at any time.
+5. An ANetDU7 (`hardware.zh-CN.md`, section ANetDU7, and `vehicles/anet-du7/README.md`): its MAVROS must send MAVLink to Relay's UDP 14550 with a unique `MAV_SYS_ID`, and its pod is attached with `gimbal_attach` (TCP port 2000). Real aircraft are shown as `anet-du7` until the operator sets `micro`; take-off, `move` and `goto` then fly on speed-limited body velocity (0.5 m/s) whenever a position estimate exists, with the monitors above. Fly the first flight with `du7_box` and an operator at the window.
 
 ## 11. Copilot (built-in agent)
 
@@ -676,4 +791,15 @@ The desktop app includes Copilot, a small agent built on [pi](https://github.com
 - **Safety:** every motion command and device write on a real aircraft (take-off, move, turn, hover, land, plans, re-fly, motor tests, actuators, reboot, calibration, termination and others) shows an approval card in the chat, and nothing is sent until the operator approves (120 s without an answer counts as declined); the floating window shows itself and flashes when an approval is waiting. The approval stands in for the confirm word; Copilot never fills one in on its own. Possession and stop work on Copilot exactly as on any other agent.
 - **Allow all (0.5.2):** the approval card's **Allow all** button (or Settings → Copilot → **Allow all**) approves that command and every later one on real aircraft without asking. Each command is still recorded in the chat as approved automatically, and a red **Allow all** badge in the Copilot title bar stays visible while it is on; a click on the badge turns it off. Relay's own gates do not change: preflight, the operator's **Allow programs on this aircraft** switch, possession and emergency stop. Hardware in the loop is the exception: `relay_hitl` start and stop always ask (0.5.4).
 - **Firmware twins and hardware in the loop (0.5.4):** in every scope and at both flight levels Copilot has the twin tools (`relay_autopilots_list`, `relay_firmware_identify`, `relay_twin_profiles_list`, `relay_twin_profile_get`, `relay_twin_profile_capture`, `relay_twin_start`, `relay_twin_status`, `relay_sim_frame`); a twin is a simulator, so they need no approval. In scope `all` it adds `relay_serial_ports`, `app_connect {serial}` and `relay_hitl`. `relay_hitl` start and stop always show an approval card, on any aircraft and also while **Allow all** is on: the card has no **Allow all** button and asks the operator to confirm the propellers are removed. `relay_hitl` status needs no approval.
+- **ANetDU7, control frames and the gimbal (0.6.0):** the flight tools take `frame`, `speed` and `settle_s` where they apply (`relay_takeoff`, `relay_move` with the named directions or `x, y, z`, `relay_yaw`, the steps of `relay_plan` including `goto`, `device_velocity` with `reference`), `relay_plan {builtin: "du7_box"}` and `relay_plans_builtin` fly the ready-made plan (full flight level), and `relay_gimbal_status`, `relay_gimbal_control` and `relay_gimbal_captures` drive the pod in every tool scope and at both flight levels (Copilot claims the aircraft first; a pod moves without an approval card, also on a real aircraft). Its instructions teach `flu` as the default, the sign of each axis and when to pass `frame`; `app_add_sim` takes the aircraft preset. Operator-only calls (setting a real aircraft's model, attaching a pod) are not Copilot tools.
 - **Programs and the flight level:** Copilot reads `agent_flight_level` before every message. At `sticks` (the default) it has no take-off, move, turn, hover, plan or re-fly tools and its instructions say that high-level flight is unavailable and that stable flight needs a program; at `full` it has them again. In every tool scope it has the program tools (`program_list`, `program_get`, `program_create`, `program_update`, `program_validate`, `program_test`, `program_deploy`, `program_stop`, `program_resume`, `program_params`, `program_status`, `program_log`, `challenge_list`, `challenge_submit`, `job_status`, `duel_run`, `ladder`, `airframe_set`) plus `relay_arm`, `relay_disarm` and `relay_mode`, and its instructions end with [`programs-guide.md`](programs-guide.md). Writing and editing programs needs no approval; deploying or resuming a program on a real aircraft, arming it and changing its mode wait for the operator's approval like every other motion. `program_deploy {arm: true}` arms the aircraft with the deployment, and at `full` the plan tools take `tuning` and `relay_plan_tune` retunes a flying sequence, so Copilot can run the whole write, test, fly and tune loop.
+
+## 12. Upgrading from 0.5
+
+The behaviour changes of 0.6.0, and how to get the old behaviour back:
+
+1. **The default simulator is the ANetDU7.** `POST /sims` (and **Add sim**, SDK `add_sims`, MCP `app_sims_add`, Copilot `app_add_sim`) without a frame adds ANetDU7s: 2.5 kg, PX4 flavour, a simulated gimbal pod, take-off, `move` and `goto` on speed-limited body velocity at 0.5 m/s. For the small ArduPilot aircraft of 0.5 pass `frame: {preset: "micro-120"}` (`add_sims(frame="micro-120")`) or set `sim_frame_default` to `micro-120`. Dogfights, judged challenges and built-in programs always use `micro-120` and are unchanged.
+2. **Unnamed axes are read in `flu` by default.** `move {x, y, z}` (new), `velocity {vx, vy, vz, yaw_rate_dps}`, `goto {x, y, z, yaw}` and `yaw {deg}` use the control frame: left and counter-clockwise are positive (before: `yaw {deg}` and `goto yaw` were clockwise and compass; `velocity` was ENU, now it follows the nose unless `reference: "local"`). Named directions (`forward`, `right`, `up`, new `left`, `down`) and `goto x, y, z` in `flu` mean what they meant (east, north, up). To get the old meaning of a call exactly, send `frame: "relay"` (SDK `frame="relay"`, MCP and Copilot `frame`); `control_frame` offers only `flu` and `frd`, so `relay` stays a per-request choice. `skill_started` params are always echoed in `relay` axes.
+3. **Real aircraft are `anet-du7` by default** (`real_model_default`), so take-off, `move` and `goto` with a position estimate fly on speed-limited body velocity at 0.5 m/s with the tracking monitors. Set the aircraft to `micro` (`POST /vehicles/{id}/model`, `set_model`, `app_set_model`) or `real_model_default` to `micro` to keep the autopilot's own setpoints, or pass `speed` explicitly.
+4. **SDK:** `add_sims` no longer sends `autopilot="ardupilot"` (the server picks PX4 for an ANetDU7); `takeoff`, `move` and `goto` compute their wait timeout from `speed`; `plan(steps=None, ..., builtin=)`; `__version__` is 0.6.0.
+5. **New:** the gimbal pod (`vehicle.gimbal`, `/vehicles/{id}/gimbal`, gimbal tools in the flight and app servers, `gimbal_*` SDK methods, Copilot tools), `vehicle.model` and `vehicle.nav`, `GET /plans/builtin` and `du7_box`, events `gimbal_*` and `model_changed`, errors `gimbal_*`, settings `control_frame`, `sim_frame_default`, `real_model_default`, `vehicle_models`. The flight MCP server has 38 tools (29 at the `sticks` level, was 34 and 26) and the app server 70 (was 67).

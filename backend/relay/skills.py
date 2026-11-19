@@ -19,6 +19,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from . import coords
 from . import sequence as sequence_mod
 from .mav import modes
 from .mav.mavlink import M
@@ -56,6 +57,25 @@ VELOCITY_PERIOD_S = 0.1  # velocity setpoints at 10 Hz
 BRAKE_SPEED_MPS = 0.2
 BRAKE_MAX_S = 2.5
 BRAKE_DECEL = 3.0  # m/s2 assumed when looking ahead for the safety volume
+
+# Speed-limited tracking (12 §4): the flight of the ANetDU7 test node ``u7_mavros_simple.py``. The position
+# error becomes a velocity (gain 0.8 1/s, capped at the skill's speed), the commanded velocity changes by at
+# most 0.5 m/s2, and it is sent in the body frame at 20 Hz with a zero yaw rate. A target counts as reached
+# after the aircraft has stayed within 0.2 m horizontally and vertically for ``settle_s``.
+TRACK_SPEED = 0.5
+TRACK_SETTLE_S = 2.0
+TRACK_GAIN = 0.8
+TRACK_ACCEL = 0.5
+TRACK_PERIOD_S = 0.05
+TRACK_TOLERANCE_M = 0.20
+TRACK_PRIME_S = 2.0  # zero-velocity setpoints before arming, as the test node sends them
+TRACK_TILT_DEG = 20.0
+TRACK_JUMP_M = 0.25  # a position step beyond 0.25 m + 1.5 m/s x dt is an estimator reset
+TRACK_JUMP_MPS = 1.5
+TRACK_STALE_S = 1.0  # the test node allows 0.3 s onboard; Relay sees the position over the radio link
+TRACK_OVERSPEED_MPS = 0.5
+TRACK_OVERSPEED_S = 1.0
+TRACK_TURN_DPS = 30.0
 
 REQUIREMENTS = {
     "takeoff": "althold",
@@ -136,6 +156,13 @@ class Skill:
     est_d: float = 0.0
     # throttle tuning of the stick variants: {climb?, hover?} (plans.normalise_tuning); a plan shares its dict
     tuning: dict[str, float] = field(default_factory=dict)
+    # speed-limited tracking (12 §4)
+    track_v: tuple[float, float, float] = (0.0, 0.0, 0.0)  # commanded velocity, ENU m/s
+    track_t: float | None = None  # when the command was last advanced
+    track_last: tuple[float, float, float] | None = None  # last position seen, for the jump check
+    track_last_t: float = 0.0
+    track_stable: float | None = None  # since when the aircraft has been within tolerance
+    track_fast: float | None = None  # since when it has been faster than allowed
 
     @property
     def active(self) -> bool:
@@ -266,6 +293,9 @@ class Skill:
     def _tick_takeoff(self, host: Host, now: float) -> None:
         if self.params.get("_stick"):
             self._tick_takeoff_sticks(host, now)
+            return
+        if self.params.get("_track"):
+            self._tick_takeoff_track(host, now)
             return
         alt = float(self.params["alt"])
         px4 = host.autopilot == modes.PX4
@@ -720,14 +750,27 @@ class Skill:
             return
         p = self.params
         if self.phase == "run":
-            vx, vy, vz = (float(p[k]) for k in ("vx", "vy", "vz"))
+            body = p.get("_body")  # 12 §3.2: (forward, right, up); the direction follows the nose
+            if body is not None:
+                heading = host.heading()
+                if heading is None:
+                    self.fail("no heading", "没有航向")
+                    return
+                vx, vy, vz = coords.fru_to_enu(heading, *(float(c) for c in body))
+            else:
+                vx, vy, vz = (float(p[k]) for k in ("vx", "vy", "vz"))
             box = p.get("_box")
             ahead = tuple(c + _reach(v) for c, v in zip(local, (vx, vy, vz), strict=True))
             if box and not _inside(box, ahead):
                 self._phase("violation", now)
                 return
             rate = p.get("yaw_rate_dps")
-            self._send_velocity(host, now, vx, vy, vz, None if rate is None else math.radians(float(rate)))
+            yaw_rate = None if rate is None else math.radians(float(rate))
+            if body is None:
+                self._send_velocity(host, now, vx, vy, vz, yaw_rate)
+            elif now - self.last_setpoint >= VELOCITY_PERIOD_S:
+                self.last_setpoint = now
+                host.driver.velocity_target_body(float(body[0]), float(body[1]), float(body[2]), yaw_rate)
             if now - self.phase_t >= float(p["seconds"]):
                 self._phase("brake", now)
             return
@@ -747,6 +790,206 @@ class Skill:
             return
         self.last_setpoint = now
         host.driver.velocity_target(vx, vy, vz, yaw_rate)
+
+    # speed-limited tracking (12 §4) -------------------------------------------
+
+    def _track_zero(self, host: Host, now: float) -> None:
+        """A zero body velocity at the tracking rate: the setpoint stream before and between flights."""
+        self.track_v, self.track_t = (0.0, 0.0, 0.0), now
+        if now - self.last_setpoint >= TRACK_PERIOD_S:
+            self.last_setpoint = now
+            host.driver.velocity_target_body(0.0, 0.0, 0.0, 0.0)
+
+    def _track_abort(self, host: Host, en: str, zh: str) -> None:
+        """A monitor tripped: ask the autopilot to land once and fail (the test node does the same)."""
+        if host.autopilot == modes.PX4:
+            host.driver.command_long(M.MAV_CMD_NAV_LAND, (0, 0, 0, math.nan, math.nan, math.nan, math.nan))
+        else:
+            host.driver.set_mode("LAND")
+        self.fail(f"{en}; landing", f"{zh}，已请求降落")
+
+    def _track_fault(self, host: Host, now: float) -> tuple[str, str] | None:
+        """The first tripped monitor of a tracked flight as (en, zh), or None."""
+        tilt = host.tilt()
+        # body z against world z, as the test node computes it from the quaternion
+        limit_cos = math.cos(math.radians(TRACK_TILT_DEG))
+        if tilt is not None and math.cos(tilt[0]) * math.cos(tilt[1]) < limit_cos:
+            return (f"tilt exceeds {TRACK_TILT_DEG:g} deg", f"倾角超过 {TRACK_TILT_DEG:g} 度")
+        local = host.local_enu()
+        if local is None:
+            return ("no local position", "没有本地位置")
+        age = getattr(host, "local_age", None)
+        if age is not None:
+            seconds = age(now)
+            if seconds is not None and seconds > TRACK_STALE_S:
+                return ("position telemetry is stale", "位置遥测已过期")
+        if self.track_last is not None:
+            dt = max(0.0, now - self.track_last_t)
+            if math.dist(local, self.track_last) > TRACK_JUMP_M + TRACK_JUMP_MPS * dt:
+                return ("position jumped; the estimator may have reset", "位置跳变，估计器可能已重置")
+        self.track_last, self.track_last_t = local, now
+        speed = host.speed()
+        limit = float(self.params["_track"]["speed"]) + TRACK_OVERSPEED_MPS
+        if speed is not None and speed > limit:
+            if self.track_fast is None:
+                self.track_fast = now
+            elif now - self.track_fast >= TRACK_OVERSPEED_S:
+                return (f"faster than {limit:g} m/s", f"速度超过 {limit:g} m/s")
+        else:
+            self.track_fast = None
+        return None
+
+    def _track(self, host: Host, now: float, target: tuple[float, float, float]) -> bool:
+        """One step towards ``target`` (local ENU). True once the aircraft has settled on it.
+
+        A tripped monitor fails the skill (and asks for a landing); the caller checks ``self.state``.
+        """
+        fault = self._track_fault(host, now)
+        if fault is not None:
+            self._track_abort(host, *fault)
+            return False
+        local, heading = host.local_enu(), host.heading()
+        assert local is not None
+        if heading is None:
+            self._track_abort(host, "no heading", "没有航向")
+            return False
+        cfg = self.params["_track"]
+        error = tuple(t - c for t, c in zip(target, local, strict=True))
+        desired = tuple(TRACK_GAIN * e for e in error)
+        speed = math.sqrt(sum(c * c for c in desired))
+        cap = float(cfg["speed"])
+        if speed > cap:
+            desired = tuple(c * cap / speed for c in desired)
+        if now - self.last_setpoint >= TRACK_PERIOD_S - 1e-6:
+            dt = TRACK_PERIOD_S if self.track_t is None else min(0.2, max(0.0, now - self.track_t))
+            delta = tuple(d - c for c, d in zip(self.track_v, desired, strict=True))
+            length = math.sqrt(sum(c * c for c in delta))
+            ratio = min(1.0, TRACK_ACCEL * dt / length) if length > 0.0 else 1.0
+            self.track_v = tuple(c + ratio * d for c, d in zip(self.track_v, delta, strict=True))  # type: ignore[assignment]
+            self.track_t = self.last_setpoint = now
+            forward, right, up = coords.enu_to_fru(heading, *self.track_v)
+            host.driver.velocity_target_body(forward, right, up, 0.0)  # no turn, no heading correction
+        arrived = (
+            math.hypot(error[0], error[1]) <= TRACK_TOLERANCE_M and abs(error[2]) <= TRACK_TOLERANCE_M
+        )
+        if not arrived:
+            self.track_stable = None
+            return False
+        if self.track_stable is None:
+            self.track_stable = now
+        return now - self.track_stable >= float(cfg["settle_s"])
+
+    def _tick_takeoff_track(self, host: Host, now: float) -> None:
+        """PX4 with a position estimate: zero-velocity setpoints, arm in POSCTL, OFFBOARD, then climb on
+        body velocity to ``alt`` above the arming point (12 §4)."""
+        alt = float(self.params["alt"])
+        if self.state == "done":
+            if self.target_local is not None:
+                self._track(host, now, self.target_local)
+            return
+        if self.phase == "start":
+            if host.armed and host.landed in ("air", "takeoff"):
+                self.expect_mode = host.mode
+                self.finish("already airborne")
+                return
+            self._phase("mode" if host.mode != "POSCTL" else "prime", now)
+        if self.phase == "mode":
+            self.expect_mode = "POSCTL"
+            self._track_zero(host, now)
+            if self._ensure_mode(host, "POSCTL", now):
+                self._phase("prime", now)
+            return
+        if self.phase == "prime":
+            self.expect_mode = "POSCTL"
+            self._track_zero(host, now)
+            if host.mode != "POSCTL":
+                self.fail(f"mode changed to {host.mode}", f"模式被切换为 {host.mode}")
+            elif now - self.phase_t >= TRACK_PRIME_S:
+                self._phase("arm", now)
+            return
+        if self.phase == "arm":
+            self._track_zero(host, now)
+            if host.mode != "POSCTL":
+                self.fail(f"mode changed to {host.mode}", f"模式被切换为 {host.mode}")
+                return
+            if host.armed or self._ensure_armed(host, now):
+                local = host.local_enu()
+                if local is None:
+                    self.fail("no local position", "没有本地位置")
+                    return
+                # the reference is taken at arming, not earlier: the estimate may creep on the ground
+                self.target_local = (local[0], local[1], local[2] + alt)
+                self.expect_mode = None  # only the POSCTL -> OFFBOARD change is allowed from here
+                self._phase("offboard", now)
+            return
+        if not host.armed:
+            self.fail("disarmed", "已上锁")
+            return
+        if self.phase == "offboard":
+            self._track_zero(host, now)
+            if host.mode not in ("POSCTL", "OFFBOARD"):
+                self.fail(f"mode changed to {host.mode}", f"模式被切换为 {host.mode}")
+            elif self._ensure_mode(host, "OFFBOARD", now):
+                self.expect_mode = "OFFBOARD"
+                self.track_last = None
+                self._phase("climb", now)
+            return
+        if not self._check_running_mode(host):
+            return  # the pilot took over: no more setpoints, no commands
+        assert self.target_local is not None
+        if self._track(host, now, self.target_local):
+            self.finish(f"at {alt:g} m")
+
+    def _tick_goto_track(self, host: Host, now: float) -> None:
+        """goto and closed-loop move on body velocity (12 §4); an optional heading is turned to first."""
+        assert self.target_local is not None
+        px4 = host.autopilot == modes.PX4
+        mode = "OFFBOARD" if px4 else "GUIDED"
+        self.expect_mode = mode
+        if self.state == "done":
+            if px4 or host.mode == mode:
+                self._track(host, now, self.target_local)
+            return
+        if self.phase == "start":
+            self._phase("fly" if host.mode == mode else "prime", now)
+            self.track_last = None
+            if self.phase == "fly" and self.yaw is not None:
+                self.phase = "turn"
+        if not host.armed:
+            self.fail("disarmed", "已上锁")
+            return
+        if self.phase == "prime":
+            self._track_zero(host, now)
+            if now - self.phase_t >= OFFBOARD_PRIME_S:
+                self._phase("mode", now)
+            return
+        if self.phase == "mode":
+            self._track_zero(host, now)
+            if self._ensure_mode(host, mode, now):
+                self._phase("turn" if self.yaw is not None else "fly", now)
+            return
+        if not self._check_running_mode(host):
+            return
+        if self.phase == "turn":
+            heading = host.heading()
+            fault = self._track_fault(host, now)
+            if fault is not None or heading is None:
+                self._track_abort(host, *(fault or ("no heading", "没有航向")))
+                return
+            assert self.yaw is not None
+            error = math.degrees(_wrap(self.yaw - heading))
+            if abs(error) <= YAW_TOLERANCE_DEG:
+                self._phase("fly", now)
+                return
+            if now - self.last_setpoint >= TRACK_PERIOD_S:
+                self.last_setpoint = now
+                rate = math.copysign(min(TRACK_TURN_DPS, max(5.0, abs(error))), error)
+                host.driver.velocity_target_body(0.0, 0.0, 0.0, math.radians(rate))
+            return
+        if self._track(host, now, self.target_local):
+            local = host.local_enu()
+            dist = math.dist(local, self.target_local) if local else 0.0
+            self.finish(f"reached within {dist:.2f} m")
 
     def _tick_rtl(self, host: Host, now: float) -> None:
         if self.phase == "start":
@@ -770,6 +1013,9 @@ class Skill:
 
     def _tick_goto(self, host: Host, now: float) -> None:
         assert self.target_local is not None
+        if self.params.get("_track"):
+            self._tick_goto_track(host, now)
+            return
         px4 = host.autopilot == modes.PX4
         mode = "OFFBOARD" if px4 else "GUIDED"
         self.expect_mode = mode
@@ -1001,8 +1247,9 @@ def make(
     name: str, params: dict[str, Any], now: float, target_local: tuple[float, float, float] | None = None
 ) -> Skill:
     skill = Skill(name=name, params=params, started=now)
+    track = params.get("_track")
     if name == "takeoff":
-        skill.timeout = 30.0
+        skill.timeout = 30.0 if not track else 40.0 + 2.0 * float(params["alt"]) / track["speed"]
     elif name == "land":
         skill.timeout = 90.0
     elif name == "hold":
@@ -1014,6 +1261,8 @@ def make(
         yaw = params.get("yaw")
         skill.yaw = None if yaw is None else math.radians(float(yaw))
         skill.timeout = 15.0 + 2.5 * float(params.get("distance", 3.0))
+        if track:
+            skill.timeout = 30.0 + 2.0 * float(params.get("distance", 3.0)) / track["speed"]
     elif name == "move":
         skill.target_local = target_local
         profile = params.get("_profile")
@@ -1022,6 +1271,8 @@ def make(
         skill.timeout = (
             15.0 + 2.5 * float(params.get("distance", 0.0)) + 2 * t1 + abs(float(params.get("up") or 0)) * 3
         )
+        if track:
+            skill.timeout = 30.0 + 2.0 * float(params.get("distance", 0.0)) / track["speed"]
     elif name == "yaw":
         skill.timeout = 6.0 + abs(float(params["deg"])) / 20.0
     elif name == "sticks":

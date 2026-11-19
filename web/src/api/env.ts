@@ -185,7 +185,7 @@ declare global {
   }
 }
 
-export type FixtureName = 'busy' | 'empty' | 'alerts' | 'dogfight' // WP-C v0.5: dogfight
+export type FixtureName = 'busy' | 'empty' | 'alerts' | 'dogfight' | 'du7' // WP-C v0.5: dogfight; 12: du7
 
 export interface RelayEnv {
   /** REST base ending in /api/v1 */
@@ -218,7 +218,7 @@ function detectPlatform(): string {
 export function readEnv(search: string = typeof location !== 'undefined' ? location.search : ''): RelayEnv {
   const q = new URLSearchParams(search)
   const fx = q.get('fixture')
-  const fixture: FixtureName | null = fx === 'busy' || fx === 'empty' || fx === 'alerts' || fx === 'dogfight' ? fx : null
+  const fixture: FixtureName | null = fx === 'busy' || fx === 'empty' || fx === 'alerts' || fx === 'dogfight' || fx === 'du7' ? fx : null
   const bridge = typeof window !== 'undefined' ? window.relay : undefined
   if (bridge) {
     // null when the shell could not reserve a port (ports_busy); the boot layer explains that state

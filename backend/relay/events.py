@@ -94,6 +94,13 @@ TEMPLATES: dict[str, tuple[str, str]] = {
         "{vehicle} hardware in the loop, step {step}: {reason}.",
         "{vehicle} 硬件在环“{step_zh}”步骤失败：{reason}。",
     ),
+    # gimbal pod (12 §5.2); {detail} from detail_en / detail_zh
+    "gimbal_attached": ("{vehicle} gimbal pod attached: {detail}.", "{vehicle} 已接入云台吊舱：{detail}。"),
+    "gimbal_detached": ("{vehicle} gimbal pod detached.", "{vehicle} 的云台吊舱已断开。"),
+    "gimbal_link": ("{vehicle} gimbal pod link {link}.", "{vehicle} 云台吊舱链路{link_zh}。"),
+    "gimbal_capture": ("{vehicle} took photo {index}.", "{vehicle} 拍照，第 {index} 张。"),
+    "gimbal_record": ("{vehicle} gimbal recording {detail}.", "{vehicle} 云台录像{detail}。"),
+    "gimbal_lens": ("{vehicle} gimbal lens is {lens}.", "{vehicle} 云台镜头切换为 {lens}。"),
     "bridge_configured": (
         "Bridge {host} settings written. The bridge is restarting.",
         "数传 {host} 设置已写入，正在重启。",
@@ -155,6 +162,8 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     "listen_error": ("UDP listen failed: {error}", "UDP 监听失败：{error}"),
     # WP-C simulator flight model (05 §5.2).
     "sim_assist_changed": ("{vehicle} hover assist {detail}.", "{vehicle} 悬停辅助{detail}。"),
+    # 12 §2.2: the operator set what a real aircraft is.
+    "model_changed": ("{vehicle} is now shown as {detail}.", "{vehicle} 的机型已设为 {detail}。"),
     # WP-2a airframe defects (06 §4).
     "sim_airframe_changed": (
         "{vehicle} airframe set to {preset_en} (seed {seed}).",

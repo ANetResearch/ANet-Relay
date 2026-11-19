@@ -466,3 +466,65 @@ loading; buttons keep `Spinner`.
   Arena toggle (`[data-arena-menu]`); form model in `arena/dogfight.ts`.
 - **Fixture** `?fixture=dogfight` (`dev/dogfightFixture.ts`, `&t0=<s>` starts the 24 s loop at that second;
   `window.__relayDogfight.t()` gives the loop time to screenshot scripts).
+
+## 13. v0.6.0 additions (ANetDU7, control frames, gimbal pod; docs/design/12)
+
+- **Aircraft models** (`stage/models.ts`, pure): `ModelId` `'anet-du7' | 'micro'`, `MODELS` mirrors
+  `GET /capabilities → models` (span, height, gimbal, GLB file under `public/models`, propeller disc). `modelOf(v)` reads
+  `vehicle.model`; anything unknown (records, traces, older backends) is the micro. `metrics(model)` is the only place
+  per-aircraft sizes come from: rings, pulse, nose marker, discs, simulator base square, click target, label and altitude
+  label offsets, spawn / pad-slot squares and pitch, fly-to, chase and overview distances. Footprints grow with the span,
+  marks with `presence(span) = (span / 0.166)^0.6`; the micro values are the 0.5 constants. `largest(models)` sizes pad
+  rows (`stage/placement.ts` `slotRow(spawns, safety, {pitch, box}?)`) and the overview framing of a mixed fleet.
+- **Templates** (`stage/scene/model.ts`): `prepareTemplate(scene, model)` merges geometry per material under each
+  articulated node (`Propeller_*_ROTATABLE`, `Gimbal_Yaw`, `Gimbal_Pitch`, `Gimbal_Camera`), keeps those nodes as pivots
+  with their rest orientation in `userData.relayRest` as `[x, y, z, w]` (`restQuaternion()`; `Object3D.clone` copies
+  userData through JSON), puts the feet at y = 0 and reports `lift` (the attitude pivot above the feet).
+  `fallbackTemplate(color, model)` builds the procedural stand-in of either model with the same node names.
+  `StageCanvas` loads every model (`ModelLoader` per id, own error boundary each) and `Fleet` gets
+  `templates: Partial<Record<ModelId, AirframeTemplate>>`; an aircraft whose model changes is rebuilt (key `id:model`).
+- **Mark layer** (`stage/scene/rigState.ts`): `MARK_LAYER = 1`, `markLayer(obj)`. Stage annotations (rings, nose
+  marker, base square, trails, altitude line, line of sight, safety volume, spawn and slot squares) live on it; the stage
+  cameras enable it, the gimbal camera does not. New stage annotations must call `markLayer`.
+- **Gimbal joints** (`stage/scene/Fleet.tsx`): `Gimbal_Yaw` / `Gimbal_Pitch` follow `vehicle.gimbal.yaw_deg / pitch_deg`
+  (yaw right +, pitch up +; `gimbal/model.ts` `gimbalNodeAngles`) with the stage smoothing and a short rate lead;
+  the selected aircraft with its laser on shows a thin line of sight to the range point (off in reduced motion).
+- **Gimbal picture feed** (`gimbal/feed.ts`, no React / three): `openFeed({vehicleId, width, height, fps, draw})`
+  returns the closer; `snapshot(id)` asks for one frame; `feedHost.{mounted, software}` is set by the renderer;
+  `feedSize(cssWidth, dpr, software)` caps 640 × 360 (320 × 180 on software GL), `feedFps` 15 (4 on software GL).
+  `stage/scene/GimbalCamera.tsx` serves open feeds from the stage's frame loop: renders from `Gimbal_Camera` with the
+  view's vertical FOV into an RGBA8 target flagged as an XR target (same tone mapping and sRGB output as the screen,
+  no new programs), sees layer 0 and its own ground on layer 2 (`--scene-pod-ground`), hides the carrying airframe,
+  reuses the last shadow map, reads back asynchronously and maps infrared lenses through the palette
+  (`gimbal/model.ts` `toImage`, `paletteLut`, `heat`). Nothing renders while no feed is open.
+- **Picture-in-picture** (`video/VideoPip.tsx`): one PiP per aircraft; `gimbal/model.ts` `pipSource(pod, bound, chosen)`
+  is the rule: a simulated pod shows its rendered picture (`gimbal/GimbalView.tsx` `GimbalPicture`) with the HUD
+  (`GimbalHud`); with a bound video source too, a GIMBAL | VIDEO switch in the header (`[data-pip-source]`, remembered
+  per aircraft for the session in `gimbal/store.ts` `useGimbalUi.source`); a real (DYT) pod shows the bound video or
+  "No video source" under the HUD; no pod: the bound video as before. Without a drag, a click on the pod's picture
+  sends `track` at the 1280 × 720 pixel (`pictureFromPointer`, operator only). Attributes: `[data-video-pip]`,
+  `[data-pip-shows]`, `[data-video-feed="gimbal"]` once a frame is drawn, `[data-gimbal-hud]`, `[data-gimbal-lens]`.
+- **Captures** (`gimbal/store.ts`): `watchCaptures()` (idempotent; started by `VideoPip` and `GimbalGroup`) turns every
+  `gimbal_capture` event into an in-memory thumbnail (the shown picture, else a snapshot of a simulated pod), the last
+  `THUMBS_KEPT` = 8 per aircraft in `useGimbalUi.thumbs`.
+- **Inspector**: `gimbal/GimbalGroup.tsx` `GimbalGroup` (Overview, above Video; `[data-gimbal="sim|dyt"]`, attach form
+  `[data-gimbal-attach]` for a real aircraft without a pod); `inspector/ModelField.tsx` (Overview "Model": a select for
+  real aircraft → `POST /vehicles/{id}/model`); Telemetry "Control frame" block from `vehicle.nav`
+  (`[data-nav-frame]`). Gimbal request bodies are built in `gimbal/model.ts` (`rateBody`, `zoomBody`, `lensBody`,
+  `trackBody`, `onBody`, `attachBody`); REST helpers `api.gimbal`, `gimbalDo`, `gimbalAttach`, `gimbalDetach`,
+  `gimbalCaptures`, `setModel`, `plansBuiltin`, `planBuiltin`.
+- **Control frames of the window** (`control/frames.ts`): every skill or plan step the window builds with a
+  frame-dependent parameter (`x/y/z`, `vx/vy/vz`, `yaw`, `deg`, `yaw_rate_dps`) goes through `relaySkillArgs` /
+  `relayPlan`, which add `frame: "relay"` (the 0.5 meaning of the buttons and the sequence editor). Named directions
+  need none. New flight requests from the renderer must use these helpers.
+- **Built-in plans** (`control/BuiltinPlans.tsx`, Control tab): `PLANS_FOR[model]` lists ids of `GET /plans/builtin`
+  (`du7_box` for the ANetDU7), title and description from the backend, `POST /vehicles/{id}/plan {builtin}` with the
+  usual ARM confirmation on an unarmed real aircraft (`[data-builtin-plan]`).
+- **Simulator dialog** (`twin/SimDialog.tsx`, `twin/model.ts`): the Model row (`[data-sim-aircraft="anet-du7|small"]`)
+  starts from `sim_frame_default`; `withAircraft`, `defaultAutopilot` (ANetDU7 → PX4 until the user picks one,
+  `SimForm.autopilotSet`). The quick add of "Fly the ring course" sends no frame (follows the setting).
+- **Settings** section `aircraft` (`SettingsSection`, `appctl` `SETTINGS_SECTIONS`): `control_frame`,
+  `sim_frame_default` (`[data-sim-frame-default]`), `real_model_default`.
+- **Fixture** `?fixture=du7` (`dev/du7Fixture.ts`): two ANetDU7 simulators (SIM-1 orbits SIM-2 with its pod tracking
+  it), a Micro 120 simulator, a real ANetDU7 with a DYT pod, a real ANetDU7 without position or pod, a real micro; the
+  REST stand-in answers the gimbal, captures, model and built-in plan routes (in every fixture).

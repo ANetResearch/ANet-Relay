@@ -15,6 +15,7 @@ import {
   ArrowUpToLine, ArrowDownToLine, RotateCw, ListOrdered, Sparkles, SendHorizontal, Hourglass, KeyRound, Stethoscope,
   FlaskConical, Code, Save, ListChecks, Swords, Trophy, GitCompare, CopyPlus, Undo2, Redo2, Scissors, Circle,
   Download, Upload, ZoomIn, ZoomOut, ChartNoAxesGantt, BetweenHorizontalStart, Cpu, Usb, Package, PackagePlus,
+  Camera, CircleDot, LocateFixed, Minus, Palette, PictureInPicture2, Ruler, Unplug, Plug,
 } from 'lucide'
 import type { IconNode } from './types'
 
@@ -137,6 +138,18 @@ export const ICONS = {
   'usb': Usb,
   'pack': Package,
   'pack.import': PackagePlus,
+  // gimbal pod (12 §5.5)
+  'gimbal.photo': Camera,
+  'gimbal.record': CircleDot,
+  'gimbal.center': LocateFixed,
+  'gimbal.laser': Ruler,
+  'gimbal.palette': Palette,
+  'gimbal.view': PictureInPicture2,
+  'gimbal.attach': Plug,
+  'gimbal.detach': Unplug,
+  'zoom.in': ZoomIn,
+  'zoom.out': ZoomOut,
+  'minus': Minus,
 } as const satisfies Record<string, IconNode>
 
 export type IconKey = keyof typeof ICONS

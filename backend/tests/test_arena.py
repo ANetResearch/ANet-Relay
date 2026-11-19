@@ -153,7 +153,7 @@ def test_hits_shoot_down_without_alert_and_respawn(svc, stepper):
     ids = boot(svc, stepper, 2)  # sim-1 at (0, 0), sim-2 two metres east
     join(svc, stepper)
     session, agent = take_off(svc, stepper, ids)
-    svc.run_skill("sim-1", agent, "yaw", {"deg": 90})
+    svc.run_skill("sim-1", agent, "yaw", {"deg": -90})  # flu: clockwise is negative; the nose turns east
     assert stepper.until(lambda: svc.vehicles["sim-1"].skill.state == "done", 10, [session])
     # park sim-2 1.5 m ahead of sim-1's nose at its height (the goto target is in the shared sim frame)
     shooter = svc.vehicles["sim-1"]

@@ -28,8 +28,13 @@ except ImportError:  # running from the repository checkout
 
 __all__ = [
     "DEFAULT_BASE",
+    "CONTROL_FRAME",
+    "CONVENTION",
     "FRAME",
     "HOME",
+    "REFERENCE",
+    "SETTLE_S",
+    "SPEED",
     "VID",
     "WAIT",
     "McpServer",
@@ -44,19 +49,63 @@ __all__ = [
     "schema_tool",
 ]
 
-SERVER_VERSION = "0.5.4"
+SERVER_VERSION = "0.6.0"
 PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 SESSION_ERRORS = ("session_expired", "session_required", "auth_required")
 
 VID = {"type": "string", "description": "Vehicle id from relay_fleet, e.g. sim-1 or real-10-7-7-36"}
 WAIT = {"type": "boolean", "description": "Wait until the skill finishes (default true)", "default": True}
 
+# 12 §3: the control frame of the numbers of a skill. Every tool that takes x / y / z, vx / vy / vz, yaw, deg or
+# yaw_rate_dps states the table in CONVENTION so that a model cannot misread a sign.
+CONVENTION = (
+    "Axes follow `frame`, omitted: the server's control_frame setting (flu unless the operator changed it). "
+    "flu (default): body x forward, y LEFT, z up; local x east, y north, z up; yaw 0 along +x (east), "
+    "counter-clockwise positive. frd: body forward, RIGHT, down; local north, east, down; yaw is the compass "
+    "heading (0 north), clockwise positive. relay: the axes before 0.6, body forward, right, up; local east, "
+    "north, up; compass heading, clockwise positive. The named directions forward, right, left, up and down "
+    "mean the same in every frame."
+)
+CONTROL_FRAME = {
+    "type": "string",
+    "enum": ["flu", "frd", "relay"],
+    "description": "control frame of the numbers of this call; omitted: the server's control_frame setting (flu "
+    "unless changed). flu: forward-left-up body, east-north-up local, yaw 0 along +x counter-clockwise; frd: "
+    "forward-right-down body, north-east-down local, yaw 0 north clockwise; relay: forward-right-up body, "
+    "east-north-up local, compass yaw clockwise (the axes before 0.6)",
+}
+REFERENCE = {
+    "type": "string",
+    "enum": ["body", "local"],
+    "description": "body (default; local in the relay frame): the velocity follows the nose; local: along "
+    "the local axes of the frame",
+}
+SPEED = {
+    "type": "number",
+    "minimum": 0.1,
+    "maximum": 5,
+    "description": "m/s: fly on speed-limited body velocity at most this fast (the ANetDU7 does so by default "
+    "at 0.5; other aircraft use the autopilot's own setpoints unless this is given)",
+}
+SETTLE_S = {
+    "type": "number",
+    "minimum": 0,
+    "maximum": 10,
+    "description": "with speed tracking: seconds the aircraft must stay within 0.2 m before the step counts as "
+    "done (default 2)",
+}
+
 # 11 §5, §8.1: the physics frame of a simulator or firmware twin; omitted values keep the preset's
 FRAME = {
     "type": "object",
-    "description": "physics frame: a preset and any of its values (omitted: the profile's or micro-120)",
+    "description": "physics frame: a preset and any of its values. Omitted: a twin takes its profile's frame or "
+    "micro-120, a simulator the sim_frame_default setting (anet-du7, the ANetDU7 with a gimbal pod)",
     "properties": {
-        "preset": {"type": "string", "enum": ["micro-120", "small-250", "large-450"]},
+        "preset": {
+            "type": "string",
+            "enum": ["anet-du7", "micro-120", "small-250", "large-450"],
+            "description": "anet-du7: ANetDU7, 2.5 kg, 500 mm; the others are the small aircraft",
+        },
         "mass_kg": {"type": "number", "exclusiveMinimum": 0},
         "wheelbase_m": {"type": "number", "exclusiveMinimum": 0},
         "prop_in": {"type": "number", "exclusiveMinimum": 0},

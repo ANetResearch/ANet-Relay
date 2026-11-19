@@ -7,6 +7,8 @@ possession, records, Copilot window, screenshots) are forwarded to the open Rela
 ``POST /app/ui`` (04 §3); the rest wrap the existing fleet, network, settings, alert and record routes.
 Fleet, network, settings and alert calls are app operations: an agent session may run them while
 agents_app_control is on (the default); the operator token (--operator-token) is never required for them.
+Three tools are operator-only (``auth="operator"``): ``app_set_model``, ``app_gimbal_attach`` and
+``app_gimbal_detach``; without ``--operator-token`` (or ``$RELAY_OPERATOR_TOKEN``) they fail with operator_required.
 """
 
 from __future__ import annotations
@@ -45,7 +47,10 @@ INSTRUCTIONS = (
     "they work while agents_app_control is on and fail with app_control_disabled (403) when it is off. "
     "Safety: app_possess takes manual control of an aircraft as the operator and displaces agents; use it "
     "only when asked. app_stop_all cuts the motors of every aircraft. app_remove_vehicle and the sim "
-    "tools change the fleet. relay_hitl runs PX4 hardware in the loop on a real aircraft: only on the person's "
+    "tools change the fleet. A new simulator is an ANetDU7 with a gimbal pod unless app_sims_add names a small "
+    "frame preset; the control_frame setting (flu or frd) is the convention of every flight tool's numbers. "
+    "app_set_model, app_gimbal_attach and app_gimbal_detach are operator actions: they need --operator-token "
+    "and fail with operator_required without it. relay_hitl runs PX4 hardware in the loop on a real aircraft: only on the person's "
     "explicit request, with the propellers removed. Flight and device control live in the anet-relay and "
     "anet-relay-device servers. "
     + PROGRAM_INSTRUCTIONS
@@ -377,12 +382,20 @@ def build_tools() -> list[Tool]:
         ),
         http_tool(
             "app_sims_add",
-            APP + "Add simulated aircraft (1..8).",
+            APP + "Add simulated aircraft (1..8). Without `frame` they are ANetDU7s (the sim_frame_default setting; "
+            "2.5 kg, 500 mm, a simulated gimbal pod, PX4 flavour unless `autopilot` says otherwise); "
+            "frame.preset micro-120, small-250 or large-450 adds the small aircraft (ArduPilot flavour by "
+            "default, no pod). Dogfights and judged challenges always use micro-120.",
             "POST",
             "/sims",
             {
                 "count": {"type": "integer", "minimum": 1, "maximum": 8, "default": 1},
-                "autopilot": {"type": "string", "enum": ["ardupilot", "px4"], "default": "ardupilot"},
+                "autopilot": {
+                    "type": "string",
+                    "enum": ["ardupilot", "px4"],
+                    "description": "omitted: px4 for an ANetDU7, ardupilot for the small presets (a twin: its "
+                    "profile's or pack's firmware)",
+                },
                 "position": {
                     "type": "boolean",
                     "default": True,
@@ -443,8 +456,51 @@ def build_tools() -> list[Tool]:
             ["vehicle", "on"],
         ),
         http_tool(
+            "app_set_model",
+            "Operator action (needs the operator token, --operator-token): what a real aircraft is shown and "
+            "flown as, anet-du7 or micro, remembered per airframe. The ANetDU7 flies take-off, move and goto "
+            "on speed-limited body velocity (0.5 m/s) by default and carries a gimbal pod. A simulator's model "
+            "follows its frame (invalid_request).",
+            "POST",
+            "/vehicles/{vehicle}/model",
+            {"vehicle": VID, "model": {"type": "string", "enum": ["anet-du7", "micro"]}},
+            ["vehicle", "model"],
+            auth="operator",
+        ),
+        http_tool(
+            "app_gimbal_attach",
+            "Operator action (needs the operator token, --operator-token): attach a gimbal pod. A real aircraft: "
+            "transport tcp with host (the pod's TCP port 2000 by default) or serial with device (baud 115200). "
+            "A simulator: transport sim. Replaces the pod the aircraft has. Control the pod with "
+            "relay_gimbal_control.",
+            "POST",
+            "/vehicles/{vehicle}/gimbal/attach",
+            {
+                "vehicle": VID,
+                "transport": {"type": "string", "enum": ["tcp", "serial", "sim"]},
+                "host": {"type": "string", "description": "tcp: the pod's address"},
+                "port": {"type": "integer", "minimum": 1, "maximum": 65535, "default": 2000},
+                "device": {"type": "string", "description": "serial: /dev/ttyUSB0, COM5"},
+                "baud": {"type": "integer", "minimum": 1200, "maximum": 3000000, "default": 115200},
+            },
+            ["vehicle", "transport"],
+            auth="operator",
+        ),
+        http_tool(
+            "app_gimbal_detach",
+            "Operator action (needs the operator token, --operator-token): detach the aircraft's gimbal pod and "
+            "close its link.",
+            "DELETE",
+            "/vehicles/{vehicle}/gimbal",
+            {"vehicle": VID},
+            ["vehicle"],
+            auth="operator",
+            destructive=True,
+        ),
+        http_tool(
             "app_settings_get",
-            "Application settings (including agents_app_control and safety volume).",
+            "Application settings (including agents_app_control, safety volume, control_frame, "
+            "sim_frame_default, real_model_default and vehicle_models).",
             "GET",
             "/settings",
             read_only=True,
@@ -452,8 +508,11 @@ def build_tools() -> list[Tool]:
         schema_tool(
             "app_settings_set",
             APP + "Update application settings; send only the keys to change (see app_settings_get "
-            "for names and types). agents_app_control is granted and withdrawn by the operator in the "
-            "window only; a change to it from an agent fails with operator_required.",
+            "for names and types). control_frame (flu default | frd) is the convention of the numbers of every "
+            "flight tool that does not pass `frame`; sim_frame_default (anet-du7 default | micro-120 | "
+            "small-250 | large-450) is what app_sims_add adds without a frame; real_model_default (anet-du7 | "
+            "micro) is what real aircraft are shown as. agents_app_control is granted and withdrawn by the "
+            "operator in the window only; a change to it from an agent fails with operator_required.",
             {"settings": {"type": "object", "minProperties": 1, "description": "settings keys to change"}},
             ["settings"],
             handler=_settings_set,

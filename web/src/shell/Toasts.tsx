@@ -44,6 +44,9 @@ function useEventToasts() {
           const lang = useLangStore.getState().lang
           const course = (lang === 'zh' ? v.course?.name_zh : v.course?.name_en) ?? v.course?.course_id ?? ''
           notify(t('course.agentFinished', { agent: v.claim.name, course, time: String(e.data?.total_text ?? '') }))
+        } else if (e.kind === 'gimbal_link' && (e.data?.link === 'lost' || e.data?.link === 'ok')) {
+          // 12 §5.3: a real pod's link going down and coming back (the backend text names the aircraft)
+          notify(pickText(useLangStore.getState().lang, e.text_en, e.text_zh), { level: e.data.link === 'lost' ? 'warn' : 'info' })
         } else if (e.kind === 'procedure_finished' || e.kind === 'procedure_aborted') {
           // WP-B: the end of a bench procedure (the backend template names the aircraft and the verdict)
           notify(pickText(useLangStore.getState().lang, e.text_en, e.text_zh), { level: e.kind === 'procedure_aborted' ? 'warn' : 'info' })

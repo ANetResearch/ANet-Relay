@@ -15,8 +15,10 @@ import { Grid, OriginCross, ShadowCatcher } from './Ground'
 import { GroundContact, Lights } from './Lights'
 import { PadSlots, SafetyVolume, SpawnPoints } from './Markers'
 import { isSoftwareGL, stageQuality } from './gpu'
-import { fallbackTemplate, MODEL_URL, prepareTemplate } from './model'
+import { fallbackTemplate, prepareTemplate, type AirframeTemplate } from './model'
+import { GimbalCamera } from './GimbalCamera'
 import { markStageModelReady } from '../loading'
+import { MODEL_IDS, modelUrl, type ModelId } from '../models'
 
 /** Exposure that keeps the GoFilm 20's grey plastics readable on g950 under the 02 §6.1 light levels. */
 const EXPOSURE = 1.35
@@ -35,20 +37,24 @@ export const imageTextures: NonNullable<Parameters<typeof useGLTF>[3]> = (loader
   })
 }
 
-function Model() {
-  const gltf = useGLTF(MODEL_URL, false, false, imageTextures)
-  const template = React.useMemo(() => prepareTemplate(gltf.scene), [gltf.scene])
-  React.useEffect(() => markStageModelReady(), [])
-  return <Fleet template={template} />
+type Templates = Partial<Record<ModelId, AirframeTemplate>>
+
+/** Loads one model's GLB (cached by drei for the window's lifetime) and hands its template up. */
+function ModelLoader({ model, onReady }: { model: ModelId; onReady(model: ModelId, t: AirframeTemplate): void }) {
+  const gltf = useGLTF(modelUrl(model), false, false, imageTextures)
+  const template = React.useMemo(() => prepareTemplate(gltf.scene, model), [gltf.scene, model])
+  React.useEffect(() => onReady(model, template), [model, template, onReady])
+  return null
 }
 
-function FallbackModel() {
-  const template = React.useMemo(() => fallbackTemplate(token('g300').color), [])
-  React.useEffect(() => markStageModelReady(), [])
-  return <Fleet template={template} />
+/** The procedural stand-in of a model whose file failed. */
+function FallbackLoader({ model, onReady }: { model: ModelId; onReady(model: ModelId, t: AirframeTemplate): void }) {
+  const template = React.useMemo(() => fallbackTemplate(token('g300').color, model), [model])
+  React.useEffect(() => onReady(model, template), [model, template, onReady])
+  return null
 }
 
-class ModelBoundary extends React.Component<{ children: React.ReactNode; onError(): void }, { failed: boolean }> {
+class ModelBoundary extends React.Component<{ children: React.ReactNode; model: ModelId; onReady(model: ModelId, t: AirframeTemplate): void; onError(): void }, { failed: boolean }> {
   override state = { failed: false }
   static getDerivedStateFromError() {
     return { failed: true }
@@ -57,8 +63,33 @@ class ModelBoundary extends React.Component<{ children: React.ReactNode; onError
     this.props.onError()
   }
   override render() {
-    return this.state.failed ? <FallbackModel /> : this.props.children
+    return this.state.failed ? <FallbackLoader model={this.props.model} onReady={this.props.onReady} /> : this.props.children
   }
+}
+
+/**
+ * Every model's template (12 §2.2): each GLB loads on its own, so a missing or broken file costs only its own
+ * procedural stand-in; the fleet draws an aircraft once its model's template is in.
+ */
+function Models({ onModelError }: { onModelError(): void }) {
+  const [templates, setTemplates] = React.useState<Templates>({})
+  const onReady = React.useCallback((model: ModelId, t: AirframeTemplate) => setTemplates((s) => (s[model] === t ? s : { ...s, [model]: t })), [])
+  const settled = MODEL_IDS.every((m) => templates[m])
+  React.useEffect(() => {
+    if (settled) markStageModelReady()
+  }, [settled])
+  return (
+    <>
+      {MODEL_IDS.map((m) => (
+        <ModelBoundary key={m} model={m} onReady={onReady} onError={onModelError}>
+          <React.Suspense fallback={null}>
+            <ModelLoader model={m} onReady={onReady} />
+          </React.Suspense>
+        </ModelBoundary>
+      ))}
+      <Fleet templates={templates} />
+    </>
+  )
 }
 
 /** WebGL may be unavailable (no GPU, blocked driver): keep the rest of the window working and say so. */
@@ -127,11 +158,9 @@ export function StageCanvas({ children, onModelError }: { children?: React.React
           <SafetyVolume />
           <SpawnPoints />
           <PadSlots />
-          <ModelBoundary onError={onModelError}>
-            <React.Suspense fallback={null}>
-              <Model />
-            </React.Suspense>
-          </ModelBoundary>
+          <Models onModelError={onModelError} />
+          {/* 12 §5.5: the gimbal pod's picture, only while a feed asks for it */}
+          <GimbalCamera light={soft} />
           {children}
         </Canvas>
       </CanvasBoundary>

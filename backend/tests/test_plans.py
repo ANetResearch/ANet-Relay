@@ -72,7 +72,8 @@ def test_demo_plan_flies_end_to_end(svc, stepper, flavour, position):
         assert abs(forward - 1.0) < 0.2 and back < 0.25
     else:  # open loop: an estimate, but in the right direction and roughly the right size
         assert 0.7 <= forward <= 1.4 and back <= 0.4
-    assert abs(heading_change(marks[4][1], marks[5][1]) - 45.0) <= 5.0
+    # yaw 45 in the default control frame (flu) is counter-clockwise: the compass heading falls (12 §3)
+    assert abs(heading_change(marks[4][1], marks[5][1]) + 45.0) <= 5.0
     kinds = [e["kind"] for e in svc.events.after(0, 2000)]
     assert kinds.count("plan_step") == 6 and "plan_finished" in kinds
 
@@ -133,7 +134,11 @@ def test_plan_validation():
     with pytest.raises(RelayError):
         plans.normalise_steps([{"action": "yaw", "deg": 720}])
     with pytest.raises(RelayError):
-        plans.normalise_steps([{"action": "takeoff", "speed": 3}])
+        plans.normalise_steps([{"action": "takeoff", "speed": 30}])  # 12 §4: speed is 0.1 to 5 m/s
+    with pytest.raises(RelayError):
+        plans.normalise_steps([{"action": "hover", "speed": 1}])
+    with pytest.raises(RelayError):
+        plans.normalise_steps([{"action": "move", "forward": 1, "frame": "ned"}])
     steps = plans.normalise_steps([{"action": "takeoff"}, {"action": "hover"}])
     assert steps == [{"action": "takeoff", "alt": 1.0}, {"action": "hover", "seconds": 3.0}]
 

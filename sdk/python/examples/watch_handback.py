@@ -78,7 +78,7 @@ def main() -> None:
             seq = relay.last_seq()
             target = (cx + radius * math.sin(angle), cy + radius * math.cos(angle), args.alt)
             try:
-                relay.goto(vid, *target)
+                relay.goto(vid, *target, frame="flu")
             except RelayError as exc:
                 if exc.code not in PAUSED:
                     raise

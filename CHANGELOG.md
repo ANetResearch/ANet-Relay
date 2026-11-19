@@ -5,6 +5,128 @@ All notable changes to ANet Relay are documented in this file. The format follow
 [Semantic Versioning](https://semver.org/). Each release section is published as the
 GitHub Release notes for its tag.
 
+## [0.6.0] - 2026-11-19
+
+The ANetDU7 becomes the main aircraft: the default simulator, a gimbal pod that
+people, agents and Copilot can drive, control frames that default to FLU, and
+the speed-limited flight of its onboard test node. The small aircraft stay
+available.
+
+### Added
+
+- **ANetDU7** (2.5 kg, 500 mm wheelbase, 684 × 684 × 211 mm with its guard
+  frame, CUAV X7+ running PX4). `vehicle.model` is `anet-du7` or `micro`. The
+  simulator has an `anet-du7` frame preset (10 inch propellers, 4S 5300 mAh,
+  guard-frame drag) and flies the PX4 flavour unless an autopilot is named;
+  `GET /capabilities` lists the model sizes the stage draws. Real aircraft are
+  shown as `anet-du7` (setting `real_model_default`) until the operator sets
+  them with `POST /vehicles/{id}/model` (event `model_changed`).
+- **Control frames.** Skills and plan steps read their numbers in a control
+  frame: the new setting `control_frame` (`flu` by default, or `frd`) or a
+  request's `frame` (`flu`, `frd` or `relay`). FLU is forward-left-up in the
+  body, east-north-up locally, yaw 0 along +x and counter-clockwise positive;
+  FRD is forward-right-down, north-east-down, compass yaw, clockwise positive;
+  `relay` is Relay's own axes, the meaning before 0.6. `move` also takes `x`,
+  `y`, `z` and the named directions `left` and `down`; `velocity` takes
+  `reference` (`body`, so the direction follows the nose, or `local`). The
+  named directions are the same in every frame. `skill_started` params are
+  echoed in `relay` axes, so a recorded skill flies the same route under any
+  setting. `vehicle.nav` reports position, velocity, body velocity, yaw and
+  yaw rate in the control frame; `GET /capabilities` adds `control_frame`,
+  `control_frames`, `models` and `sim_frame_default`.
+- **Speed-limited flight.** `takeoff`, `move` and `goto` take `speed` (0.1 to 5
+  m/s) and `settle_s`; the ANetDU7 flies them that way by default at 0.5 m/s,
+  as its onboard test node `u7_mavros_simple.py` does: a position error
+  becomes a body velocity (gain 0.8, capped, 0.5 m/s² acceleration limit, 20
+  Hz, no yaw correction), PX4 arms in POSCTL after two seconds of zero
+  velocity and switches to OFFBOARD, and the target counts when the aircraft
+  stays within 0.2 m for `settle_s`. Monitors for a tilt over 20°, a position
+  jump, position telemetry older than 1 s and overspeed ask the autopilot to
+  land and fail the skill; a mode changed from outside ends it without
+  further setpoints.
+- **Ready-made plans.** `GET /plans/builtin` and `POST /vehicles/{id}/plan
+  {"builtin": "du7_box"}`: take off to 2 m, 1 m forward and back, 1 m left and
+  back, land, at 0.5 m/s.
+- **Gimbal pod.** `vehicle.gimbal` with `GET`/`POST`/`DELETE
+  /vehicles/{id}/gimbal`, `POST /vehicles/{id}/gimbal/attach` and `GET
+  /vehicles/{id}/gimbal/captures`. ANetDU7 simulators carry a simulated pod;
+  a real DYT pod attaches over TCP (port 2000) or serial. One set of 25
+  actions drives both: rate, angle, centre, follow and lock, zoom, lens
+  (visible zoom, visible wide, infrared zoom, infrared fixed) with a
+  picture-in-picture lens, palette, photo, record, track, laser, focus,
+  enhance, OSD, low light, scan, geo-track and `look_at` (a local point in the
+  control frame). Pod angles are the pod's own (yaw right, pitch up) and do not
+  follow the control frame. Allowed at every agent flight level for the
+  session that controls the aircraft. The DYT protocol (control frames,
+  telemetry, carrier attitude, network wrapper) is implemented and tested
+  against its documented examples and a replayed fake pod. Photos and
+  recording changes are logged with the aircraft's pose.
+  Events `gimbal_attached`, `gimbal_detached`, `gimbal_link`,
+  `gimbal_capture`, `gimbal_record`, `gimbal_lens`; errors `gimbal_missing`,
+  `gimbal_offline`, `gimbal_unsupported`, `gimbal_busy`.
+- **The stage and the window** draw the ANetDU7 model at real size with
+  turning rotors and a pod that follows `vehicle.gimbal`, render the pod's
+  picture-in-picture, and offer the aircraft preset in the Add simulator
+  dialog and the control frame in Settings.
+- **Copilot, MCP and SDK.**
+  - Flight MCP server and Copilot: `relay_gimbal_status`,
+    `relay_gimbal_control` and `relay_gimbal_captures` (also at the sticks
+    level), `relay_plans_builtin` and `builtin` on `relay_plan`; `frame`,
+    `speed` and `settle_s` on `relay_takeoff`, `relay_move`, `relay_goto` (MCP)
+    and plan steps, `frame` on `relay_yaw`, `left`, `down` and `x`, `y`, `z` on
+    `relay_move`, `goto` steps in plans; `relay_fleet` shows `model`, `nav` and
+    a gimbal summary. The flight server now has 38 tools, 29 at the sticks
+    level. `device_velocity` takes `frame` and `reference`.
+  - App MCP server: `app_sims_add` takes the aircraft preset
+    (`frame.preset`), `app_settings_set` documents `control_frame`,
+    `sim_frame_default` and `real_model_default`, and the operator actions
+    `app_set_model`, `app_gimbal_attach` and `app_gimbal_detach` (they need
+    `--operator-token`). The app server now has 70 tools.
+  - The SDK adds `gimbal()`, `gimbal_do()`, `gimbal_angle()`,
+    `gimbal_rate()`, `gimbal_zoom()`, `gimbal_lens()`, `gimbal_photo()`,
+    `gimbal_record()`, `gimbal_look_at()`, `gimbal_captures()`,
+    `gimbal_attach()`, `gimbal_detach()`, `plans_builtin()`, `set_model()`,
+    `plan(builtin=)`, `frame`, `reference`, `speed` and `settle_s` on the
+    flight methods, `left`, `down`, `x`, `y`, `z` on `move()`, and
+    `add_sims(frame=)`. New example `du7_box_and_gimbal.py`.
+- **`vehicles/anet-du7/`** holds everything about the aircraft: the onboard
+  workspace, the interface documents, the DYT gimbal protocol notes, the
+  real-aircraft test node and how to connect it to Relay. The two branches of
+  the onboard repository `auto-lcx/yix_drone_ws` (`main`, the earlier
+  workspace with its UI, maps and drivers, and `new_u7_src`, the ANetDU7
+  onboard stack) were merged with their full history into
+  `vehicles/anet-du7/onboard/main` and `vehicles/anet-du7/onboard/new_u7_src`;
+  the code is independent of Relay's build and installers. The hardware guide
+  has an ANetDU7 section with the first-flight checklist.
+
+### Changed
+
+- **A new simulator is an ANetDU7**, in PX4 flavour, with a simulated gimbal
+  pod and speed-limited flight, instead of the 120 g ArduPilot-style aircraft.
+  For the small aircraft pass `frame: {"preset": "micro-120"}` (or
+  `small-250`, `large-450`) to `POST /sims`, or set `sim_frame_default`.
+  Dogfights, judged challenges, duels and the built-in programs always use
+  `micro-120` and behave as before; firmware twins keep their profile's frame.
+- **Parameters without a named direction are read in FLU by default**:
+  `yaw {deg}` and the heading of `goto` are counter-clockwise from east
+  (before: clockwise, compass), `velocity` follows the nose (before: east,
+  north, up) and its `vy` is left, and `yaw_rate_dps` of `velocity` is
+  counter-clockwise. `forward`, `right` and `up` and the stick values are
+  unchanged. Send `frame: "relay"` (SDK `frame="relay"`) to get the old
+  meaning of any call exactly; the ring course numbers are in those axes, and
+  `course_sim.py` passes it.
+- **Real aircraft are `anet-du7` until set otherwise**, so take-off, `move` and
+  `goto` with a position estimate fly on speed-limited body velocity at 0.5
+  m/s with the new monitors. Set the aircraft or `real_model_default` to
+  `micro` to keep the autopilot's own setpoints.
+- The SDK's `add_sims` no longer sends `autopilot="ardupilot"` by default (the
+  server chooses PX4 for an ANetDU7), and `takeoff`, `move` and `goto` derive
+  their wait timeout from `speed`.
+- Frame presets are `anet-du7`, `micro-120`, `small-250` and `large-450`.
+- Descriptions of the flight tools in the MCP servers, Copilot and the SDK
+  state the control frame; Copilot's instructions teach FLU and when to pass
+  `frame`.
+
 ## [0.5.4] - 2026-11-09
 
 Firmware twins fly the official PX4 and ArduPilot firmware against Relay's

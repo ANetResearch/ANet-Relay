@@ -315,6 +315,19 @@ CATALOGUE: dict[str, tuple[int, str, str]] = {
         "Hardware in the loop is not available: {reason}.",
         "硬件在环不可用：{reason_zh}。",
     ),
+    # gimbal pod (12 §5.2)
+    "gimbal_missing": (404, "{vehicle} has no gimbal pod.", "{vehicle} 没有云台吊舱。"),
+    "gimbal_offline": (
+        409,
+        "The gimbal pod {address} is not answering.",
+        "云台吊舱 {address} 没有响应。",
+    ),
+    "gimbal_unsupported": (
+        409,
+        "The gimbal pod cannot do that: {reason}.",
+        "吊舱不支持此操作：{reason_zh}。",
+    ),
+    "gimbal_busy": (409, "The gimbal pod is busy: {reason}.", "吊舱忙：{reason_zh}。"),
     "hitl_restore_mismatch": (
         409,
         "{count} parameters differ from the hardware-in-the-loop backup; the backup file is kept.",

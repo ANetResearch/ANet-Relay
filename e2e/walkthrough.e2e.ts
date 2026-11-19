@@ -222,7 +222,8 @@ for (const size of SIZES) {
         await page.keyboard.press('Escape')
 
         // fleet: four simulators, two fake aircraft (one without a position estimate), one agent
-        await rest(r, 'POST', '/sims', { count: 4 })
+        // the small ArduPilot quads of 0.5 (the keyboard steps below use ALT_HOLD); 12 §2.2 made the ANetDU7 the default
+        await rest(r, 'POST', '/sims', { count: 4, frame: { preset: 'micro-120' } })
         children.push(await startFake({ autopilot: 'ardupilot', host: '127.0.0.2', udpPort: bridgePort, httpPort, gcs: `127.0.0.1:${listenPort}` }))
         children.push(await startFake({ autopilot: 'px4', host: '127.0.0.3', udpPort: bridgePort, httpPort, gcs: `127.0.0.1:${listenPort}`, noPosition: true }))
         const agent = startPython(

@@ -42,7 +42,13 @@ export interface SlotRow {
   y: number
   /** ENU east coordinate of the row centre */
   cx: number
+  /** slot pitch and square side when a larger airframe than the micro sits in the row (stage/models.ts) */
+  pitch?: number
+  box?: number
 }
+
+/** Side of the dashed pad-slot square of a row. */
+export const SLOT_BOX = 0.4
 
 /** Spawn of a simulator by id (sim-3 -> third grid point) when the backend detail is not known. */
 export function fallbackSpawn(id: string): [number, number] | null {
@@ -56,17 +62,19 @@ export function fallbackSpawn(id: string): [number, number] | null {
  * The pad row depends only on static things (spawn points and the safety volume), so slots never wander while
  * aircraft fly.
  */
-export function slotRow(spawns: readonly [number, number][], safety: { x: number; y: number }): SlotRow {
+export function slotRow(spawns: readonly [number, number][], safety: { x: number; y: number }, size?: { pitch: number; box: number }): SlotRow {
   const ys = spawns.map((s) => s[1])
   const xs = spawns.map((s) => s[0])
-  const south = Math.min(0, ...ys) - safety.y / 2 - SLOT_MARGIN
+  // a larger square keeps the same gap to the flying area
+  const grow = size ? Math.max(0, (size.box - SLOT_BOX) / 2) : 0
+  const south = Math.min(0, ...ys) - safety.y / 2 - SLOT_MARGIN - grow
   const cx = xs.length ? (Math.min(...xs) + Math.max(...xs)) / 2 : 0
-  return { y: south, cx }
+  return size ? { y: south, cx, pitch: size.pitch, box: size.box } : { y: south, cx }
 }
 
 /** Position of slot i of n in the row. */
 export function slotPosition(row: SlotRow, i: number, n: number): [number, number] {
-  return [row.cx + (i - (n - 1) / 2) * SLOT_SPACING, row.y]
+  return [row.cx + (i - (n - 1) / 2) * (row.pitch ?? SLOT_SPACING), row.y]
 }
 
 /** gap between two frames drawn side by side (02 §6.3) */
@@ -177,10 +185,10 @@ export function addPoint(b: Bounds, x: number, y: number, z = 0): Bounds {
 /**
  * Bounds grown to a minimum footprint around their centre. 02 §6.5 asks for at least 4 x 4 m; with a single
  * aircraft that would leave it at 2 % of the frame width while the same row asks for about a tenth, so one
- * aircraft (and nothing else to frame) uses a 0.8 m footprint instead.
+ * aircraft (and nothing else to frame) uses a 0.8 m footprint instead (`single`, larger for a larger model).
  */
-export function framed(b: Bounds, aircraft: number): Bounds {
-  const min = aircraft === 1 && b.count <= 1 ? 0.8 : 4
+export function framed(b: Bounds, aircraft: number, single = 0.8): Bounds {
+  const min = aircraft === 1 && b.count <= 1 ? single : 4
   if (b.count === 0) return { minX: -min / 2, maxX: min / 2, minY: -min / 2, maxY: min / 2, maxZ: 0, count: 0 }
   const cx = (b.minX + b.maxX) / 2
   const cy = (b.minY + b.maxY) / 2

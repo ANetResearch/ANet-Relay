@@ -27,15 +27,24 @@ def _agent_flight_level(request, monkeypatch):
     """06 §5: sessions fly with sticks only by default. The tests written before that rule (and the ones
     that are not about it) fly sessions with every skill, so their fleets run at ``full``; tests of the
     default level are marked ``sticks_level``."""
-    if request.node.get_closest_marker("sticks_level"):
+    sticks = request.node.get_closest_marker("sticks_level")
+    product = request.node.get_closest_marker("product_defaults")
+    if sticks and product:
         return
     init = FleetService.__init__
 
-    def full(self, *args, **kwargs):
+    def legacy(self, *args, **kwargs):
         init(self, *args, **kwargs)
-        self.settings.agent_flight_level = "full"
+        if not sticks:
+            self.settings.agent_flight_level = "full"
+        if not product:
+            # 12 §2.2: a new simulator is an ANetDU7 flying the PX4 flavour. The tests written before that
+            # (and the ones that are not about it) add "a simulator" and mean the small ArduPilot aircraft,
+            # so their fleets keep micro-120 as the default; tests of the product default are marked
+            # ``product_defaults``.
+            self.settings.sim_frame_default = "micro-120"
 
-    monkeypatch.setattr(FleetService, "__init__", full)
+    monkeypatch.setattr(FleetService, "__init__", legacy)
 
 
 class FakeClock:

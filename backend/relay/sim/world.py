@@ -33,6 +33,13 @@ from .physics import DT, MASS
 Vec3 = tuple[float, float, float]
 
 PAIR_DISTANCE = 2.0 * collide.CRAFT_RADIUS
+DU7_RADIUS = 0.342  # 12 §2: half the 684 mm span of the ANetDU7 with its cage
+
+
+def craft_radius(sim: Any) -> float:
+    """The collision sphere of a simulator: the ANetDU7's cage, else the small aircraft's 15 cm."""
+    frame = getattr(getattr(sim, "quad", None), "frame", None)
+    return DU7_RADIUS if getattr(frame, "preset", None) == "anet-du7" else collide.CRAFT_RADIUS
 EVENT_GAP_S = 0.25  # one report per pair while a bounce settles; a crash is always reported
 REPORT_V = 0.2  # m/s: slower contacts (one aircraft resting on another) are resolved but not reported
 CONTACT_MEMORY_S = 1.0  # how long obs.collision shows a contact
@@ -211,7 +218,8 @@ class World:
                 sb = b.sim.quad.s
                 if (sa.on_ground and sb.on_ground) or (sa.crashed and sb.crashed):
                     continue  # resting on the ground, or two wrecks
-                hit = collide.sweep_spheres(a0, a1, b0, b1, PAIR_DISTANCE)
+                rb = craft_radius(b.sim)
+                hit = collide.sweep_spheres(a0, a1, b0, b1, craft_radius(a.sim) + rb)
                 if hit is None:
                     continue
                 ca = tuple(a0[c] + (a1[c] - a0[c]) * hit for c in range(3))
@@ -227,7 +235,7 @@ class World:
                 if closing <= 0.0:
                     continue
                 crash = collide.crashes(closing)
-                point = tuple(cb[c] + n[c] * collide.CRAFT_RADIUS for c in range(3))
+                point = tuple(cb[c] + n[c] * rb for c in range(3))
                 crashed = [x.id for x, s in ((a, sa), (b, sb)) if crash and not s.crashed]
                 self.apply_contact(a, dva, n, point, closing, b.id, b.label, crash, t)  # type: ignore[arg-type]
                 neg = (-n[0], -n[1], -n[2])
@@ -247,7 +255,7 @@ class World:
                 continue
             for key, _ring, centre, normal, radius in solid:
                 hit = collide.sweep_torus(
-                    p0, p1, centre, normal, radius, collide.RING_TUBE, collide.CRAFT_RADIUS
+                    p0, p1, centre, normal, radius, collide.RING_TUBE, craft_radius(body.sim)
                 )
                 if hit is None:
                     continue

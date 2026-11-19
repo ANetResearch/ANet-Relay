@@ -15,7 +15,7 @@ import math
 from typing import TYPE_CHECKING, Any
 
 from .. import authority as auth
-from .. import device, preflight
+from .. import device, plans, preflight
 from ..authority import Actor
 from ..errors import RelayError, err
 from ..fleet_device import MOTOR_TEST_S, REAL_MOTOR_PCT
@@ -221,9 +221,13 @@ class Context:
         self.run.prev_armed = self.v.armed
 
     def run_plan(self, steps: list[dict[str, Any]], confirm: str | None, name: str) -> None:
-        self.fleet.run_plan(self.v.id, self.actor, steps, name, confirm)
+        self.fleet.run_plan(self.v.id, self.actor, plans.native(steps), name, confirm)
 
     def run_skill(self, name: str, params: dict[str, Any]) -> None:
+        # bench procedures are written in Relay's own axes, whatever the control_frame setting is
+        params = dict(params)
+        if name in ("move", "yaw", "goto", "velocity"):
+            params.setdefault("frame", "relay")
         self.fleet.run_skill(self.v.id, self.actor, name, params)
 
     def human_override(self) -> bool:

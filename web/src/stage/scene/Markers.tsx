@@ -8,10 +8,12 @@ import { useT } from '@/i18n'
 import { useUi } from '@/store/ui'
 import { anyPositioned, live, safetyOriginFor } from '../live'
 import { enuToScene } from '../math'
-import { slotPosition } from '../placement'
+import { slotPosition, SLOT_BOX } from '../placement'
+import { metrics } from '../models'
 import { useStage } from '../store'
 import { token } from '../tokens'
 import { dashedSquare } from './Aircraft'
+import { markLayer } from './rigState'
 
 /** Re-renders only when the string key computed in the frame loop changes. */
 function useFrameKey(compute: () => string): string {
@@ -38,7 +40,7 @@ export function SafetyVolume() {
     floor.position.y = 0.0008
     floor.renderOrder = -1
     floor.raycast = () => {}
-    return { edges, floor }
+    return { edges: markLayer(edges), floor: markLayer(floor) }
   }, [])
 
   useFrame(() => {
@@ -67,16 +69,16 @@ export function SafetyVolume() {
   )
 }
 
-function SpawnBox({ n, x, y }: { n: number; x: number; y: number }) {
+function SpawnBox({ n, x, y, size }: { n: number; x: number; y: number; size: number }) {
   const obj = React.useMemo(() => {
-    const l = dashedSquare(0.4, token('g700').color, 0.04, 0.03)
-    return l
-  }, [])
+    const k = size / 0.4
+    return dashedSquare(size, token('g700').color, 0.04 * k, 0.03 * k)
+  }, [size])
   const [sx, , sz] = enuToScene(x, y, 0)
   return (
     <group position={[sx, 0.0015, sz]}>
       <primitive object={obj} />
-      <Html position={[0.2, 0, 0.2]} zIndexRange={[4, 0]} style={{ pointerEvents: 'none' }}>
+      <Html position={[size / 2, 0, size / 2]} zIndexRange={[4, 0]} style={{ pointerEvents: 'none' }}>
         <span className="stage-tag stage-tag-corner">{n}</span>
       </Html>
     </group>
@@ -84,9 +86,10 @@ function SpawnBox({ n, x, y }: { n: number; x: number; y: number }) {
 }
 
 export function SpawnPoints() {
+  // the square fits the simulator that spawned there (12 §2.2: an ANetDU7 needs a larger one)
   const key = useFrameKey(() =>
     [...live.spawns.entries()]
-      .map(([id, [x, y]]) => `${id}:${x}:${y}`)
+      .map(([id, [x, y]]) => `${id}:${x}:${y}:${metrics(live.targets.get(id)?.model ?? 'micro').spawnBox.toFixed(3)}`)
       .sort()
       .join('|'),
   )
@@ -94,9 +97,9 @@ export function SpawnPoints() {
     () =>
       key
         ? key.split('|').map((s) => {
-            const [id, x, y] = s.split(':')
+            const [id, x, y, size] = s.split(':')
             const n = Number(/(\d+)$/.exec(id)?.[1] ?? 0)
-            return { id, n, x: Number(x), y: Number(y) }
+            return { id, n, x: Number(x), y: Number(y), size: Number(size) }
           })
         : [],
     [key],
@@ -104,20 +107,23 @@ export function SpawnPoints() {
   return (
     <>
       {spawns.map((s) => (
-        <SpawnBox key={s.id} n={s.n} x={s.x} y={s.y} />
+        <SpawnBox key={s.id} n={s.n} x={s.x} y={s.y} size={s.size} />
       ))}
     </>
   )
 }
 
-function SlotBox({ x, y }: { x: number; y: number }) {
+function SlotBox({ x, y, size }: { x: number; y: number; size: number }) {
   const t = useT()
-  const obj = React.useMemo(() => dashedSquare(0.4, token('g600').color, 0.035, 0.025), [])
+  const obj = React.useMemo(() => {
+    const k = size / SLOT_BOX
+    return dashedSquare(size, token('g600').color, 0.035 * k, 0.025 * k)
+  }, [size])
   const [sx, , sz] = enuToScene(x, y, 0)
   return (
     <group position={[sx, 0.0015, sz]}>
       <primitive object={obj} />
-      <Html position={[0, 0, 0.2]} zIndexRange={[4, 0]} style={{ pointerEvents: 'none' }}>
+      <Html position={[0, 0, size / 2]} zIndexRange={[4, 0]} style={{ pointerEvents: 'none' }}>
         <span className="stage-tag stage-tag-below">{t('stage.noPosition')}</span>
       </Html>
     </group>
@@ -128,14 +134,14 @@ export function PadSlots() {
   const key = useFrameKey(() => {
     let n = 0
     for (const tg of live.targets.values()) if (tg.kind === 'slot') n++
-    return `${n}:${live.row.y.toFixed(2)}:${live.row.cx.toFixed(2)}`
+    return `${n}:${live.row.y.toFixed(2)}:${live.row.cx.toFixed(2)}:${(live.row.pitch ?? 0).toFixed(3)}:${(live.row.box ?? SLOT_BOX).toFixed(3)}`
   })
-  const [n, y, cx] = key.split(':').map(Number)
-  const slots = Array.from({ length: n }, (_, i) => slotPosition({ y, cx }, i, n))
+  const [n, y, cx, pitch, box] = key.split(':').map(Number)
+  const slots = Array.from({ length: n }, (_, i) => slotPosition({ y, cx, pitch: pitch || undefined }, i, n))
   return (
     <>
       {slots.map(([x, sy], i) => (
-        <SlotBox key={i} x={x} y={sy} />
+        <SlotBox key={i} x={x} y={sy} size={box} />
       ))}
     </>
   )

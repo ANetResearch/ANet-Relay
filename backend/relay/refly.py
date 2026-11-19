@@ -70,7 +70,8 @@ def plan_steps(
                 if isinstance(step.get(axis), (int, float)):
                     step[axis] = step[axis] + delta
     try:
-        return plans.normalise_steps(_strip(steps), MAX_STEPS)
+        # recorded parameters are in Relay's own axes (records from before v0.6 carry no frame)
+        return plans.normalise_steps(plans.native(_strip(steps)), MAX_STEPS)
     except Exception:  # a record the plan rules no longer accept offers no plan
         return None
 
@@ -172,7 +173,7 @@ def path_steps(
         )
     if path["to_ground"]:
         steps.append({"action": "land"})
-    return plans.normalise_steps(steps, MAX_STEPS)
+    return plans.normalise_steps(plans.native(steps), MAX_STEPS)
 
 
 def stick_rows(detail: dict[str, Any]) -> dict[str, Any] | None:

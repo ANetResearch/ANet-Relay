@@ -1,7 +1,7 @@
 // Device tools (04 §2, §6.2): one tool per device-level endpoint, down to a single motor, actuator or MAVLink
 // command. Names match the device MCP server (device_*). Tools with a danger level fill in the confirm word
 // themselves: the operator's approval in the chat is the confirmation for a real aircraft (agent.mjs gates them).
-import { defineTool, enc, flightHelpers, Type, VID } from "./tools-common.mjs";
+import { CONVENTION, defineTool, enc, FRAME_ARG, flightHelpers, Type, VID } from "./tools-common.mjs";
 
 const num = (d, o = {}) => Type.Number({ description: d, ...o });
 const opt = (t) => Type.Optional(t);
@@ -235,7 +235,7 @@ export function deviceTools(relay, danger = dangerResolver(relay)) {
     defineTool(
       "device_attitude",
       "Attitude target",
-      "Hold a roll / pitch attitude with a yaw rate and thrust for seconds (up to 10), then return to altitude hold. Aircraft must be armed and airborne.",
+      "Hold a roll (right +) / pitch (nose up +) attitude with a clockwise-positive yaw rate and thrust for seconds (up to 10), then return to altitude hold; independent of the control frame. Aircraft must be armed and airborne.",
       Type.Object({
         vehicle: VID,
         roll_deg: num("-30..30", { minimum: -30, maximum: 30 }),
@@ -249,16 +249,21 @@ export function deviceTools(relay, danger = dangerResolver(relay)) {
     defineTool(
       "device_velocity",
       "Velocity target",
-      "Fly a velocity (ENU, m/s, each at most 2) for seconds (up to 10). Needs a position estimate and stays inside the safety volume.",
+      "Fly a velocity (m/s, each at most 2) for seconds (up to 10). reference body (the default; local in the relay frame) reads vx, vy, vz along the aircraft's axes, so the direction follows the nose; local reads them along the local axes. " +
+        CONVENTION +
+        " Needs a position estimate and stays inside the safety volume.",
       Type.Object({
         vehicle: VID,
-        vx: num("East m/s", { minimum: -2, maximum: 2 }),
-        vy: num("North m/s", { minimum: -2, maximum: 2 }),
-        vz: num("Up m/s", { minimum: -2, maximum: 2 }),
-        yaw_rate_dps: opt(num("-90..90", { minimum: -90, maximum: 90 })),
+        vx: num("m/s along x: body forward, or local east (flu) / north (frd)", { minimum: -2, maximum: 2 }),
+        vy: num("m/s along y: body LEFT in flu (right in frd and relay); local north (flu) / east (frd)", { minimum: -2, maximum: 2 }),
+        vz: num("m/s along z: up in flu and relay, DOWN in frd", { minimum: -2, maximum: 2 }),
+        yaw_rate_dps: opt(num("-90..90 deg/s: counter-clockwise positive in flu, clockwise in frd and relay", { minimum: -90, maximum: 90 })),
+        reference: opt(Type.Union([Type.Literal("body"), Type.Literal("local")])),
+        frame: opt(FRAME_ARG),
         seconds: num("(0, 10]", { minimum: 0.1, maximum: 10 }),
       }),
-      (p, ctx) => skill(p.vehicle, "velocity", { vx: p.vx, vy: p.vy, vz: p.vz, yaw_rate_dps: p.yaw_rate_dps, seconds: p.seconds }, ctx.signal),
+      (p, ctx) =>
+        skill(p.vehicle, "velocity", { vx: p.vx, vy: p.vy, vz: p.vz, yaw_rate_dps: p.yaw_rate_dps, ...(p.reference ? { reference: p.reference } : {}), ...(p.frame ? { frame: p.frame } : {}), seconds: p.seconds }, ctx.signal),
     ),
     defineTool(
       "device_message_interval",

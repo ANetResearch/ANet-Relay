@@ -2,7 +2,7 @@
 // {"error": {code, message_en, message_zh, detail}} become RelayApiError. The transport is swappable so the dev
 // fixture (src/dev/fixtures.ts) can serve the same calls without a backend.
 import { env } from './env'
-import type { Alert, AutopilotPack, AutopilotPacks, ErrorBody, Fleet, Health, ProcedureCatalogue, ProcedureRun, SimAirframe, SimFrame, SimTwin, TestRuns, TwinProfile, TwinProfiles, Vehicle, VehicleFirmware } from './types'
+import type { Alert, AutopilotPack, AutopilotPacks, ErrorBody, Fleet, GimbalView, Health, ProcedureCatalogue, ProcedureRun, SimAirframe, SimFrame, SimTwin, TestRuns, TwinProfile, TwinProfiles, Vehicle, VehicleFirmware } from './types'
 import type { HitlAction, HitlStatus, SerialBaud, SerialPorts } from './hitl'
 import type { RelayEvent } from './events'
 
@@ -92,8 +92,27 @@ export type PossessInput = { input: 'keyboard' | 'screen' | 'gamepad'; pad?: num
 export type Ok = { ok?: boolean } & Record<string, unknown>
 export type SkillName = 'takeoff' | 'land' | 'hold' | 'rtl' | 'goto' | 'move' | 'yaw'
 export type PlanAction = 'takeoff' | 'hover' | 'hold' | 'move' | 'yaw' | 'land' | 'goto' | 'rtl'
-/** One plan step (03 §5.8): takeoff {alt}, hover {seconds}, move {forward, right, up}, yaw {deg}, land. */
-export type PlanStep = { action: PlanAction; alt?: number; seconds?: number; forward?: number; right?: number; up?: number; deg?: number }
+/**
+ * Control frame of a request (12 §3.1): flu / frd, or relay = Relay's own axes (forward / right / up body, ENU local,
+ * compass heading, clockwise +), the pre-0.6 meaning. Omitted: the control_frame setting.
+ */
+export type RequestFrame = 'flu' | 'frd' | 'relay'
+/** One plan step (03 §5.8, 12 §3): takeoff {alt}, hover {seconds}, move {forward, right, up | left, down}, yaw {deg}, land. */
+export type PlanStep = { action: PlanAction; alt?: number; seconds?: number; forward?: number; right?: number; up?: number; left?: number; down?: number; deg?: number; x?: number; y?: number; z?: number; yaw?: number; speed?: number; frame?: RequestFrame }
+/** A ready-made plan of GET /plans/builtin (12 §4). */
+export type BuiltinPlan = { id: string; title: string; title_zh?: string; description?: string; description_zh?: string; steps: PlanStep[] }
+/** A capture of GET /vehicles/{id}/gimbal/captures (12 §5.2), newest last. */
+export type GimbalCapture = {
+  seq: number
+  kind: 'photo' | 'record_start' | 'record_stop'
+  t: number
+  nav: Record<string, unknown> | null
+  gimbal: Record<string, number | null>
+  lens: GimbalView['lens']
+  zoom: number | null
+  laser_range_m: number | null
+  target: { lat: number; lon: number; alt: number } | null
+}
 /** Throttle sticks of the stick steps (aircraft without a position estimate): lift-off and climb, height hold. */
 export type PlanTuning = { climb?: number; hover?: number }
 
@@ -133,6 +152,17 @@ export const api = {
     op<Ok>('POST', `/vehicles/${enc(id)}/skills/${name}`, args ?? {}),
   plan: (id: string, steps: PlanStep[], opts?: { name?: string; confirm?: string; tuning?: PlanTuning }) =>
     op<Ok>('POST', `/vehicles/${enc(id)}/plan`, { steps, ...opts }),
+  // 12 §4: ready-made plans (du7_box)
+  plansBuiltin: () => request<{ plans: BuiltinPlan[] }>('GET', '/plans/builtin'),
+  planBuiltin: (id: string, builtin: string, opts?: { confirm?: string }) => op<Ok>('POST', `/vehicles/${enc(id)}/plan`, { builtin, ...opts }),
+  // 12 §2.2: what a real aircraft is shown and flown as (operator)
+  setModel: (id: string, model: Vehicle['model']) => op<{ id: string; model: Vehicle['model'] }>('POST', `/vehicles/${enc(id)}/model`, { model }),
+  // 12 §5: gimbal pod
+  gimbal: (id: string) => request<GimbalView>('GET', `/vehicles/${enc(id)}/gimbal`),
+  gimbalDo: (id: string, body: { action: string } & Record<string, unknown>) => op<{ id: string; gimbal: GimbalView }>('POST', `/vehicles/${enc(id)}/gimbal`, body),
+  gimbalAttach: (id: string, body: Record<string, unknown>) => op<{ id: string; gimbal: GimbalView }>('POST', `/vehicles/${enc(id)}/gimbal/attach`, body),
+  gimbalDetach: (id: string) => op<{ id: string; detached: boolean }>('DELETE', `/vehicles/${enc(id)}/gimbal`),
+  gimbalCaptures: (id: string, limit = 20) => request<{ id: string; total: number; captures: GimbalCapture[] }>('GET', `/vehicles/${enc(id)}/gimbal/captures?limit=${limit}`),
   tunePlan: (id: string, tuning: PlanTuning) => op<Ok>('PATCH', `/vehicles/${enc(id)}/plan/tuning`, tuning),
   cancelPlan: (id: string) => op<Ok>('POST', `/vehicles/${enc(id)}/plan/cancel`),
   // stick timelines, .ars (10 §2)
@@ -203,7 +233,7 @@ export const api = {
 } as const
 
 /** A simulator frame (11 §8.1): a preset and any of its values; omitted values keep the preset's. */
-export type FrameBody = { preset?: 'micro-120' | 'small-250' | 'large-450'; mass_kg?: number; wheelbase_m?: number; prop_in?: number; cells?: number; capacity_mah?: number }
+export type FrameBody = { preset?: 'anet-du7' | 'micro-120' | 'small-250' | 'large-450'; mass_kg?: number; wheelbase_m?: number; prop_in?: number; cells?: number; capacity_mah?: number }
 /** A twin's home: latitude, longitude and altitude above mean sea level. */
 export type HomeBody = { lat: number; lon: number; alt_m?: number }
 /** POST /twins/profiles (11 §5): capture from a connected aircraft, or recapture into `profile`. */

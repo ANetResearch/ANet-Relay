@@ -85,6 +85,39 @@ function SensorsTable({ sensors }: { sensors: Vehicle['sensors'] }) {
   )
 }
 
+/** Axis names of the control frames (12 §3): body and local x / y / z. */
+const NAV_AXES = {
+  flu: { body: ['nav.forward', 'nav.left', 'nav.up'], local: ['tele.east', 'tele.north', 'tele.up'] },
+  frd: { body: ['nav.forward', 'nav.right', 'nav.down'], local: ['tele.north', 'tele.east', 'nav.down'] },
+} as const
+
+const fixed = (n: number | null | undefined, d: number, unit: string) => (typeof n === 'number' && Number.isFinite(n) ? `${signed(n, 1, d)} ${unit}` : null)
+
+/** vehicle.nav (12 §3.3): the pose in the control frame the agents use, with the frame's axis names. */
+function NavBlock({ v, t }: { v: Vehicle; t: T }) {
+  const nav = v.nav
+  if (!nav) return null
+  const axes = NAV_AXES[nav.frame === 'frd' ? 'frd' : 'flu']
+  const noPos = t('value.reason.noPosition')
+  const p = nav.position
+  const bv = nav.body_velocity
+  return (
+    <Block title={t('nav.title')} right={<span className="num text-[10px] font-[560] tracking-[0.06em] text-[var(--g300)]" data-nav-frame={nav.frame}>{nav.frame.toUpperCase()}</span>}>
+      <KvList>
+        {(['x', 'y', 'z'] as const).map((k, i) => (
+          <Kv key={k} label={`${k} · ${t(axes.local[i] as AnyKey)}`} value={fixed(p?.[i], 2, 'm')} reason={noPos} />
+        ))}
+        {(['vx', 'vy', 'vz'] as const).map((k, i) => (
+          <Kv key={k} label={`${t('nav.body')} ${k} · ${t(axes.body[i] as AnyKey)}`} value={fixed(bv?.[i], 2, 'm/s')} reason={noPos} />
+        ))}
+        <Kv label={t('nav.yaw')} value={typeof nav.yaw_deg === 'number' ? `${nav.yaw_deg.toFixed(1)}°` : null} reason={t('value.reason.noData')} />
+        <Kv label={t('nav.yawRate')} value={fixed(nav.yaw_rate_dps, 1, '°/s')} reason={t('value.reason.noData')} />
+      </KvList>
+      <p className="text-hud-sub text-[var(--g500)]">{t(nav.frame === 'frd' ? 'nav.hint.frd' : 'nav.hint.flu')}</p>
+    </Block>
+  )
+}
+
 function Values({ v, t }: { v: Vehicle; t: T }) {
   const len = useLength()
   const notLive = v.link.state !== 'ok' && v.link.state !== 'delayed'
@@ -126,6 +159,7 @@ function Values({ v, t }: { v: Vehicle; t: T }) {
           <Kv label={t('tele.altAmsl')} value={len(v.global?.alt, 1)} reason={t('value.reason.noGps')} />
         </KvList>
       </Block>
+      <NavBlock v={v} t={t} />
       <Block title={t('tele.battery')}>
         <KvList>
           <Kv label={t('tele.voltage')} value={volts(b.voltage)} reason={r('SYS_STATUS')} />

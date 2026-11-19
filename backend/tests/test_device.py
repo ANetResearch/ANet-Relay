@@ -436,7 +436,10 @@ def test_velocity_skill_moves_a_position_aircraft_and_holds(svc, stepper, flavou
     fly(svc, stepper, vid, v, session, agent)
     s = true_state(v)
     x0, y0 = s.p[0], s.p[1]
-    svc.run_skill(vid, agent, "velocity", {"vx": 0.5, "vy": 0.0, "vz": 0.0, "seconds": 2})
+    # 12 §3: the local reference in the default frame (flu) is ENU; x is east
+    svc.run_skill(
+        vid, agent, "velocity", {"vx": 0.5, "vy": 0.0, "vz": 0.0, "seconds": 2, "reference": "local"}
+    )
     assert stepper.until(lambda: v.skill.state != "running", 15, [session])
     assert v.skill.state == "done", v.skill.detail
     assert s.p[0] - x0 > 0.6 and abs(s.p[1] - y0) < 0.4

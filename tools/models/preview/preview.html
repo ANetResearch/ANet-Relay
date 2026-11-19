@@ -1,0 +1,139 @@
+<!doctype html>
+<!-- Model preview for tools/models: the stage's light rig (web/src/stage/scene/Lights.tsx, StageCanvas.tsx) around one
+     model, driven by shoot.mjs through window.view(). Served from the repo root by shoot.mjs. -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>html, body { margin: 0; background: #0A0B0D; overflow: hidden; } canvas { display: block; }</style>
+<script type="importmap">
+{ "imports": {
+  "three": "/web/node_modules/three/build/three.module.js",
+  "three/addons/": "/web/node_modules/three/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'three'
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { STLLoader } from 'three/addons/loaders/STLLoader.js'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
+renderer.toneMapping = THREE.ACESFilmicToneMapping
+renderer.toneMappingExposure = 1.35
+renderer.outputColorSpace = THREE.SRGBColorSpace
+renderer.shadowMap.enabled = true
+renderer.shadowMap.type = THREE.PCFSoftShadowMap
+document.body.appendChild(renderer.domElement)
+
+const g = (hex) => new THREE.Color(hex)
+const scene = new THREE.Scene()
+scene.background = g('#0A0B0D')
+// Lights.tsx: hemisphere g200 / g950 at 0.6, directional key 1.4 from (2.4, 5.2, 2.4) above the target
+const hemi = new THREE.HemisphereLight(g('#CACDD3'), g('#0A0B0D'), 0.6)
+scene.add(hemi)
+const key = new THREE.DirectionalLight(0xffffff, 1.4)
+key.position.set(2.4, 5.2, 2.4)
+key.castShadow = true
+Object.assign(key.shadow.camera, { left: -1, right: 1, top: 1, bottom: -1, near: 0.5, far: 16 })
+key.shadow.camera.updateProjectionMatrix()
+key.shadow.mapSize.set(2048, 2048)
+key.shadow.bias = -0.0004
+key.shadow.normalBias = 0.01
+scene.add(key, key.target)
+// Ground.tsx: shadow catcher plus a faint 0.5 m grid
+const catcher = new THREE.Mesh(new THREE.PlaneGeometry(10, 10), new THREE.ShadowMaterial({ opacity: 0.28, transparent: true, depthWrite: false }))
+catcher.rotation.x = -Math.PI / 2
+catcher.receiveShadow = true
+scene.add(catcher)
+const grid = new THREE.GridHelper(10, 40, 0x3E4249, 0x2A2D32)
+grid.material.transparent = true
+grid.material.opacity = 0.6
+scene.add(grid)
+
+const camera = new THREE.PerspectiveCamera(30, 1, 0.01, 50)
+let model = null
+const cache = new Map()
+
+// Same merge as web/src/stage/scene/model.ts prepareTemplate: static meshes merged per material, propellers kept as
+// pivots; the gimbal subtree is kept as is so its pivots can still be posed.
+function mergeLikeStage(scene) {
+  scene.updateMatrixWorld(true)
+  const groups = new Map(), keep = []
+  scene.traverse((o) => {
+    if (!o.isMesh) return
+    if (/^Propeller_.*_ROTATABLE/.test(o.name)) return keep.push(o)
+    for (let p = o.parent; p; p = p.parent) if (p.name === 'Gimbal_Yaw') return
+    const geo = o.geometry.clone().applyMatrix4(o.matrixWorld)
+    const k = o.material.uuid
+    if (!groups.has(k)) groups.set(k, { material: o.material, geos: [] })
+    groups.get(k).geos.push(geo)
+  })
+  const out = new THREE.Group()
+  for (const { material, geos } of groups.values()) out.add(new THREE.Mesh(mergeGeometries(geos, false), material))
+  for (const o of keep) { const c = o.clone(); o.matrixWorld.decompose(c.position, c.quaternion, c.scale); out.add(c) }
+  const gy = scene.getObjectByName('Gimbal_Yaw')
+  if (gy) { const c = gy.clone(true); gy.parent.matrixWorld.clone().multiply(gy.matrix).decompose(c.position, c.quaternion, c.scale); out.add(c) }
+  return out
+}
+
+async function load(url, merged) {
+  const key = `${url}|${merged ? 1 : 0}`
+  if (cache.has(key)) return cache.get(key)
+  let obj
+  if (url.endsWith('.stl')) {
+    const geo = await new STLLoader().loadAsync(url)
+    geo.computeVertexNormals()
+    obj = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xb0b4ba, roughness: 0.55, metalness: 0.1, side: THREE.DoubleSide }))
+    obj.rotation.x = -Math.PI / 2 // ROS Z-up to Y-up
+  } else {
+    obj = (await new GLTFLoader().loadAsync(url)).scene
+    if (merged) obj = mergeLikeStage(obj)
+  }
+  obj.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true } })
+  cache.set(key, obj)
+  return obj
+}
+
+window.view = async (o) => {
+  const w = o.width ?? 1280, h = o.height ?? 800
+  renderer.setPixelRatio(1)
+  renderer.setSize(w, h)
+  const m = await load(o.model, o.merged)
+  if (model !== m) { if (model) scene.remove(model); scene.add(m); model = m }
+  m.position.set(...(o.offset ?? [0, 0, 0]))
+  if (o.stlFit) { // centre an STL on the origin with its feet at y = 0
+    m.position.set(0, 0, 0); m.updateMatrixWorld(true)
+    const b = new THREE.Box3().setFromObject(m)
+    m.position.set(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2)
+  }
+  const yaw = THREE.MathUtils.degToRad(o.gimbalYaw ?? 0), pitch = THREE.MathUtils.degToRad(o.gimbalPitch ?? 0)
+  m.traverse((n) => {
+    if (n.name === 'Gimbal_Yaw') n.rotation.set(0, yaw, 0)
+    if (n.name === 'Gimbal_Pitch') n.rotation.set(pitch, 0, 0)
+    if (/^Propeller_.*_ROTATABLE$/.test(n.name)) n.rotation.set(0, THREE.MathUtils.degToRad(o.prop ?? 0) * (/FR|RL/.test(n.name) ? 1 : -1), 0)
+  })
+  grid.visible = o.grid ?? true
+  catcher.visible = o.shadow ?? true
+  scene.background = g(o.background ?? '#0A0B0D')
+  camera.fov = o.fov ?? 30
+  camera.aspect = w / h
+  const t = new THREE.Vector3(...(o.target ?? [0, 0.1, 0]))
+  // camera from spherical angles around the target: azimuth 0 looks at the nose (+Z side), positive azimuth swings to +X
+  const az = THREE.MathUtils.degToRad(o.az ?? 30), el = THREE.MathUtils.degToRad(o.el ?? 20), d = o.dist ?? 1.6
+  camera.position.set(t.x + d * Math.cos(el) * Math.sin(az), t.y + d * Math.sin(el), t.z + d * Math.cos(el) * Math.cos(az))
+  camera.up.set(0, 1, 0)
+  if (Math.abs(o.el ?? 0) > 89.5) camera.up.set(0, 0, -1)
+  camera.lookAt(t)
+  camera.updateProjectionMatrix()
+  key.target.position.copy(t)
+  key.position.copy(t).add(new THREE.Vector3(...(o.key ?? [2.4, 5.2, 2.4])))
+  renderer.render(scene, camera)
+  renderer.render(scene, camera)
+  return { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles }
+}
+window.ready = true
+</script>
+</body>
+</html>

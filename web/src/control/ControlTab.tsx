@@ -19,6 +19,7 @@ import { isWindowSource, sourceOf } from './bindings'
 import { Calibration } from './Calibration'
 import { CourseGroup } from './CourseGroup'
 import { ActionsBlock, PlanBlock } from './FlightActions'
+import { BuiltinPlans } from './BuiltinPlans' // 12 §4
 import { SequenceEntry } from '@/sequence/SequenceEntry' // 10 §2
 import { MotorTest } from './MotorTest'
 import { PreflightList } from './PreflightList'
@@ -246,6 +247,7 @@ export function ControlTab({ vehicleId }: ControlTabProps) {
       <BenchEntry vehicleId={v.id} />
       <ModeBlock v={v} />
       <ActionsBlock v={v} />
+      <BuiltinPlans v={v} />
       <PlanBlock v={v} />
       <SequenceEntry />
       <CourseGroup vehicleId={v.id} />

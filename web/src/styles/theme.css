@@ -46,6 +46,7 @@
     --scene-cloud-max-snow: 0.5; --scene-cloud-max-blizzard: 0.5; --scene-cloud-max-sandstorm: 0.15;
     --scene-grid-minor: oklch(from var(--g700) l c h / 0.5);
     --scene-grid-major: oklch(from var(--g600) l c h / 0.8);
+    --scene-pod-ground: var(--g800); /* 12 §5.5: the ground as the simulated gimbal pod's camera sees it */
     --pc-ramp-0: var(--g800); --pc-ramp-1: var(--g600); --pc-ramp-2: var(--g400); --pc-ramp-3: var(--g200); --pc-ramp-4: var(--g50);
     --pc-hero: var(--r500);
     --pc-gamma: 0.6; --pc-hero-mix: 0.85; --pc-edl-strength: 0.45; --pc-edl-radius: 1.4;

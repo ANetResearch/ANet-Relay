@@ -16,6 +16,8 @@ import { HealthBlock } from './HealthBlock'
 import { AirframeGroup } from './AirframeGroup' // WP-2a
 import { FirmwareBlock } from '@/twin/FirmwareBlock' // 11 §11
 import { SimBlock } from '@/twin/SimBlock' // 11 §11
+import { GimbalGroup } from '@/gimbal/GimbalGroup' // 12 §5.5
+import { ModelField } from './ModelField' // 12 §2.2
 import { Block } from './parts'
 import { useInspectorTab } from './tabs'
 
@@ -135,12 +137,16 @@ export function OverviewTab({ vehicleId }: { vehicleId: string }) {
             {v.capabilities.position ? t('insp.position.local') : t('insp.position.none')}
           </span>
         </Readout>
+        <Readout label={t('insp.field.model')}>
+          <ModelField v={v} />
+        </Readout>
       </div>
       {/* 11 §11: the firmware of a real aircraft; a simulator's engine, reset, frame and twin details */}
       <FirmwareBlock vehicleId={vehicleId} />
       <SimBlock vehicleId={vehicleId} />
       <HealthBlock health={v.health} />
       <AirframeGroup vehicleId={vehicleId} />
+      <GimbalGroup vehicleId={vehicleId} />
       <Block title={t('video.group')}>
         <VideoSourceGroup vehicleId={vehicleId} />
       </Block>

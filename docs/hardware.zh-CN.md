@@ -2,6 +2,8 @@
 
 本文说明如何把配套的小型四旋翼接入 ANet Relay：平台组成、Wi-Fi 数传配网、首飞流程、PX4 与 ArduPilot 的关键参数、失控保护，以及常见问题排查。文中以产品负责人的实际网络为例逐步演示，读者替换为自己的网络名称与地址即可。
 
+> 主力机型 ANetDU7（0.6.0）直接说 MAVLink，不使用 Wi-Fi 数传；它的接入要求与首飞清单见第 9 节，机型资料在 `vehicles/anet-du7/README.md`。
+
 **接入后的第一件事是运行标定流程。** 飞机出现在机群中后，选中它，打开检查器 **控制** 页，点击起飞前检查下方的 **运行标定检查**，选择 `full_bench`（完整标定与测试）。流程按固定顺序完成链路与固件、电池、参数基线、传感器校准、杆向、电机顺序与转向、地面振动、装桨确认、悬停测试、阶跃响应与悬停学习，并保存一份可导出的报告。首飞流程（第 4 节）即围绕这一流程组织；各步骤的判定与处理见 [飞行调参指南](flight-tuning.zh-CN.md) 第 1 节。
 
 > **安全要求**：本平台没有配套遥控器，全部飞行指令经 Wi-Fi 数传以 MAVLink 发送。真机只能在四周设有阻拦网、地面铺有缓冲垫的场地内飞行；上述防护未落实前不得解锁。首次飞行前的所有检查都在无桨状态下完成。
@@ -246,3 +248,33 @@ PX4 的 `COM_RCL_EXCEPT` 同理保持 0，使 OFFBOARD 与 Hold 模式下的手�
 - MAVLink 消息定义：<https://mavlink.io/en/messages/common.html>
 - ArduPilot 失控保护：<https://ardupilot.org/copter/docs/failsafe-landing-page.html>
 - PX4 安全设置：<https://docs.px4.io/main/en/config/safety.html>
+
+## 9. ANetDU7（0.6.0）
+
+ANetDU7 的构型、机载软件栈、接口文档、吊舱协议要点，以及 Relay 与测试节点飞法的逐项对照，都在 [`vehicles/anet-du7/README.md`](../vehicles/anet-du7/README.md) 与同目录的 `docs/` 中，本节不重复，只列 Relay 一侧对飞机的要求和首飞清单。
+
+### 9.1 Relay 对飞机的要求
+
+| 项目 | 要求 |
+|---|---|
+| MAVLink 链路 | 机载 MAVROS 以 `gcs_url:=udp://:14550@<Relay 主机 IP>:14550` 把 MAVLink 转发给 Relay（`onboard/main/start_drone.sh` 已有这一行，改成 Relay 主机的 IP）。Relay 在 UDP 14550（设置项 `listen_port`）发现飞机，与其他 MAVLink 飞机相同，飞机以 `real-<ip>` 出现在机群中；不需要 Wi-Fi 数传，也不需要在机上安装任何东西 |
+| `MAV_SYS_ID` | 多机时每架飞机的 PX4 参数 `MAV_SYS_ID` 必须不同，各机的 MAVROS 都指向同一台 Relay |
+| 位置估计 | 飞控要有本地位置估计（机载 FAST-LIO → `/mavros/vision_pose/pose` → EKF2）。没有它，`capabilities.position` 为 false，`move` 只能开环、`goto` 不可用，限速跟踪也不会启用 |
+| 机型 | 真机缺省按 `anet-du7` 显示与飞行（设置项 `real_model_default`），可在检视器或用 `POST /vehicles/{id}/model` 逐机修改；`anet-du7` 的起飞、`move`、`goto` 缺省以 0.5 m/s 限速的机体系速度飞行 |
+| 吊舱 | 吊舱网口接入机载网络后，操作员在检视器的云台一栏填它的 IP（TCP 2000），或调用 `POST /vehicles/{id}/gimbal/attach {"transport": "tcp", "host": "<吊舱 IP>", "port": 2000}`；也可用串口 `{"transport": "serial", "device": "...", "baud": 115200}`。接入后用 `vehicle.gimbal` 与 `POST /vehicles/{id}/gimbal` 操作（[智能体接口：云台吊舱](agent-api.zh-CN.md#云台吊舱060)） |
+| 唯一的控制者 | 机上的 `yydrone_fsm` 或 `u7_mavros_simple.py` 也会发 OFFBOARD 设定点，同一时间只让一方控制 |
+| 失控保护 | Relay 经 Wi-Fi 控制飞机，链路中断由 PX4 的 OFFBOARD 丢失保护接管：首飞前确认 `COM_OBL_RC_ACT`、`COM_OF_LOSS_T` 以及遥控器接管开关（见 README） |
+
+### 9.2 首飞清单
+
+Relay 的限速跟踪带有与测试节点相同的监视项，下面的检查正是为了不触发它们（触发后 Relay 会向飞控请求一次降落，技能失败，原因写在 `skill.detail`）：
+
+1. **先在模拟机上飞一遍。** `POST /sims`（缺省就是 ANetDU7）后对 `sim-1` 执行 `POST /vehicles/sim-1/plan {"builtin": "du7_box"}`，确认流程与你的安全区（缺省 3 × 3 × 2 m，`du7_box` 起飞到 2 m，需要至少 2 m 高）相符。
+2. **位置遥测要新鲜且稳定。** 位置遥测超过 1 s 未更新（测试节点在机上用 0.3 s，Relay 经无线链路看到的位置更晚）就会触发降落：起飞前确认 `capabilities.position` 为 true、`nav.position` 在地面上稳定不漂，链路没有 `link_delayed` 事件。
+3. **估计器不能重置。** 位置在一个周期内跳变超过 0.25 m + 1.5 m/s × dt 视为估计器重置并降落：FAST-LIO 或 EKF2 初始化未完成、定位源丢失时不要起飞。
+4. **倾角与速度。** 倾角超过 20°，或实际速度超过 `speed` + 0.5 m/s 并持续 1 s 都会触发降落：在有风或气流的场地先不要提高 `speed`（缺省 0.5 m/s）。
+5. **知道遥控器接管开关。** 模式被遥控器改走时 Relay 的技能立即失败、不再发任何设定点；首飞前在地面确认开关位置，并让持遥控器的人随时能接管。
+6. **安全区与原点。** 真机的原点是首次解锁点，安全区以它为中心；`goto` 与限速飞行的目标都要在其中（`outside_safety_volume`）。
+7. **窗口前留有操作员，首飞带 `confirm: "ARM"`。** 真机从地面起飞的调用需要 `confirm: "ARM"` 并通过起飞前检查；附身与急停随时优先于任何智能体。
+8. **先飞 `du7_box`。** 每一步到位误差应不超过 0.2 m（水平与高度），降落后检查 `skill.detail` 与 `nav`。
+9. **吊舱。** 接入后读 `relay_gimbal_status`（`link` 为 `ok`），做一次 `angle`、`zoom` 与 `photo`，在 `gimbal/captures` 里确认拍照记录带有飞机位姿。

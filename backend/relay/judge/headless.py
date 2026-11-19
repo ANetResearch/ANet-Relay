@@ -200,7 +200,12 @@ class Headless:
     def setup(self) -> None:
         svc = self.svc
         for slot in self.slots:
-            (vid,) = svc.add_sims(1, hover_assist=self.scenario.hover_assist, airframe=slot.airframe)
+            (vid,) = svc.add_sims(
+                1,
+                hover_assist=self.scenario.hover_assist,
+                airframe=slot.airframe,
+                frame={"preset": "micro-120"},  # judged programs fly the small aircraft (12 §2.2)
+            )
             v = svc.vehicles[vid]
             v.spawn = (slot.spawn.x, slot.spawn.y)
             v.frame_offset = (slot.spawn.x, slot.spawn.y, 0.0)

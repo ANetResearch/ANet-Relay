@@ -9,15 +9,30 @@ import { useRelay } from '@/store/relay'
 import { useReplay, type ReplayState } from '@/records/replayState'
 import { create } from 'zustand'
 import type { Quat } from './math'
+import { largest, modelOf, type ModelId } from './models'
 import { fallbackSpawn, frameOffsets, framesUsed, NO_OFFSETS, place, slotPosition, slotRow, type FrameOffsets, type PlaceKind, type SlotRow } from './placement'
 
 /** Frame offsets for React consumers that place things in an aircraft's frame (course rings). */
 export const useFrameOffsets = create<FrameOffsets>(() => NO_OFFSETS)
 
+/** Gimbal pod pose for the stage (12 §5.1): frame angles in degrees, yaw right +, pitch up +. */
+export interface GimbalTarget {
+  yaw: number
+  pitch: number
+  /** deg/s, for the short dead-reckoning step between snapshots */
+  yawRate: number
+  pitchRate: number
+  /** laser range in metres when the laser is on and has a return */
+  laser: number | null
+}
+
 export interface Target {
   id: string
   kind: PlaceKind
   sim: boolean
+  /** stage model (12 §2.2); replays and traces are micros unless the live fleet knows the aircraft */
+  model: ModelId
+  gimbal: GimbalTarget | null
   /** ENU metres and m/s */
   x: number
   y: number
@@ -138,14 +153,27 @@ function spawnDetail(id: string): void {
     })
 }
 
-function replayTargets(r: ReplayState, now: number): Map<string, Target> {
+/** A gimbal view as the stage's target, or null without a pod. */
+export function gimbalTarget(g: Vehicle['gimbal'] | undefined): GimbalTarget | null {
+  if (!g) return null
+  const n = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : 0)
+  return {
+    yaw: n(g.yaw_deg),
+    pitch: n(g.pitch_deg),
+    yawRate: g.link === 'ok' ? n(g.yaw_dps) : 0,
+    pitchRate: g.link === 'ok' ? n(g.pitch_dps) : 0,
+    laser: g.laser?.on && typeof g.laser.range_m === 'number' && g.laser.range_m > 0 ? g.laser.range_m : null,
+  }
+}
+
+function replayTargets(r: ReplayState, now: number, vehicles: readonly Vehicle[]): Map<string, Target> {
   const out = new Map<string, Target>()
   // WP-3: a multi-aircraft trace (06 §3.4) places every aircraft by its recorded arena position
   if (r.crafts) {
     for (const c of r.crafts) {
       const f = c.frame
       out.set(c.id, {
-        id: c.id, kind: 'position', sim: c.sim,
+        id: c.id, kind: 'position', sim: c.sim, model: 'micro', gimbal: null,
         x: f.x ?? 0, y: f.y ?? 0, z: Math.max(0, f.z ?? 0), vx: 0, vy: 0, vz: 0,
         roll: f.roll, pitch: f.pitch, yaw: f.yaw,
         throttle: f.armed ? Math.min(1, Math.max(0, (f.throttle ?? 50) / 100)) : 0,
@@ -162,6 +190,9 @@ function replayTargets(r: ReplayState, now: number): Map<string, Target> {
     id: r.vehicleId,
     kind: has ? 'position' : 'slot',
     sim: r.kind === 'sim',
+    // a record carries no model: the live aircraft's when it is still connected, else the micro
+    model: modelOf(vehicles.find((v) => v.id === r.vehicleId)),
+    gimbal: null,
     x: sx,
     y: sy,
     z: has ? Math.max(0, f.z as number) : Math.max(0, f.alt ?? 0),
@@ -198,7 +229,9 @@ function rebuild(): void {
     spawnDetail(v.id)
   }
   for (const id of fetched) if (!ids.has(id)) fetched.delete(id)
-  live.row = slotRow([...live.spawns.values()], live.safety)
+  // pad slots fit the largest airframe that sits in one (02 §6.3; an ANetDU7 needs a wider pitch)
+  const slotted = largest(vehicles.filter((v) => !v.position && !(v.kind === 'real' && v.global && v.gps && v.gps.fix >= 3)).map((v) => modelOf(v)))
+  live.row = slotRow([...live.spawns.values()], live.safety, slotted.model === 'micro' ? undefined : { pitch: slotted.slotPitch, box: slotted.slotBox })
   const offsets = frameOffsets([...live.spawns.values()], live.safety, framesUsed(vehicles))
   if (offsets.local.join() !== live.offsets.local.join() || offsets.gps.join() !== live.offsets.gps.join()) {
     live.offsets = offsets
@@ -207,7 +240,7 @@ function rebuild(): void {
 
   let next: Map<string, Target>
   if (replay.active) {
-    next = replayTargets(replay, now)
+    next = replayTargets(replay, now, vehicles)
   } else {
     const placed = place(vehicles, live.row, live.offsets)
     next = new Map<string, Target>()
@@ -220,6 +253,8 @@ function rebuild(): void {
         id: v.id,
         kind: p.kind,
         sim: v.kind === 'sim',
+        model: modelOf(v),
+        gimbal: gimbalTarget(v.gimbal),
         x: p.x,
         y: p.y,
         z: p.z,

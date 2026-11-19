@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from .. import device, plans, skills
+from .. import coords, device, plans, skills
 from ..config import (
     ARM_CONFIRM,
     LEASE_S,
@@ -50,8 +50,36 @@ def capabilities(request: Request) -> dict[str, Any]:
             "yaw = NED heading (0 north, clockwise +)",
             "sticks": "roll right +, pitch forward +, yaw clockwise +, all -1..1; "
             "throttle 0..1 (0.5 = hold in altitude-hold modes)",
-            "goto_yaw": "degrees, compass heading (0 north, clockwise)",
+            "goto_yaw": "degrees in the control frame (flu: 0 along +x east, counter-clockwise; "
+            "frd: compass heading, 0 north, clockwise)",
+            "control": "x / y / z, vx / vy / vz, yaw, deg and yaw_rate_dps of skills and plan steps follow "
+            "control_frame unless the request gives frame; vehicle.nav reports the pose in it (12 §3)",
         },
+        # 12 §3: the coordinate convention of the control API and what each one means
+        "control_frame": svc.settings.control_frame,
+        "control_frames": coords.DESCRIPTIONS,
+        # 12 §2.2: aircraft models (the stage draws them at real size)
+        "models": {
+            "anet-du7": {
+                "title": "ANetDU7",
+                "span_m": 0.684,
+                "height_m": 0.211,
+                "wheelbase_m": 0.5,
+                "mass_kg": 2.5,
+                "gimbal": True,
+                "frame_preset": "anet-du7",
+            },
+            "micro": {
+                "title": "Micro 120",
+                "span_m": 0.166,
+                "height_m": 0.045,
+                "wheelbase_m": 0.25,
+                "mass_kg": 0.12,
+                "gimbal": False,
+                "frame_preset": "micro-120",
+            },
+        },
+        "sim_frame_default": svc.settings.sim_frame_default,
         "limits": {
             "stick_timeout_s": STICK_TIMEOUT_S,
             "stick_rate_hz": STICK_HZ,
@@ -125,16 +153,35 @@ def _skill_params(name: str) -> dict[str, str]:
             "alt": "metres above the take-off point, 0.2 to the safety-volume height",
             "confirm": "ARM, real aircraft only",
         },
-        "goto": {"x": "m east", "y": "m north", "z": "m up", "yaw": "optional heading in degrees"},
+        "takeoff_track": {
+            "speed": "optional m/s: PX4 with a position estimate arms in POSCTL, switches to OFFBOARD and "
+            "climbs on speed-limited body velocity (the ANetDU7 default, 0.5)",
+            "settle_s": "with speed: seconds within 0.2 m before the take-off counts as done (2)",
+        },
+        "goto": {
+            "x": "m along local x of the frame (flu: east, frd: north)",
+            "y": "m along local y (flu: north, frd: east)",
+            "z": "m along local z (flu: up, frd: down)",
+            "yaw": "optional heading in degrees, in the frame",
+            "frame": "flu or frd; omitted: control_frame",
+            "speed": "optional m/s: fly on speed-limited body velocity (ANetDU7 default 0.5)",
+        },
         "hold": {"seconds": "optional: report done after holding this long (hover)"},
         "move": {
             "forward": "m forward in the body frame (negative: back)",
-            "right": "m right (negative: left)",
-            "up": "m up (negative: down)",
+            "right": "m right (negative: left); or left",
+            "up": "m up (negative: down); or down",
+            "x, y, z": "instead of the named directions: body offsets in the frame "
+            "(flu: forward, left, up; frd: forward, right, down)",
+            "frame": "flu or frd; omitted: control_frame",
+            "speed": "optional m/s: fly on speed-limited body velocity (ANetDU7 default 0.5)",
             "note": "closed loop with a position estimate; otherwise an open-loop tilt profile, "
             "at most 2 m, whose distance is an estimate",
         },
-        "yaw": {"deg": "degrees relative to the current heading, positive clockwise"},
+        "yaw": {
+            "deg": "degrees relative to the current heading; flu: counter-clockwise +, frd: clockwise +",
+            "frame": "flu or frd; omitted: control_frame",
+        },
         "sticks": {
             "roll": "-1..1 right +",
             "pitch": "-1..1 forward +",
@@ -151,10 +198,12 @@ def _skill_params(name: str) -> dict[str, str]:
             "note": "ArduPilot GUIDED_NOGPS or PX4 OFFBOARD with SET_ATTITUDE_TARGET at 20 Hz",
         },
         "velocity": {
-            "vx": "m/s east, -2..2",
-            "vy": "m/s north, -2..2",
-            "vz": "m/s up, -2..2",
-            "yaw_rate_dps": "optional, -90..90",
+            "vx": "m/s along x of the frame, -2..2 (flu body: forward)",
+            "vy": "m/s along y, -2..2 (flu body: left; frd body: right)",
+            "vz": "m/s along z, -2..2 (flu: up; frd: down)",
+            "yaw_rate_dps": "optional, -90..90; flu: counter-clockwise +, frd: clockwise +",
+            "reference": "body (default: the direction follows the nose) or local",
+            "frame": "flu or frd; omitted: control_frame",
             "seconds": "0 to 10; stops before leaving the safety volume (outside_safety_volume)",
         },
     }.get(name, {})
