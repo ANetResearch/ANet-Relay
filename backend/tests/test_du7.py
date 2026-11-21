@@ -87,6 +87,24 @@ def test_a_simulator_model_follows_its_frame(svc, stepper):
         svc.set_model(v.id, "micro")
 
 
+def test_a_real_aircraft_model_is_unconfirmed_until_chosen(svc):
+    import types
+
+    from relay.fleet import Vehicle
+
+    v = Vehicle("real-1", "real", "Quad 01", types.SimpleNamespace(), host="10.0.0.9", port=14550)
+    svc._attach(v)
+    svc.vehicles[v.id] = v
+    try:
+        assert v.model == "anet-du7" and not svc.model_confirmed(v)  # the default: nobody has said what it is
+        svc.set_model(v.id, "anet-du7")  # choosing the model already shown confirms it
+        assert v.model == "anet-du7" and svc.model_confirmed(v)
+        svc.set_model(v.id, "micro")
+        assert v.model == "micro" and svc.model_confirmed(v)
+    finally:
+        svc.vehicles.pop(v.id, None)
+
+
 # ------------------------------------------------------------------ take-off as the onboard node flies it
 
 

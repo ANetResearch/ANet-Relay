@@ -8692,6 +8692,11 @@
           ],
           "type": "string"
         },
+        "model_confirmed": {
+          "default": true,
+          "description": "false while a real aircraft only carries real_model_default: nobody has chosen a model (POST /vehicles/{id}/model confirms it)",
+          "type": "boolean"
+        },
         "nav": {
           "anyOf": [
             {
@@ -8824,6 +8829,7 @@
         "record_session",
         "sim",
         "model",
+        "model_confirmed",
         "nav",
         "procedure",
         "program",

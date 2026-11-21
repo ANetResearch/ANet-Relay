@@ -1321,6 +1321,10 @@ class FleetService(
         key = getattr(v, "store_key", None) or v.id
         return settings.vehicle_models.get(key) or settings.real_model_default
 
+    def model_confirmed(self, v: Vehicle) -> bool:
+        """False while a real aircraft only carries the default model: nobody has said what it is yet."""
+        return v.kind != "real" or (getattr(v, "store_key", None) or v.id) in self.settings.vehicle_models
+
     def set_model(self, vid: str, model: str) -> dict[str, Any]:
         """Set what a real aircraft is (anet-du7 or micro); a simulator's model follows its frame."""
         if model not in ("anet-du7", "micro"):
@@ -3091,6 +3095,8 @@ class FleetService(
             "preflight": preflight.summary(items),
             "sim": self._sim_view(v),  # WP-C (05 §5.2)
             "model": v.model,  # 12 §2.2
+            # False while a real aircraft only carries the default: nobody has said what it is yet
+            "model_confirmed": self.model_confirmed(v),
             "nav": coords.nav_view(  # 12 §3.3: in the control_frame convention
                 self.settings.control_frame,
                 v.world_enu(),

@@ -99,6 +99,7 @@ function base(over: Partial<V> & Pick<V, 'id' | 'label' | 'kind'>): V {
     serial: null,
     hitl: null,
     model: 'micro', // 12 §2.2
+    model_confirmed: true,
     nav: null,
     gimbal: null,
     ...over,

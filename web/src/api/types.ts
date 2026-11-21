@@ -165,6 +165,10 @@ export interface Vehicle {
    */
   model: 'anet-du7' | 'micro'
   /**
+   * false while a real aircraft only carries real_model_default: nobody has chosen a model (POST /vehicles/{id}/model confirms it)
+   */
+  model_confirmed: boolean
+  /**
    * pose in the control_frame convention (12 §3.3)
    */
   nav: NavView | null

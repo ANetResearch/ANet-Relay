@@ -21,7 +21,7 @@ export function ModelField({ v }: { v: Vehicle }) {
     { value: 'micro', label: name('micro') },
   ]
   const change = (m: string | null) => {
-    if ((m !== 'anet-du7' && m !== 'micro') || m === model) return
+    if ((m !== 'anet-du7' && m !== 'micro') || (m === model && v.model_confirmed !== false)) return
     setBusy(true)
     api
       .setModel(v.id, m)

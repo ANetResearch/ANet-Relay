@@ -5,6 +5,17 @@ All notable changes to ANet Relay are documented in this file. The format follow
 [Semantic Versioning](https://semver.org/). Each release section is published as the
 GitHub Release notes for its tag.
 
+## [Unreleased]
+
+### Added
+
+- **Choosing what a found aircraft is.** Every fleet card carries a model tag
+  (`DU7` or `Micro`). A real aircraft nobody has chosen a model for shows a
+  bright `Model?` tag; clicking the tag chooses ANetDU7 (large) or Micro 120
+  (small) on the spot. `vehicle.model_confirmed` is false until then. The
+  connection dialog has a "New aircraft are" switch (the `real_model_default`
+  setting) for what newly found aircraft are taken for.
+
 ## [0.6.0] - 2026-11-19
 
 The ANetDU7 becomes the main aircraft: the default simulator, a gimbal pod that

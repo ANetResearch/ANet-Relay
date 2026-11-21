@@ -456,6 +456,11 @@ class Vehicle(_Model):
     model: VehicleModel = Field(
         default="micro", description="what the aircraft is (12 §2.2): the stage model and the flight defaults"
     )
+    model_confirmed: bool = Field(
+        default=True,
+        description="false while a real aircraft only carries real_model_default: nobody has chosen a model "
+        "(POST /vehicles/{id}/model confirms it)",
+    )
     nav: NavView | None = Field(default=None, description="pose in the control_frame convention (12 §3.3)")
     procedure: ProcedureBrief | None = None  # bench procedure (WP-B)
     # WP-1 onboard programs (06 §2.6)

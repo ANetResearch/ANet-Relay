@@ -140,8 +140,14 @@ def test_host_guard_and_cors(client):
 
 
 def test_arm_needs_control_and_settings(client):
-    client.post("/api/v1/sims", headers=OP)
-    assert wait_for(lambda: client.get("/api/v1/fleet").json()["vehicles"][0]["link"]["state"] == "ok")
+    added = client.post("/api/v1/sims", headers=OP)
+    assert added.status_code == 200, added.text
+
+    def linked() -> bool:  # the fleet snapshot may still be the one from before the simulator
+        vehicles = client.get("/api/v1/fleet").json()["vehicles"]
+        return bool(vehicles) and vehicles[0]["link"]["state"] == "ok"
+
+    assert wait_for(linked)
     resp = client.post("/api/v1/vehicles/sim-1/arm", headers=OP, json={"arm": True})
     assert error(resp) == "not_possessed"
     client.post("/api/v1/vehicles/sim-1/possess", headers=OP, json={"input": "keyboard"})

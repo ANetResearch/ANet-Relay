@@ -78,7 +78,7 @@ export function du7Vehicles(base: Base, now: number): V[] {
       modes: PX4_MODES, bridge: null, battery: DU7_BATTERY,
       firmware_info: { family: 'px4', vehicle: 'copter', version: '1.15.4', type: 'official', git: 'c4e1b5d2', board: 'CUAV X7+' },
     }),
-    base({ id: 'q03', label: 'Quad 03', kind: 'real', host: '10.7.7.38', sysid: 3 }),
+    base({ id: 'q03', label: 'Quad 03', kind: 'real', host: '10.7.7.38', sysid: 3, model_confirmed: false }),
   ]
 }
 
@@ -271,7 +271,7 @@ export function startDu7Fixture(d: Deps, active: boolean) {
     if (m && method === 'POST') {
       const id = decodeURIComponent(m[1])
       const model = b.model === 'micro' ? 'micro' : 'anet-du7'
-      d.mutate(id, (v) => ({ ...v, model }))
+      d.mutate(id, (v) => ({ ...v, model, model_confirmed: true }))
       d.emit('model_changed', id, { model })
       return { id, model }
     }

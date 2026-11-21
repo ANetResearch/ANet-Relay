@@ -23,6 +23,7 @@ import { ArmedWord, BatteryReadout, ControllerPill, HoldProgress, LinkStatus, Si
 import { openInspector } from '@/inspector/tabs'
 import { useT8 } from './copy'
 import { useHold } from './holds'
+import { ModelChip } from './ModelChip'
 import { resetSim } from '@/twin/actions'
 import { canResetSim, engineBadge, engineBadgeText, twinRestarting } from '@/twin/model'
 import { useTT } from '@/twin/strings'
@@ -155,6 +156,7 @@ export const FleetCard = React.memo(function FleetCard({ id }: { id: string }) {
             ) : (
               <span className="truncate text-hud-title font-[560] text-[var(--g100)]">{v.label}</span>
             )}
+            {renaming ? null : <ModelChip v={v} />}
             {alertLevel ? <AlertMark id={id} level={alertLevel} /> : null}
           </div>
           <LinkStatus link={v.link} critical={alertLevel === 'critical'} className="shrink-0" />

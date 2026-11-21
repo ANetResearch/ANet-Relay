@@ -11,12 +11,59 @@ import { AddressTab } from './AddressTab'
 import { BridgeWizard } from './BridgeWizard'
 import { SerialTab } from '@/twin/SerialTab' // 11 §7.1
 import { useTT } from '@/twin/strings'
+import { api } from '@/api'
+import { notifyError } from '@/shell/notify'
+import { useHello } from '@/store/selectors'
+import { ToggleGroup, ToggleGroupItem } from '@/ui/components/ui/toggle-group'
 import './connect.css'
 
 export interface ConnectDialogProps {
   open: boolean
   tab: ConnectTab
   onOpenChange(open: boolean): void
+}
+
+/** What newly found real aircraft are taken for (the real_model_default setting, 12 §2.2). */
+function NewModelRow({ open }: { open: boolean }) {
+  const t = useT8()
+  const operator = Boolean(useHello()?.operator)
+  const [value, setValue] = React.useState<'anet-du7' | 'micro' | null>(null)
+  React.useEffect(() => {
+    if (!open) return
+    api.settings().then(
+      (s) => setValue(s.real_model_default === 'micro' ? 'micro' : 'anet-du7'),
+      () => undefined,
+    )
+  }, [open])
+  const change = (m: 'anet-du7' | 'micro') => {
+    const before = value
+    setValue(m)
+    api.putSettings({ real_model_default: m }).catch((e) => {
+      setValue(before)
+      notifyError(e)
+    })
+  }
+  return (
+    <div className="flex shrink-0 items-center gap-3 border-t border-[var(--border)] px-5 py-3" data-connect-model="">
+      <span className="text-hud-sub text-[var(--g200)]">{t('conn.newModel')}</span>
+      <ToggleGroup
+        value={value ? [value] : []}
+        onValueChange={(v: unknown[]) => (v[0] === 'anet-du7' || v[0] === 'micro') && change(v[0])}
+        disabled={!operator || value === null}
+        spacing={0}
+        className="rounded-md bg-[var(--g950)] p-0.5 ring-1 ring-[var(--border)]"
+        aria-label={t('conn.newModel')}
+      >
+        <ToggleGroupItem value="anet-du7" title={t('fleet.model.du7')} className="h-6 rounded-[5px] px-2 text-[12px] text-[var(--g400)] hover:bg-transparent data-[pressed]:text-[var(--g50)]">
+          ANetDU7
+        </ToggleGroupItem>
+        <ToggleGroupItem value="micro" title={t('fleet.model.micro')} className="h-6 rounded-[5px] px-2 text-[12px] text-[var(--g400)] hover:bg-transparent data-[pressed]:text-[var(--g50)]">
+          Micro 120
+        </ToggleGroupItem>
+      </ToggleGroup>
+      <span className="min-w-0 flex-1 text-[11px] text-[var(--g500)]">{t('conn.newModelHint')}</span>
+    </div>
+  )
 }
 
 export function ConnectDialog({ open, tab, onOpenChange }: ConnectDialogProps) {
@@ -69,6 +116,7 @@ export function ConnectDialog({ open, tab, onOpenChange }: ConnectDialogProps) {
             </TabsContent>
           </div>
         </Tabs>
+        <NewModelRow open={open} />
       </DialogContent>
     </Dialog>
   )
