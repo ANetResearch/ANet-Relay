@@ -23,6 +23,7 @@ ANetDU7（汤圆 U7）是 ANet Relay 的主力机型：室内自主飞行四旋�
 | `tests/u7_mavros_simple.py` | 真机本地测试节点（MAVROS，机体 FLU 速度控制）：起飞 2 m，前后左右各 1 m，降落 |
 | `docs/onboard-interfaces.zh-CN.md` | 机载系统接口文档 v1.2：话题、服务、坐标系、MAVROS 注意事项 |
 | `docs/gimbal-dyt.zh-CN.md` | 吊舱控制协议要点和 Relay 的实现对照 |
+| `docs/vendor/` | 合作厂商原始资料：上博智像 DYT 吊舱控制协议与接口定义、汤圆 U7 整机接口文档与海报（版权归厂商） |
 
 两个分支都是原样并入（`git subtree`，历史完整）。`main` 里也包含一些不属于源码的文件（Python 虚拟环境
 `src/ui/scripts/drone_venv`、SDK 日志、预编译的 `.so`），为了不丢东西没有删。`onboard/main/Livox-SDK2` 是子模块，
