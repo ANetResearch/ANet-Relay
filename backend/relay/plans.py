@@ -39,10 +39,10 @@ _SKILL = {
 _RANGES = {
     "alt": (0.2, 10.0),
     "seconds": (0.0, 120.0),
-    "forward": (-5.0, 5.0),
-    "right": (-5.0, 5.0),
+    "forward": (-30.0, 30.0),
+    "right": (-30.0, 30.0),
     "up": (-2.0, 2.0),
-    "left": (-5.0, 5.0),
+    "left": (-30.0, 30.0),
     "down": (-2.0, 2.0),
     "speed": (0.1, 5.0),
     "settle_s": (0.0, 10.0),
@@ -62,7 +62,7 @@ _RANGES = {
 # Parameters whose range differs from the shared table for one action.
 _ACTION_RANGES = {
     "sticks": {"roll": (-1.0, 1.0), "pitch": (-1.0, 1.0), "yaw": (-1.0, 1.0), "throttle": (0.0, 1.0)},
-    "move": {"x": (-5.0, 5.0), "y": (-5.0, 5.0), "z": (-5.0, 5.0)},  # body offsets in the step's frame
+    "move": {"x": (-30.0, 30.0), "y": (-30.0, 30.0), "z": (-5.0, 5.0)},  # body offsets in the step's frame
 }
 _SECONDS = {"sticks": (0.05, 10.0), "attitude": (0.05, 10.0), "velocity": (0.05, 10.0)}
 _REQUIRED = {
@@ -170,6 +170,23 @@ BUILTIN: dict[str, dict[str, Any]] = {
             {"action": "move", "forward": -1.0, "speed": 0.5},
             {"action": "move", "left": 1.0, "speed": 0.5},
             {"action": "move", "left": -1.0, "speed": 0.5},
+            {"action": "land"},
+        ],
+    },
+    # the route of ``u7_mavros_square10.py`` (13 §9); needs a safety volume of at least 22 x 22 x 10.5 m
+    "du7_square10": {
+        "title": "ANetDU7 10 m square",
+        "title_zh": "ANetDU7 10 米方形航线",
+        "description": "Outdoors: take off to 10 m, fly a 10 m square (forward, left, back, right), land; "
+        "2.5 m/s level, 0.5 m/s vertical.",
+        "description_zh": "室外：起飞到 10 米，飞 10 米见方的航线（前、左、后、右），降落；"
+        "水平限速 2.5 m/s，垂直 0.5 m/s。",
+        "steps": [
+            {"action": "takeoff", "alt": 10.0, "speed": 2.5},
+            {"action": "move", "forward": 10.0, "speed": 2.5},
+            {"action": "move", "left": 10.0, "speed": 2.5},
+            {"action": "move", "forward": -10.0, "speed": 2.5},
+            {"action": "move", "left": -10.0, "speed": 2.5},
             {"action": "land"},
         ],
     },

@@ -28,6 +28,7 @@ function WorkspaceSwitch() {
     { id: 'agents', label: t('ws.agents') },
     { id: 'records', label: t('ws.records') },
     { id: 'lab', label: t('ws.lab') }, // WP-3
+    { id: 'sequence', label: t('ws.sequence') }, // 0.6.1
   ]
   return (
     <ToggleGroup
@@ -35,7 +36,7 @@ function WorkspaceSwitch() {
       onValueChange={(v: unknown[]) => v[0] && setWs(v[0] as Workspace)}
       spacing={0}
       aria-label={t('ws.label')}
-      className="no-drag w-[320px] rounded-md bg-[var(--g900)] p-0.5 ring-1 ring-[var(--border)]"
+      className="no-drag w-[380px] rounded-md bg-[var(--g900)] p-0.5 ring-1 ring-[var(--border)]"
     >
       {items.map((it) => (
         <ToggleGroupItem

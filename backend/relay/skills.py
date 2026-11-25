@@ -58,11 +58,15 @@ BRAKE_SPEED_MPS = 0.2
 BRAKE_MAX_S = 2.5
 BRAKE_DECEL = 3.0  # m/s2 assumed when looking ahead for the safety volume
 
-# Speed-limited tracking (12 §4): the flight of the ANetDU7 test node ``u7_mavros_simple.py``. The position
-# error becomes a velocity (gain 0.8 1/s, capped at the skill's speed), the commanded velocity changes by at
-# most 0.5 m/s2, and it is sent in the body frame at 20 Hz with a zero yaw rate. A target counts as reached
-# after the aircraft has stayed within 0.2 m horizontally and vertically for ``settle_s``.
+# Speed-limited tracking (12 §4, 13 §9): the flight of the ANetDU7 test nodes ``u7_mavros_simple.py`` and
+# ``u7_mavros_square10.py``. The position error becomes a velocity: horizontally gain 0.8 1/s, capped at the
+# skill's speed and at the braking curve sqrt(2 a d), so a fast leg slows down in time; vertically gain
+# 0.8 1/s capped at 0.5 m/s. The commanded velocity changes by at most 0.5 m/s2 and is sent in the body
+# frame at 20 Hz with a zero yaw rate. The settle timer starts when the aircraft first comes within 0.2 m
+# horizontally and vertically (or when the approach limit runs out) and the target counts after ``settle_s``.
 TRACK_SPEED = 0.5
+TRACK_CLIMB_MPS = 0.5  # vertical speed cap, whatever the skill's speed
+TRACK_APPROACH_MARGIN_S = 8.0  # on top of the time the leg takes at its speed limits
 TRACK_SETTLE_S = 2.0
 TRACK_GAIN = 0.8
 TRACK_ACCEL = 0.5
@@ -161,7 +165,9 @@ class Skill:
     track_t: float | None = None  # when the command was last advanced
     track_last: tuple[float, float, float] | None = None  # last position seen, for the jump check
     track_last_t: float = 0.0
-    track_stable: float | None = None  # since when the aircraft has been within tolerance
+    track_stable: float | None = None  # when the settle timer started
+    track_deadline: float | None = None  # approach limit of this leg: the settle timer starts by then
+    track_short: bool = False  # the settle timer was started by the approach limit, not by arriving
     track_fast: float | None = None  # since when it has been faster than allowed
 
     @property
@@ -855,11 +861,14 @@ class Skill:
             return False
         cfg = self.params["_track"]
         error = tuple(t - c for t, c in zip(target, local, strict=True))
-        desired = tuple(TRACK_GAIN * e for e in error)
-        speed = math.sqrt(sum(c * c for c in desired))
         cap = float(cfg["speed"])
-        if speed > cap:
-            desired = tuple(c * cap / speed for c in desired)
+        distance = math.hypot(error[0], error[1])
+        if self.track_deadline is None:
+            eta = track_eta(distance, error[2], cap)
+            self.track_deadline = now + eta + TRACK_APPROACH_MARGIN_S
+            # the skill's own timeout stays behind the approach limit and the settle time
+            self.timeout = max(self.timeout, now - self.started + 2.0 * eta + 30.0)
+        desired = track_velocity(error, cap)
         if now - self.last_setpoint >= TRACK_PERIOD_S - 1e-6:
             dt = TRACK_PERIOD_S if self.track_t is None else min(0.2, max(0.0, now - self.track_t))
             delta = tuple(d - c for c, d in zip(self.track_v, desired, strict=True))
@@ -869,14 +878,13 @@ class Skill:
             self.track_t = self.last_setpoint = now
             forward, right, up = coords.enu_to_fru(heading, *self.track_v)
             host.driver.velocity_target_body(forward, right, up, 0.0)  # no turn, no heading correction
-        arrived = (
-            math.hypot(error[0], error[1]) <= TRACK_TOLERANCE_M and abs(error[2]) <= TRACK_TOLERANCE_M
-        )
-        if not arrived:
-            self.track_stable = None
-            return False
         if self.track_stable is None:
-            self.track_stable = now
+            arrived = distance <= TRACK_TOLERANCE_M and abs(error[2]) <= TRACK_TOLERANCE_M
+            if not arrived and now < self.track_deadline:
+                return False
+            # as the test node does: a timer from the first arrival, not a wait for a quiet 2 s; a leg
+            # that never gets within tolerance (wind, a drifting estimate) ends at its approach limit
+            self.track_stable, self.track_short = now, not arrived
         return now - self.track_stable >= float(cfg["settle_s"])
 
     def _tick_takeoff_track(self, host: Host, now: float) -> None:
@@ -938,7 +946,10 @@ class Skill:
             return  # the pilot took over: no more setpoints, no commands
         assert self.target_local is not None
         if self._track(host, now, self.target_local):
-            self.finish(f"at {alt:g} m")
+            local = host.local_enu()
+            dist = math.dist(local, self.target_local) if local else 0.0
+            short = f"approach limit reached {dist:.2f} m from {alt:g} m"
+            self.finish(short if self.track_short else f"at {alt:g} m")
 
     def _tick_goto_track(self, host: Host, now: float) -> None:
         """goto and closed-loop move on body velocity (12 §4); an optional heading is turned to first."""
@@ -989,7 +1000,11 @@ class Skill:
         if self._track(host, now, self.target_local):
             local = host.local_enu()
             dist = math.dist(local, self.target_local) if local else 0.0
-            self.finish(f"reached within {dist:.2f} m")
+            self.finish(
+                f"approach limit reached {dist:.2f} m from the target"
+                if self.track_short
+                else f"reached within {dist:.2f} m"
+            )
 
     def _tick_rtl(self, host: Host, now: float) -> None:
         if self.phase == "start":
@@ -1209,6 +1224,24 @@ def sticks_at(samples: list[tuple[float, ...]], t: float) -> tuple[float, ...]:
     return (t, *(a[i] + (b[i] - a[i]) * f for i in range(1, 5)))
 
 
+def track_velocity(error: tuple[float, ...], cap: float) -> tuple[float, float, float]:
+    """The velocity (ENU, m/s) the tracker wants for a position ``error``: horizontally 0.8 x distance,
+    at most ``cap`` and at most what still stops at 0.5 m/s2; vertically 0.8 x error within +-0.5 m/s."""
+    east, north, up = error
+    distance = math.hypot(east, north)
+    if distance > 0.0:
+        speed = min(TRACK_GAIN * distance, cap, math.sqrt(2.0 * TRACK_ACCEL * distance))
+        east, north = east * speed / distance, north * speed / distance
+    climb = min(cap, TRACK_CLIMB_MPS)
+    return (east, north, max(-climb, min(climb, TRACK_GAIN * up)))
+
+
+def track_eta(distance: float, climb: float, cap: float) -> float:
+    """Seconds a tracked leg takes at its limits: cruise plus speeding up and slowing down, both axes."""
+    vertical = min(cap, TRACK_CLIMB_MPS)
+    return distance / cap + cap / TRACK_ACCEL + abs(climb) / vertical + vertical / TRACK_ACCEL
+
+
 def _reach(v: float) -> float:
     """Distance an aircraft moving at ``v`` m/s covers before it can stop: reaction time plus braking."""
     return v * 0.3 + math.copysign(v * v / (2.0 * BRAKE_DECEL), v)
@@ -1249,7 +1282,9 @@ def make(
     skill = Skill(name=name, params=params, started=now)
     track = params.get("_track")
     if name == "takeoff":
-        skill.timeout = 30.0 if not track else 40.0 + 2.0 * float(params["alt"]) / track["speed"]
+        skill.timeout = 30.0
+        if track:
+            skill.timeout = 40.0 + 2.0 * track_eta(0.0, float(params["alt"]), track["speed"])
     elif name == "land":
         skill.timeout = 90.0
     elif name == "hold":

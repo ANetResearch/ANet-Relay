@@ -175,7 +175,7 @@ Relay 的核心是人与智能体之间的控制权接力。每架飞机同一�
 | `PUT /sims/{id}/airframe` | 控制者或操作员 | `{preset \| params, seed?}`：模拟机机体缺陷（见下） |
 | `GET /sims/{id}/airframe` | 控制者或操作员 | 机体缺陷的全部数值、取值范围与悬停油门 |
 | `PUT /sims/{id}/frame` | 控制者或操作员 | `{preset?, mass_kg?, ...}`：上锁且在地面时更换模拟机的物理机型（见[固件孪生](#固件孪生054)） |
-| `GET /plans/builtin` | – | 内置计划：`{plans: [{id, title, title_zh, description, description_zh, steps}]}`（`du7_box`） |
+| `GET /plans/builtin` | – | 内置计划：`{plans: [{id, title, title_zh, description, description_zh, steps}]}`（`du7_box`、`du7_square10`） |
 | `POST /vehicles/{id}/model` | 操作员 | `{model: anet-du7 \| micro}` → `{id, model}`：真机按什么机型显示与飞行（[ANetDU7](#anetdu7-与限速飞行060)）；模拟机返回 `invalid_request` |
 | `GET /vehicles/{id}/gimbal` | – | 飞机的云台吊舱视图（`vehicle.gimbal`）；没有吊舱时 404 `gimbal_missing` |
 | `POST /vehicles/{id}/gimbal` | 控制者或操作员 | `{action, ...参数}` → `{id, gimbal}`：执行一个吊舱动作，任何飞行等级都允许（[云台吊舱](#云台吊舱060)） |
@@ -220,7 +220,7 @@ POST /api/v1/vehicles/sim-1/plan
 
 可用动作：`takeoff {alt, speed?, settle_s?}`（缺省 1 m）、`hover {seconds}` / `hold {seconds}`（缺省 3 s）、`move {forward, right, left, up, down \| x, y, z; frame?, speed?, settle_s?}`、`yaw {deg, frame?}`、`land`、`goto {x, y, z, yaw?, frame?, speed?, settle_s?}`、`rtl`，以及 `sticks`、`attitude`、`velocity {…, reference?, frame?}`（参数同上表）。每一步按自己的 `frame` 解释数值，缺省取设置 `control_frame`。序列开始前会校验每一步（`invalid_request` 指出出错的步骤与字段；缺少能力的步骤返回 `capability_missing`）。不以 `takeoff` 开头的序列要求飞机已在空中（`not_airborne`）。真机从地面开始的序列需要 `confirm: "ARM"`。
 
-**内置计划（0.6.0）。** `POST /vehicles/{id}/plan {"builtin": "du7_box"}` 飞 `GET /plans/builtin` 中的计划，代替 `steps`（二者给一个，否则 `invalid_request`；除非 `name` 另指定，序列以计划名命名）。`du7_box` 是 ANetDU7 机载测试节点 `u7_mavros_simple.py` 的航线：起飞到 2 m、前进 1 m 并返回、左移 1 m 并返回、降落，每步限速 0.5 m/s。它的方向都有名字，所以在任何控制坐标系下读法相同；2 m 的起飞要求安全区至少 2 m 高（缺省满足）。
+**内置计划（0.6.0）。** `POST /vehicles/{id}/plan {"builtin": "du7_box"}` 飞 `GET /plans/builtin` 中的计划，代替 `steps`（二者给一个，否则 `invalid_request`；除非 `name` 另指定，序列以计划名命名）。`du7_box` 是 ANetDU7 机载测试节点 `u7_mavros_simple.py` 的航线：起飞到 2 m、前进 1 m 并返回、左移 1 m 并返回、降落，每步限速 0.5 m/s。它的方向都有名字，所以在任何控制坐标系下读法相同；2 m 的起飞要求安全区至少 2 m 高（缺省满足）。 **0.6.1：** `du7_square10` 是 ANetDU7 的室外 10 米方形航线（起飞到 10 米，前、左、后、右各 10 米，降落；水平 2.5 m/s，垂直 0.5 m/s），安全区至少 22 × 22 × 10.5 米。限速飞行现在把水平速度限制在 `speed` 和刹车曲线以内，垂直速度限 0.5 m/s；飞机首次进入 0.2 米后计时 `settle_s` 即算到位，始终进不去的一段在到达时限结束（`skill.detail`：`approach limit reached … m from the target`）。计划步骤的 `forward` / `right` / `left` 与 move 的 `x` / `y` 上限为 30 米。
 
 飞机的 `plan` 字段报告 `{id, name, state, index, count, steps, results, detail, tuning}`，`state` 为 `running`、`done`、`failed` 或 `cancelled`；事件 `plan_started`、`plan_step`、`plan_finished`、`plan_failed`、`plan_cancelled` 标记进度，`plan_tuned` 标记油门参数的修改。任一步失败、新的技能、控制者发送杆量、操作员拨杆或接管、急停，都会结束序列。`POST /plan/cancel` 主动结束序列（没有序列时返回 `no_plan`），空中的飞机原地悬停。
 

@@ -21,6 +21,7 @@ ANetDU7（汤圆 U7）是 ANet Relay 的主力机型：室内自主飞行四旋�
 | `onboard/new_u7_src/` | 机载 ROS 2 工作空间，当前版本（`auto-lcx/yix_drone_ws` 的 `new_u7_src` 分支，含提交历史）：FAST-LIO2、Livox 驱动、EGO-Planner、`yydrone_fsm` 状态机、`yydrone_localization`、`yydrone_description`（URDF、`yix.stl` 机体网格） |
 | `onboard/main/` | 同一仓库的 `main` 分支（含提交历史）：早期工作空间，另有 `yydrone_safety`、`yydrone_mission`、`yydrone_aruco`、`yydrone_control`、Qt 地面端 `src/ui`、Orbbec 相机驱动、FASTLIO2_ROS2（PGO / 重定位 / HBA）、建好的地图 `src/maps`、开机自启 `drone-stack.service` + `start_drone.sh` |
 | `tests/u7_mavros_simple.py` | 真机本地测试节点（MAVROS，机体 FLU 速度控制）：起飞 2 m，前后左右各 1 m，降落 |
+| `tests/u7_mavros_square10.py` | 同一节点的室外版本，真机飞过：起飞 10 m，10 m 见方航线（前、左、后、右），降落；水平 2.5 m/s，垂直 0.5 m/s |
 | `docs/onboard-interfaces.zh-CN.md` | 机载系统接口文档 v1.2：话题、服务、坐标系、MAVROS 注意事项 |
 | `docs/gimbal-dyt.zh-CN.md` | 吊舱控制协议要点和 Relay 的实现对照 |
 | `docs/vendor/` | 合作厂商原始资料：上博智像 DYT 吊舱控制协议与接口定义、汤圆 U7 整机接口文档与海报（版权归厂商） |
@@ -71,11 +72,13 @@ Relay 的控制接口默认 FLU，与机载代码一致：
 |---|---|
 | POSCTL 下预发 2 s 零速度设定点 → 解锁 → 切 OFFBOARD | 相同顺序 |
 | `setpoint_raw/local`，`FRAME_BODY_NED`，`type_mask` 只用速度和偏航角速度 | `SET_POSITION_TARGET_LOCAL_NED`，`MAV_FRAME_BODY_NED`，`type_mask` 0x05C7（MAVROS 发出的同一帧） |
-| 速度 = 0.8 × 位置误差，限 0.5 m/s，加速度限 0.5 m/s²，20 Hz，偏航角速度 0 | 相同（`speed` 可改） |
-| 水平、高度误差各 ≤ 0.20 m 保持 2 s 算到位 | 相同（`settle_s` 可改） |
+| 水平速度 = min(0.8 × 距离, 限速, √(2 × 0.5 × 距离))，后一项是刹车曲线；垂直速度 = 0.8 × 高度误差，限 0.5 m/s；加速度限 0.5 m/s²，20 Hz，偏航角速度 0 | 相同（水平限速即 `speed`，缺省 0.5 m/s） |
+| 水平、高度误差首次都进入 0.20 m 后计时 2 s 算到位；一直进不去则到“到达时限”后同样计时 2 s 并进入下一步 | 相同（`settle_s` 可改）；到达时限 = 按限速飞完这一段的时间 + 8 s，这样结束的步骤 `detail` 里写明离目标多远 |
 | 倾角 > 20°、位置跳变 > 0.25 m + 1.5 m/s·dt、遥测过期 → 请求 AUTO.LAND 一次 | 相同；遥测过期阈值 1.0 s（Relay 经无线链路看到的位置比机上晚） |
 | 模式被遥控器改走 → 放手，不再发指令 | 相同 |
 | 航线：起飞 2 m，前 1 m 回，左 1 m 回，降落 | 内置计划 `du7_box` |
+| 室外航线（`u7_mavros_square10.py`）：起飞 10 m，前、左、后、右各 10 m，降落；水平 2.5 m/s | 内置计划 `du7_square10` |
+| 室外版的包线：离起飞点水平 30 m、高度 12 m；水平速度 > 3.5 m/s 或垂直速度 > 1.0 m/s 即停 | 安全区（设置 `safety_volume`，飞 `du7_square10` 前至少设为 22 × 22 × 10.5 m，建议 30 × 30 × 12）；速度超过限速 0.5 m/s 持续 1 s 请求降落 |
 
 与测试节点不同的地方：Relay 在地面电脑上，经 Wi-Fi 控制；链路中断时由 PX4 的 OFFBOARD 丢失保护
 （`COM_OBL_RC_ACT`、`COM_OF_LOSS_T`）接管，首飞前先确认这两个参数和遥控器接管开关。

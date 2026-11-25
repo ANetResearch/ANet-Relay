@@ -5,6 +5,7 @@
 import type { MenuAction, MenuEvent } from '@/api'
 import { setLang, t } from '@/i18n'
 import { useUi, type SettingsSection } from '@/store/ui'
+import { getVehicle } from '@/store/selectors'
 import { moveSelection, stopAll, stopFocused } from './actions'
 import { notify } from './notify'
 
@@ -13,7 +14,7 @@ export interface Hotkey {
   combo: string
   handler(e: KeyboardEvent): void | false
   /** only while this workspace is shown */
-  workspace?: 'fly' | 'agents' | 'records' | 'lab'
+  workspace?: 'fly' | 'agents' | 'records' | 'lab' | 'sequence'
   /** also fire while a text field has focus (default false) */
   inText?: boolean
   /** also fire while a dialog, sheet, popover or menu is open (default false) */
@@ -52,7 +53,7 @@ export function comboOf(e: Pick<KeyboardEvent, 'code' | 'key' | 'metaKey' | 'ctr
   return parts.join('+')
 }
 
-const SETTINGS_SECTIONS: readonly SettingsSection[] = ['general', 'safety', 'controllers', 'copilot', 'network', 'autopilots', 'data', 'about']
+const SETTINGS_SECTIONS: readonly SettingsSection[] = ['general', 'aircraft', 'safety', 'controllers', 'copilot', 'network', 'autopilots', 'data', 'about']
 
 export const OVERLAY_SELECTOR = [
   'dialog-content', 'alert-dialog-content', 'sheet-content', 'popover-content', 'dropdown-menu-content',
@@ -116,6 +117,15 @@ function onKeyDown(e: KeyboardEvent): void {
   const overlay = overlayOpen()
   if (combo === 'escape') {
     if (overlay) return
+    // 0.6.1: while the selected aircraft flies a stick timeline, Esc stops it on the first press, whatever is
+    // selected and also from the Timeline workspace's code editor (a real text field still only loses focus)
+    const flying = getVehicle(useUi.getState().selectedId)?.skill
+    const active = document.activeElement as HTMLElement | null
+    if (flying?.name === 'sequence' && flying.state === 'running' && (!inTextField(undefined, false) || active?.closest('[data-sequence-workspace] .cm-editor'))) {
+      e.preventDefault()
+      if (!e.repeat) stopFocused()
+      return
+    }
     // Esc keeps its stop meaning inside an editor with its own keys; only a real text field takes it
     if (inTextField(undefined, false)) {
       ;(document.activeElement as HTMLElement | null)?.blur()
@@ -162,6 +172,9 @@ function builtins(): Hotkey[] {
     // WP-3: Lab (06 §7) on 4 like the other workspaces, and on mod+4 from anywhere, the editor included
     { combo: '4', handler: () => ui().setWorkspace('lab') },
     { combo: 'mod+4', inText: true, handler: () => ui().setWorkspace('lab') },
+    { combo: '5', handler: () => ui().setWorkspace('sequence') }, // 0.6.1: Timeline
+    // 0.6.1: Alt+1..5 switch workspace from anywhere, editors and text fields included
+    ...(['fly', 'agents', 'records', 'lab', 'sequence'] as const).map((w, i): Hotkey => ({ combo: `alt+${i + 1}`, inText: true, handler: () => ui().setWorkspace(w) })),
     { combo: 'up', workspace: 'fly', repeat: true, handler: () => moveSelection(-1) },
     { combo: 'down', workspace: 'fly', repeat: true, handler: () => moveSelection(1) },
     {

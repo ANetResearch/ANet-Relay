@@ -155,7 +155,7 @@ export type CopilotKey = keyof typeof en
 const zh: Record<CopilotKey, string> = {
   'cp.title': 'Copilot',
   'cp.open': 'Copilot',
-  'cp.hint': '用自然语言提问或下指令：状态、起飞、动作序列、降落。（{mod}J）',
+  'cp.hint': '用自然语言提问或下指令：状态、起飞、动作计划、降落。（{mod}J）',
   'cp.placeholder': '让 Copilot 查看或驾驶飞机',
   'cp.send': '发送',
   'cp.stop': '停止',

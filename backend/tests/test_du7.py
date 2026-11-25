@@ -279,3 +279,70 @@ def test_speed_asks_for_tracking_on_any_aircraft(svc, stepper):
     assert stepper.until(lambda: v.skill.state != "running", 60, [session]) and v.skill.state == "done"
     sent = targets(v, t)
     assert sent and all(m.coordinate_frame == M.MAV_FRAME_BODY_NED for m in sent)
+
+
+# ------------------------------------------------------------------ the 10 m square of u7_mavros_square10.py
+
+
+def test_track_velocity_brakes_and_caps_the_climb():
+    # far away: the horizontal cap; the climb never exceeds 0.5 m/s whatever the speed
+    assert skills.track_velocity((0.0, 20.0, 10.0), 2.5) == (0.0, 2.5, 0.5)
+    # 1 m out the braking curve sqrt(2 x 0.5 x 1) = 1 m/s is below the gain (0.8) only further in
+    assert skills.track_velocity((1.0, 0.0, 0.0), 2.5)[0] == pytest.approx(0.8)
+    assert skills.track_velocity((4.0, 0.0, 0.0), 2.5)[0] == pytest.approx(2.0)  # sqrt(2 x 0.5 x 4)
+    assert skills.track_velocity((0.0, 0.0, -3.0), 0.3) == (0.0, 0.0, -0.3)
+    # the 10 m climb of the test node: 20 s at 0.5 m/s plus speeding up on both axes and the 8 s margin
+    # (the node allows 28 s)
+    assert skills.track_eta(0.0, 10.0, 2.5) + skills.TRACK_APPROACH_MARGIN_S == pytest.approx(34.0)
+
+
+def test_du7_square10_plan_flies_the_square(svc, stepper):
+    v = boot(svc, stepper)
+    svc.update_settings({"safety_volume": {"x": 30.0, "y": 30.0, "z": 12.0}})
+    session, agent = open_agent(svc)
+    svc.claim(v.id, agent)
+    origin = v.world_enu()
+    svc.run_plan(v.id, agent, [dict(s) for s in plans.builtin("du7_square10")["steps"]], "du7_square10")
+    corners, seen, fastest, climb = [], set(), 0.0, 0.0
+    last = origin
+    for _ in range(400 * 20):
+        stepper.run(0.05, [session])
+        here = v.world_enu()
+        plan = v.plan
+        if plan is not None and plan.running and plan.index <= 4:  # not the autopilot's own landing
+            climb = max(climb, abs(here[2] - last[2]) / 0.05)
+        last = here
+        if plan is not None and plan.running and 1 <= plan.index <= 4:
+            fastest = max(fastest, v.speed() or 0.0)
+        if plan is not None and plan.running and plan.index not in seen and plan.index >= 1:
+            seen.add(plan.index)
+            corners.append(tuple(c - o for c, o in zip(here, origin, strict=True)))
+        if plan is None or not plan.running:
+            break
+    assert v.plan is not None and v.plan.state == "done", v.plan.view()
+    assert stepper.until(lambda: not v.armed, 30, [session])
+    # after the take-off, forward (north at heading 0), left (west), back, right
+    expect = [(0.0, 0.0, 10.0), (0.0, 10.0, 10.0), (-10.0, 10.0, 10.0), (-10.0, 0.0, 10.0), (0.0, 0.0, 10.0)]
+    assert len(corners) == 5
+    for got, want in zip(corners, expect, strict=True):
+        assert math.dist(got, want) <= 0.5, (got, want)
+    # 10 m at 0.5 m/s2 up and down peaks near sqrt(5) m/s: well above the old 0.5, under the 2.5 limit
+    assert 1.7 <= fastest <= 2.5
+    assert climb <= 0.5 + 0.15  # vertical speed stays at the 0.5 m/s cap
+    assert not any("approach limit" in (r or "") for r in v.plan.results), v.plan.results
+
+
+def test_tracked_leg_ends_at_its_approach_limit(svc, stepper):
+    v = boot(svc, stepper)
+    session, agent = open_agent(svc)
+    svc.claim(v.id, agent)
+    svc.run_skill(v.id, agent, "takeoff", {"alt": 2.0})
+    assert stepper.until(lambda: v.skill.state != "running", 40, [session])
+    svc.run_skill(v.id, agent, "move", {"forward": 2.0, "speed": 0.5, "settle_s": 1.0})
+    skill = v.skill
+    stepper.run(0.2, [session])
+    assert skill.track_deadline is not None
+    skill.track_deadline = stepper.clock.t  # the leg is out of time 2 m from its target
+    assert stepper.until(lambda: skill.state != "running", 5, [session])
+    assert skill.state == "done" and skill.track_short
+    assert "approach limit" in skill.view()["detail"]

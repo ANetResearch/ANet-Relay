@@ -1754,7 +1754,16 @@ class FleetService(
                     self._stop_skill(v, "superseded by sticks", "被杆量指令取代")
                 else:
                     baseline = v.skill.params.get("_baseline")
-                    if baseline is None:
+                    # the resting sticks are those of the mode the skill flies in: a window's throttle sits at
+                    # the bottom in a stick mode and at mid stick in a hold mode, so while a stick timeline
+                    # still switches mode and arms, what arrives is the new rest, not a pilot taking over
+                    # (a keyboard's rest follows the reported mode a moment later: the first second too)
+                    keyboard = v.auth.possession is not None and v.auth.possession.source == "keyboard"
+                    settling = v.skill.name == "sequence" and (
+                        v.skill.phase in ("start", "mode", "arm")
+                        or (keyboard and v.skill.phase == "play" and now - v.skill.phase_t < 1.0)
+                    )
+                    if baseline is None or settling:
                         v.skill.params["_baseline"] = new
                         return {"accepted": False, "reason": "skill_running"}
                     if new.deflection_from(baseline) <= PILOT_OVERRIDE:

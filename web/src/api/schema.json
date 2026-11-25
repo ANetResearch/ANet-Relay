@@ -8051,7 +8051,8 @@
             "fly",
             "agents",
             "records",
-            "lab"
+            "lab",
+            "sequence"
           ],
           "type": "string"
         },

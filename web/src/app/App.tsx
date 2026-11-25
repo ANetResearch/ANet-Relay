@@ -8,6 +8,7 @@ import { TooltipProvider } from '@/ui/components/ui/tooltip'
 import { TopBar } from '@/shell/TopBar'
 import { AlertBar } from '@/shell/AlertBar'
 import { FlyWorkspace } from '@/shell/FlyWorkspace'
+import { SequenceWorkspace } from '@/sequence/SequenceWorkspace' // 0.6.1
 import { RelayTimeline } from '@/shell/timeline/RelayTimeline'
 import { RelayToaster } from '@/shell/Toasts'
 import { CommandPalette } from '@/shell/CommandPalette'
@@ -77,6 +78,7 @@ function Workspace() {
       </React.Suspense>
     )
   }
+  if (ws === 'sequence') return <SequenceWorkspace />
   return <FlyWorkspace />
 }
 

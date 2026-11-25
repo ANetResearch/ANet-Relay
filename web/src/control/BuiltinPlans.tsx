@@ -13,7 +13,7 @@ import { modelOf } from '@/stage/models'
 import { useCT } from './strings'
 
 /** Built-in plans by model (12 §4); the backend's list decides what exists. */
-export const PLANS_FOR: Record<Vehicle['model'], readonly string[]> = { 'anet-du7': ['du7_box'], micro: [] }
+export const PLANS_FOR: Record<Vehicle['model'], readonly string[]> = { 'anet-du7': ['du7_box', 'du7_square10'], micro: [] }
 
 let cached: Promise<BuiltinPlan[]> | null = null
 function loadPlans(): Promise<BuiltinPlan[]> {

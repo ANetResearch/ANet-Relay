@@ -100,6 +100,62 @@ export function templateHover(hold = 5): ArsDoc {
   }
 }
 
+/** A step on the throttle in the air (tune the climb response): 0.5, 0.6 for a second, 0.5; keeps holding. */
+export function templateStep(): ArsDoc {
+  return {
+    ...templateBlank(4),
+    name: 'Throttle step',
+    tracks: {
+      throttle: [
+        { t: 0, v: 0.5, ease: 'hold', label: 'hold' },
+        { t: 1, v: 0.6, ease: 'hold', label: 'step' },
+        { t: 2, v: 0.5, ease: 'hold', label: 'settle' },
+      ],
+      pitch: [{ t: 0, v: 0, ease: 'hold' }],
+      roll: [{ t: 0, v: 0, ease: 'hold' }],
+      yaw: [{ t: 0, v: 0, ease: 'hold' }],
+    },
+  }
+}
+
+/** Pitch then roll doublets in the air (+0.1, -0.1, 0; a second each); keeps holding. */
+export function templateDoublet(): ArsDoc {
+  const pulse = (t0: number, label: string): ArsKey[] => [
+    { t: 0, v: 0, ease: 'hold' },
+    { t: t0, v: 0.1, ease: 'hold', label },
+    { t: t0 + 1, v: -0.1, ease: 'hold' },
+    { t: t0 + 2, v: 0, ease: 'hold' },
+  ]
+  return {
+    ...templateBlank(9),
+    name: 'Pitch and roll doublet',
+    tracks: {
+      throttle: [{ t: 0, v: 0.5, ease: 'hold' }],
+      pitch: pulse(1, 'pitch'),
+      roll: pulse(5, 'roll'),
+      yaw: [{ t: 0, v: 0, ease: 'hold' }],
+    },
+  }
+}
+
+export function templateBlank(seconds = 10): ArsDoc {
+  return {
+    format: 'ars',
+    version: 1,
+    name: 'Untitled',
+    mode: 'althold',
+    duration_s: seconds,
+    trim: zeroTrim(),
+    tracks: {
+      throttle: [{ t: 0, v: 0.5, ease: 'hold' }],
+      pitch: [{ t: 0, v: 0, ease: 'hold' }],
+      roll: [{ t: 0, v: 0, ease: 'hold' }],
+      yaw: [{ t: 0, v: 0, ease: 'hold' }],
+    },
+    end: 'hold',
+  }
+}
+
 export function valueAt(keys: ArsKey[], t: number): number {
   if (t <= keys[0].t) return keys[0].v
   const last = keys[keys.length - 1]
@@ -195,6 +251,54 @@ export function setDuration(doc: ArsDoc, track: TrackName, index: number, second
   const lastOther = Math.max(0, ...TRACKS.filter((n) => n !== track).map((n) => lastKey(out, n)))
   const end = next ? doc.duration_s + shift : k.t + len
   return { ...out, duration_s: r3(Math.min(MAX_DURATION_S, Math.max(end, lastOther + MIN_BLOCK_S, lastKey(out, track) + MIN_BLOCK_S))) }
+}
+
+/**
+ * Ripple across tracks: every key of the other tracks at or after `at` moves by `delta` seconds (never past the key
+ * before it), so lengthening one phase on the throttle keeps the pitch and yaw moves that follow in step.
+ */
+export function rippleFrom(doc: ArsDoc, at: number, delta: number, except: TrackName): ArsDoc {
+  if (!delta) return doc
+  const tracks: ArsDoc['tracks'] = { ...doc.tracks }
+  let last = 0
+  for (const name of TRACKS) {
+    const src = doc.tracks[name]
+    if (!src || !src.length) continue
+    if (name !== except) {
+      const keys = src.map((k) => ({ ...k }))
+      for (let i = 0; i < keys.length; i++) {
+        if (keys[i].t < at - 1e-6 || keys[i].t <= 0) continue
+        const floor = i > 0 ? keys[i - 1].t + MIN_BLOCK_S : 0
+        keys[i].t = r3(Math.min(MAX_DURATION_S - MIN_BLOCK_S, Math.max(floor, keys[i].t + delta)))
+      }
+      tracks[name] = keys
+    }
+    const keys = tracks[name]!
+    last = Math.max(last, keys[keys.length - 1].t)
+  }
+  return { ...doc, tracks, duration_s: r3(Math.min(MAX_DURATION_S, Math.max(doc.duration_s, last + MIN_BLOCK_S))) }
+}
+
+/** setDuration, with the other tracks following when `ripple` is on. */
+export function resize(doc: ArsDoc, track: TrackName, index: number, seconds: number, ripple: boolean): ArsDoc {
+  const before = blocks(doc, track)[index]
+  if (!before) return doc
+  const out = setDuration(doc, track, index, seconds)
+  if (!ripple) return out
+  const after = blocks(out, track)[index]
+  return rippleFrom(out, before.end, r3(after.end - before.end), track)
+}
+
+/** A copy of block `index` right after it (same stick, length, ease and name). */
+export function duplicateBlock(doc: ArsDoc, track: TrackName, index: number, ripple: boolean): { doc: ArsDoc; index: number } {
+  const b = blocks(doc, track)[index]
+  if (!b) return { doc, index }
+  const r = insertAfter(doc, track, index, b.end - b.start)
+  if (r.index === index) return r
+  let out = setEase(setValue(r.doc, track, r.index, b.v), track, r.index, b.ease)
+  if (b.label) out = setLabel(out, track, r.index, b.label)
+  if (ripple) out = rippleFrom(out, b.end + 1e-4, r3(b.end - b.start), track)
+  return { doc: out, index: r.index }
 }
 
 /** Move the boundary between block index-1 and index (drag the left edge): nothing else moves. */

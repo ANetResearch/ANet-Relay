@@ -411,7 +411,7 @@ const zh: Record<ControlKey, string> = {
   'act.closedLoop': '平移按位置估计闭环执行。',
   'act.needsAirborne': '先起飞，才能平移或转向。',
   'act.confirmTakeoff': '输入 ARM 以解锁 {aircraft} 并起飞',
-  'plan.title': '动作序列',
+  'plan.title': '动作计划',
   'plan.add': '添加步骤',
   'plan.run': '执行序列',
   'plan.cancel': '取消',

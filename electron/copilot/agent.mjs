@@ -393,7 +393,7 @@ export function relayTools(relay) {
       name: "relay_plan",
       label: "Fly a sequence",
       description:
-        "Fly a whole sequence and wait for it, or a ready-made plan with builtin (du7_box: take off to 2 m, 1 m forward and back, 1 m left and back, land, at 0.5 m/s; relay_plans_builtin lists them). Give steps or builtin, not both. " +
+        "Fly a whole sequence and wait for it, or a ready-made plan with builtin (du7_box: take off to 2 m, 1 m forward and back, 1 m left and back, land, at 0.5 m/s; du7_square10: outdoors, take off to 10 m, a 10 m square forward-left-back-right, land, 2.5 m/s level and 0.5 m/s vertical, needs a safety volume of at least 22 x 22 x 10.5 m; relay_plans_builtin lists them). Give steps or builtin, not both. " +
         "Actions: takeoff {alt, speed?}, hover {seconds}, move {forward, right, left, up, down | x, y, z; speed?, frame?}, yaw {deg, frame?}, goto {x, y, z, yaw?; speed?, frame?}, land. " +
         "A step's numbers follow its own frame, omitted: the server's control_frame (flu by default: left and counter-clockwise are positive; frd and relay: right and clockwise); prefer the named directions in move. " +
         "Prefer this for multi-step requests. A failed step stops the sequence and the aircraft holds. " +
@@ -401,7 +401,7 @@ export function relayTools(relay) {
       parameters: Type.Object({
         vehicle: VID,
         steps: Type.Optional(Type.Array(STEP, { minItems: 1, maxItems: 24 })),
-        builtin: Type.Optional(Type.Literal("du7_box", { description: "a ready-made plan instead of steps (relay_plans_builtin)" })),
+        builtin: Type.Optional(Type.Union([Type.Literal("du7_box"), Type.Literal("du7_square10")], { description: "a ready-made plan instead of steps (relay_plans_builtin)" })),
         tuning: Type.Optional(TUNING),
       }),
       executionMode: "sequential",
@@ -420,7 +420,7 @@ export function relayTools(relay) {
     defineTool(
       "relay_plans_builtin",
       "Ready-made plans",
-      "The ready-made plans relay_plan can fly with builtin: id, title, description and steps (du7_box is the ANetDU7 box test of its onboard test node).",
+      "The ready-made plans relay_plan can fly with builtin: id, title, description and steps (du7_box is the ANetDU7 box test of its onboard test node, du7_square10 the outdoor 10 m square).",
       Type.Object({}),
       async () => (await relay.call("GET", "/plans/builtin")).plans ?? [],
     ),
@@ -610,7 +610,7 @@ export function systemPrompt(lang, scope = "all", level = "full") {
     sticks
       ? "- relay_* (flight): read status, set a manual mode, arm and disarm, push the sticks for a few seconds (relay_sticks_for), fly stick timelines in stabilize (relay_timeline_*), land as a safety action, release the claim and stop."
       : "- relay_* (flight): read status and fly with takeoff, hover, move, yaw, land, whole sequences (relay_plan), stick timelines (relay_timeline_*: .ars files of throttle / pitch / roll / yaw blocks, trimmed and edited in flight, recorded from any flight), timed stick pushes (relay_sticks_for), arming, manual modes and flying a recorded flight again (relay_refly).",
-    ...(sticks ? [] : ["- relay_plans_builtin and relay_plan {builtin}: ready-made plans; du7_box is the ANetDU7 box test (take off to 2 m, 1 m forward and back, 1 m left and back, land)."]),
+    ...(sticks ? [] : ["- relay_plans_builtin and relay_plan {builtin}: ready-made plans; du7_box is the ANetDU7 box test (take off to 2 m, 1 m forward and back, 1 m left and back, land), du7_square10 the outdoor 10 m square at 10 m (needs a safety volume of at least 22 x 22 x 10.5 m)."]),
     // 12 §5
     "- relay_gimbal_status, relay_gimbal_control and relay_gimbal_captures: the gimbal pod of an aircraft (angle, rate, zoom, lens, photo, record, look_at, track and the rest); allowed at every flight level once you control the aircraft. Pod angles are the pod's own (yaw right +, pitch up +, looking down is negative) and do not follow the control frame; look_at takes a local point in the control frame. Zoom works per lens (visible1 1-30x, ir1 1-8x; visible2 and ir2 are fixed). Photos and recordings are listed by relay_gimbal_captures.",
     // 10 §2-§3: the timeline tuning loop

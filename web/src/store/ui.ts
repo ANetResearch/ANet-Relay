@@ -2,7 +2,7 @@
 // timeline window) go to localStorage under relay.ui; everything else resets per launch.
 import { create } from 'zustand'
 
-export type Workspace = 'fly' | 'agents' | 'records' | 'lab' // WP-3: Lab (06 §7)
+export type Workspace = 'fly' | 'agents' | 'records' | 'lab' | 'sequence' // WP-3: Lab (06 §7); 0.6.1: Timeline (stick timelines)
 export type ConnectTab = 'scan' | 'address' | 'serial' | 'bridge' // 11 §7.1: serial
 export type SettingsSection = 'general' | 'aircraft' | 'safety' | 'controllers' | 'copilot' | 'network' | 'autopilots' | 'data' | 'about' // 11 §3: autopilots; 12: aircraft
 export type TimelineWindow = 1 | 5 | 15
@@ -13,6 +13,8 @@ export interface UiState {
   fleetCollapsed: boolean
   inspectorCollapsed: boolean
   timelineCollapsed: boolean
+  /** the relay timeline strip per workspace (0.6.1): open in Fly and Agents, header row only elsewhere */
+  timelineByWs: Partial<Record<Workspace, boolean>>
   timelineWindow: TimelineWindow
   /** compact layout (< 1200 px wide): the inspector opens as a sheet */
   inspectorSheetOpen: boolean
@@ -42,7 +44,7 @@ export interface UiState {
 }
 
 const KEY = 'relay.ui'
-type Persisted = Pick<UiState, 'fleetCollapsed' | 'inspectorCollapsed' | 'timelineCollapsed' | 'timelineWindow'>
+type Persisted = Pick<UiState, 'fleetCollapsed' | 'inspectorCollapsed' | 'timelineCollapsed' | 'timelineWindow'> & { timelineByWs?: UiState['timelineByWs'] }
 
 function load(): Partial<Persisted> {
   try {
@@ -57,7 +59,8 @@ function save(s: UiState): void {
     const p: Persisted = {
       fleetCollapsed: s.fleetCollapsed,
       inspectorCollapsed: s.inspectorCollapsed,
-      timelineCollapsed: s.timelineCollapsed,
+      timelineCollapsed: s.timelineByWs.fly ?? s.timelineCollapsed,
+      timelineByWs: s.timelineByWs,
       timelineWindow: s.timelineWindow,
     }
     localStorage.setItem(KEY, JSON.stringify(p))
@@ -82,6 +85,7 @@ export const useUi = create<UiState>()((set, get) => {
   return {
     workspace: 'fly',
     selectedId: null,
+    timelineByWs: {},
     ...layoutDefaults(vw, vh),
     ...load(),
     inspectorSheetOpen: false,
@@ -92,11 +96,21 @@ export const useUi = create<UiState>()((set, get) => {
     settings: { open: false, section: 'general' },
     recordsFocus: null,
 
-    setWorkspace: (workspace) => set({ workspace }),
+    setWorkspace: (workspace) => {
+      const s = get()
+      const quiet = workspace === 'records' || workspace === 'lab' || workspace === 'sequence'
+      const base = s.timelineByWs.fly ?? (s.workspace === 'fly' || s.workspace === 'agents' ? s.timelineCollapsed : layoutDefaults(vw, vh).timelineCollapsed)
+      set({ workspace, timelineCollapsed: s.timelineByWs[workspace] ?? (quiet ? true : base) })
+    },
     select: (selectedId) => set({ selectedId }),
     toggleFleet: (force) => persist({ fleetCollapsed: force ?? !get().fleetCollapsed }),
     toggleInspector: (force) => persist({ inspectorCollapsed: force ?? !get().inspectorCollapsed }),
-    toggleTimeline: (force) => persist({ timelineCollapsed: force ?? !get().timelineCollapsed }),
+    toggleTimeline: (force) => {
+      const s = get()
+      const timelineCollapsed = force ?? !s.timelineCollapsed
+      const both = s.workspace === 'fly' || s.workspace === 'agents' ? { fly: timelineCollapsed, agents: timelineCollapsed } : { [s.workspace]: timelineCollapsed }
+      persist({ timelineCollapsed, timelineByWs: { ...s.timelineByWs, ...both } })
+    },
     setTimelineWindow: (timelineWindow) => persist({ timelineWindow }),
     setInspectorSheet: (inspectorSheetOpen) => set({ inspectorSheetOpen }),
     setCommandOpen: (commandOpen) => set({ commandOpen }),

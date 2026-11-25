@@ -190,7 +190,7 @@ def plan(request: Request, vid: str, body: schemas.PlanBody) -> dict[str, Any]:
 
 @router.get("/plans/builtin", tags=["control"])
 def plans_builtin() -> dict[str, Any]:
-    """Ready-made plans (12 §4): ``du7_box`` is the ANetDU7 box test."""
+    """Ready-made plans (12 §4): ``du7_box`` is the ANetDU7 box test, ``du7_square10`` its 10 m square."""
     return {"plans": [{"id": pid, **plan} for pid, plan in plans.BUILTIN.items()]}
 
 

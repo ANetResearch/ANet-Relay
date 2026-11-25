@@ -31,6 +31,8 @@ import './stage.css'
 export interface StageProps {
   /** 3D layers rendered inside the stage scene (CourseLayer) */
   children?: ReactNode
+  /** only the scene and the view tools: a host that shows its own readouts (the Timeline workspace) */
+  bare?: boolean
 }
 
 /** Window events of the input layer (control/actions.ts). */
@@ -181,7 +183,7 @@ function useStageBindings(): void {
   }, [])
 }
 
-export function Stage({ children }: StageProps) {
+export function Stage({ children, bare = false }: StageProps) {
   const root = React.useRef<HTMLDivElement>(null)
   const { w } = useStageSize(root)
   const replaying = useReplay((r) => r.active)
@@ -239,6 +241,8 @@ export function Stage({ children }: StageProps) {
         <StageLoading />
         {replaying ? (
           <ReplayBadge />
+        ) : bare ? (
+          <ViewTools top={topShift} />
         ) : (
           <>
             <IdentityBlock top={topShift} />

@@ -45,8 +45,8 @@ When the person lets go, control is relayed back to the agent that held it. Real
 <td><img src="docs/media/readme/dogfight.webp" alt="Quadcopters in a voxel arena exchanging red tracers; one bursts into voxels" width="100%" /></td>
 </tr>
 <tr>
-<td><h3>Timeline sequences</h3>Throttle, pitch, roll and yaw as rows of blocks on one time line, with both sticks drawn at every change. Drag a block or a stick, nudge with the arrow keys, trim out a drift while it flies, record a flight by hand. Saved as <code>.ars</code> files that fly simulators and real aircraft alike.</td>
-<td><img src="docs/media/readme/timeline.webp" alt="The timeline dock under the stage: stick pairs, throttle and direction blocks, a red playhead and two stick pads" width="100%" /></td>
+<td><h3>Timeline</h3>A workspace for tuning stick sequences: throttle, pitch, roll and yaw as rows of blocks that always fill the width, edited from the keyboard, or written as an aligned time table in the code view next to them. <code>Ctrl+Enter</code> runs from either view, edits reach the aircraft while it flies, and the altitude of each run is drawn against the one before. Saved as <code>.ars</code> files that fly simulators and real aircraft alike.</td>
+<td><img src="docs/media/readme/timeline.webp" alt="The Timeline workspace: the stage and live readouts, the transport bar, the tracks with a red playhead and the altitude lane, and the sequence as code beside them" width="100%" /></td>
 </tr>
 <tr>
 <td><img src="docs/media/readme/physics.webp" alt="A quadcopter inside its collision sphere, with rotor thrust arrows and a reaction-torque arc" width="100%" /></td>

@@ -12,7 +12,7 @@ const empty = Type.Object({});
 /** Interface actions: tool name -> {action, label, description, parameters}. */
 const UI = [
   ["app_set_language", "set_language", "Set language", "Switch the interface language of the ANet Relay window (also the native menus).", Type.Object({ lang: lit("en", "zh") })],
-  ["app_set_workspace", "set_workspace", "Open workspace", "Open the Fly, Agents or Records workspace.", Type.Object({ workspace: lit("fly", "agents", "records") })],
+  ["app_set_workspace", "set_workspace", "Open workspace", "Open the Fly, Agents, Records, Lab or Timeline (stick timeline editor, \"sequence\") workspace.", Type.Object({ workspace: lit("fly", "agents", "records", "lab", "sequence") })],
   [
     "app_select_vehicle",
     "select_vehicle",

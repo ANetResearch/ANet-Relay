@@ -102,6 +102,15 @@ const BUILTIN = [
       { action: 'move', left: 1, speed: 0.5 }, { action: 'move', left: -1, speed: 0.5 }, { action: 'land' },
     ],
   },
+  {
+    id: 'du7_square10', title: 'ANetDU7 10 m square', title_zh: 'ANetDU7 10 米方形航线',
+    description: 'Outdoors: take off to 10 m, fly a 10 m square (forward, left, back, right), land; 2.5 m/s level, 0.5 m/s vertical.',
+    description_zh: '室外：起飞到 10 米，飞 10 米见方的航线（前、左、后、右），降落；水平限速 2.5 m/s，垂直 0.5 m/s。',
+    steps: [
+      { action: 'takeoff', alt: 10, speed: 2.5 }, { action: 'move', forward: 10, speed: 2.5 }, { action: 'move', left: 10, speed: 2.5 },
+      { action: 'move', forward: -10, speed: 2.5 }, { action: 'move', left: -10, speed: 2.5 }, { action: 'land' },
+    ],
+  },
 ]
 
 const err = (status: number, code: string, en: string, zh: string) => new RelayApiError(status, code, en, zh)
@@ -279,7 +288,7 @@ export function startDu7Fixture(d: Deps, active: boolean) {
     if (m && method === 'POST' && typeof b.builtin === 'string') {
       const id = decodeURIComponent(m[1])
       const plan = BUILTIN.find((p) => p.id === b.builtin)
-      if (!plan) throw err(400, 'invalid_request', 'builtin must be du7_box', 'builtin 必须是 du7_box')
+      if (!plan) throw err(400, 'invalid_request', 'builtin must be du7_box or du7_square10', 'builtin 必须是 du7_box 或 du7_square10')
       d.mutate(id, (v) => ({ ...v, plan: { id: 1, name: plan.id, state: 'running', index: 0, count: plan.steps.length, steps: plan.steps, results: plan.steps.map(() => null), detail: null, tuning: {} } }))
       return { id, plan: plan.id }
     }

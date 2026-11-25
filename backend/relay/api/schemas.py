@@ -938,7 +938,8 @@ class PlanTuning(_Body):
 class PlanBody(_Body):
     steps: list[PlanStep] | None = Field(default=None, min_length=1, max_length=24)
     builtin: str | None = Field(
-        default=None, description="a ready-made plan instead of steps (GET /plans/builtin), e.g. du7_box"
+        default=None,
+        description="a ready-made plan instead of steps (GET /plans/builtin): du7_box or du7_square10",
     )
     name: str | None = Field(default=None, max_length=80)
     confirm: str | None = Field(default=None, description='"ARM" when the plan arms a real aircraft')

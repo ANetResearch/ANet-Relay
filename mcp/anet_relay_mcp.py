@@ -121,7 +121,7 @@ INSTRUCTIONS = (
     "Real aircraft need confirm='ARM' to arm and must pass preflight checks. goto targets must stay inside "
     "the safety volume reported by relay_fleet. Use relay_stop only in an emergency: it cuts the motors. "
     "relay_sticks_for pushes the sticks for a few seconds (a language model cannot fly a 50 Hz loop); "
-    "relay_refly repeats an earlier recorded flight; relay_plan with builtin du7_box flies the ANetDU7 box test "
+    "relay_refly repeats an earlier recorded flight; relay_plan with builtin du7_box flies the ANetDU7 box test, du7_square10 its outdoor 10 m square "
     "(relay_plans_builtin lists the ready-made plans). The ANetDU7 flies relay_takeoff, relay_move and "
     "relay_goto on speed-limited body velocity at 0.5 m/s by default; pass speed to change it. "
     "relay_gimbal_status, relay_gimbal_control and relay_gimbal_captures drive the gimbal pod of the aircraft "
@@ -310,16 +310,16 @@ TOOLS = [
         "velocity and finishes after `settle_s` within 0.2 m.",
         {
             "vehicle": VID,
-            "forward": {"type": "number", "minimum": -5, "maximum": 5},
-            "right": {"type": "number", "minimum": -5, "maximum": 5},
-            "left": {"type": "number", "minimum": -5, "maximum": 5},
+            "forward": {"type": "number", "minimum": -30, "maximum": 30},
+            "right": {"type": "number", "minimum": -30, "maximum": 30},
+            "left": {"type": "number", "minimum": -30, "maximum": 30},
             "up": {"type": "number", "minimum": -2, "maximum": 2},
             "down": {"type": "number", "minimum": -2, "maximum": 2},
-            "x": {"type": "number", "minimum": -5, "maximum": 5, "description": "body x (forward) in `frame`"},
+            "x": {"type": "number", "minimum": -30, "maximum": 30, "description": "body x (forward) in `frame`"},
             "y": {
                 "type": "number",
-                "minimum": -5,
-                "maximum": 5,
+                "minimum": -30,
+                "maximum": 30,
                 "description": "body y in `frame`: flu LEFT, frd and relay right",
             },
             "z": {
@@ -351,7 +351,9 @@ TOOLS = [
     _tool(
         "relay_plan",
         "Fly a sequence of steps and wait for it to finish, or a ready-made plan with `builtin` (du7_box: take "
-        "off to 2 m, 1 m forward and back, 1 m left and back, land, at 0.5 m/s; list them with "
+        "off to 2 m, 1 m forward and back, 1 m left and back, land, at 0.5 m/s; du7_square10: outdoors, take "
+        "off to 10 m, a 10 m square forward-left-back-right, land, 2.5 m/s level and 0.5 m/s vertical, needs "
+        "a safety volume of at least 22 x 22 x 10.5 m; list them with "
         "relay_plans_builtin). Give steps or builtin, not both. Actions: takeoff {alt, speed?}, hover "
         "{seconds}, move {forward, right, left, up, down | x, y, z; speed?, frame?}, yaw {deg, frame?}, goto "
         "{x, y, z, yaw?; speed?, frame?}, land. Example: takeoff 1 m, hover 3 s, move forward 1, move forward "
@@ -393,7 +395,7 @@ TOOLS = [
             },
             "builtin": {
                 "type": "string",
-                "enum": ["du7_box"],
+                "enum": ["du7_box", "du7_square10"],
                 "description": "a ready-made plan instead of steps (relay_plans_builtin)",
             },
             "confirm": {"type": "string", "enum": ["ARM"], "description": "real aircraft on the ground"},
@@ -404,7 +406,7 @@ TOOLS = [
     _tool(
         "relay_plans_builtin",
         "The ready-made plans relay_plan can fly with `builtin`: id, title, description and steps (du7_box is "
-        "the ANetDU7 box test of its onboard test node).",
+        "the ANetDU7 box test of its onboard test node, du7_square10 the 10 m square of the outdoor one).",
         read_only=True,
     ),
     _tool(

@@ -218,6 +218,7 @@ export function InputLayer() {
         },
       }),
       registerHotkey({ combo: 'p', workspace: 'fly', handler: toggleKeyboardPossession }),
+      registerHotkey({ combo: 'p', workspace: 'sequence', handler: toggleKeyboardPossession }), // 0.6.1: the Timeline's target aircraft
       // WP-C (05 §6.1, §6.3): Z throttle to the hover point, H hover assist
       registerHotkey({
         combo: 'z',

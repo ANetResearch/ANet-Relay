@@ -57,6 +57,7 @@ export const zh: Record<MessageKey, string> = {
   'ws.agents': '智能体',
   'ws.records': '记录',
   'ws.lab': '实验室', // WP-3
+  'ws.sequence': '时间轴', // 0.6.1
   'ws.label': '工作区',
   'relay.handback': '{aircraft} 已交还给 {agent}',
 
@@ -454,6 +455,7 @@ export const zh: Record<MessageKey, string> = {
   'cmd.goAgents': '前往智能体',
   'cmd.goRecords': '前往记录',
   'cmd.goLab': '前往实验室', // WP-3
+  'cmd.goSequence': '前往时间轴', // 0.6.1
   'cmd.stopAll': '全部急停',
   'cmd.select': '选中 {aircraft}',
   'cmd.possess': '附身 {aircraft}',

@@ -5,16 +5,98 @@ All notable changes to ANet Relay are documented in this file. The format follow
 [Semantic Versioning](https://semver.org/). Each release section is published as the
 GitHub Release notes for its tag.
 
-## [Unreleased]
+## [0.6.1] - 2026-11-25
+
+Stick timelines get their own workspace, built for tuning: change a number,
+run, watch, stop, change again. The sequence can be written as code at any
+time, and it runs from the code.
 
 ### Added
 
+- **ANetDU7 outdoor square.** The onboard test node that was flown on the real
+  aircraft now has an outdoor version, `vehicles/anet-du7/tests/u7_mavros_square10.py`
+  (take off to 10 m, a 10 m square, land), and Relay flies the same way:
+  built-in plan `du7_square10` (Control tab, `POST /vehicles/{id}/plan
+  {"builtin": "du7_square10"}`, MCP, SDK, Copilot). Set the safety volume to
+  at least 22 x 22 x 10.5 m first.
+
+- **Timeline workspace** (fifth tab, key `5`, `Alt+5` from anywhere). Top to
+  bottom: the document bar, the stage with a live monitor (sticks at the
+  cursor, altitude, attitude, battery, the four trims), the transport, the
+  block strip, then the tracks and the code. It replaces the dock under the
+  Fly stage; the Control tab, the command palette and Records "Open as
+  sequence" lead here.
+- **A time axis that fits.** The tracks always fill the width: resizing the
+  window, opening the code or folding the stage re-fits. `Ctrl`/`⌘` + wheel or
+  `Alt+=` zooms in, `\` fits again, `Z` zooms to the selection. The lanes
+  stretch with the height.
+- **Keyboard editing.** `←` `→` move between blocks (`Shift` extends), `Tab`
+  changes track, `↑` `↓` change the stick of every selected block, `Alt+←/→`
+  the duration, `Ctrl/⌘+←/→` the start; typing a number sets the stick; `R`
+  hold or ramp, `S` split, `I` insert, `Ctrl/⌘+D` duplicate, `Delete`,
+  `[` `]` cursor to the next key time. `?` opens the key sheet. Blocks are
+  also selected with `Ctrl/⌘`+click and `Shift`+click, and dragged together.
+- **Ripple across tracks** (on by default, `G`): a longer or shorter block
+  moves the later keys of the other tracks too.
+- **Code view** (`Alt+T` tracks, `Alt+S` split, `Alt+C` code; `Ctrl/⌘+E`
+  moves the focus). The sequence as an aligned time table: one row per moment
+  at which a stick changes, one column per stick, `+0.5` for "half a second
+  after the row above", `~` for a ramp, names after the value. Both views
+  show one document: typing moves the blocks, dragging a block rewrites the
+  number, the caret selects the block of its cell, the row being flown is
+  marked. `Alt+↑/↓` nudges the number under the caret. A text with problems
+  names the row and the rule, and never flies. The `.ars` file is unchanged.
+- **Run from anywhere in the workspace**: `Ctrl/⌘+Enter` runs from the start
+  and `Ctrl/⌘+Shift+Enter` from the cursor, in the tracks, the code and the
+  fields alike; `Space` stops the sequence. Run possesses an idle simulator
+  and puts a disarmed or crashed one back on its spawn point by itself;
+  `0.5× / 1× / 2×` sets the speed. A real aircraft is asked for in the
+  transport bar itself (possession, typed `ARM`), so nothing is pushed off
+  screen.
+- **Response lane**: the altitude of the run against sequence time, with the
+  previous run as a dashed line and both peaks; "Restore the previous run's
+  sequence" goes back in one click.
+- **Library and templates**: `Ctrl/⌘+S` saves the sequence under its name
+  (kept per viewer); the Open menu lists saved sequences, four templates
+  (take-off and land, throttle step, pitch and roll doublet, blank) and
+  import / export. Dropping an `.ars` file on the workspace imports it.
+- `Alt+1` … `Alt+5` switch workspace from anywhere, text fields and editors
+  included.
 - **Choosing what a found aircraft is.** Every fleet card carries a model tag
   (`DU7` or `Micro`). A real aircraft nobody has chosen a model for shows a
   bright `Model?` tag; clicking the tag chooses ANetDU7 (large) or Micro 120
   (small) on the spot. `vehicle.model_confirmed` is false until then. The
   connection dialog has a "New aircraft are" switch (the `real_model_default`
   setting) for what newly found aircraft are taken for.
+
+### Changed
+
+- **Speed-limited flight of `takeoff` / `move` / `goto` follows the new test
+  node.** Level speed is capped at `speed` and at a braking curve, so fast
+  legs stop in time; vertical speed is capped at 0.5 m/s whatever `speed` is
+  (a take-off with `speed` above 0.5 no longer climbs faster). A target counts
+  `settle_s` after the aircraft first comes within 0.2 m instead of after an
+  uninterrupted `settle_s` inside it, and a leg that never gets there ends at
+  its approach limit with `approach limit reached … m from the target` in
+  `skill.detail`. Plan steps accept `forward` / `right` / `left` and move
+  `x` / `y` up to 30 m (was 5).
+
+- `Esc` stops the aircraft on the first press while it flies a stick timeline,
+  whatever is selected and also from the code editor. Before, a selected block
+  took the first press.
+- The step plan of the Control tab is called "Action plan" (动作计划); the
+  stick editor is the "Timeline" (时间轴); the strip at the bottom stays the
+  "Relay timeline" (控制权时间线). The strip is folded to its header row in
+  Records, Lab and Timeline, and remembers its state per workspace.
+- Undo and redo keep the selected block selected.
+
+### Fixed
+
+- A stick timeline started right after a keyboard possession, or from a
+  different flight mode, could stop with "operator override": the keyboard's
+  resting throttle moves with the flight mode (bottom in a stick mode, middle
+  in a hold mode), and that jump was read as the pilot taking over. The rest
+  position is now taken again while the timeline switches mode and arms.
 
 ## [0.6.0] - 2026-11-19
 

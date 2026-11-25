@@ -45,7 +45,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 __all__ = ["DEFAULT_BASE", "RelayClient", "RelayError"]
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 
 DEFAULT_BASE = os.environ.get("RELAY_API", "http://127.0.0.1:8765")
 API = "/api/v1"
@@ -455,7 +455,7 @@ class RelayClient:
         return self.wait_plan(vehicle_id, plan["id"], timeout)
 
     def plans_builtin(self) -> list[dict]:
-        """The ready-made plans: ``[{id, title, title_zh, description, description_zh, steps}]`` (``du7_box``)."""
+        """The ready-made plans: ``[{id, title, title_zh, description, description_zh, steps}]`` (``du7_box``, ``du7_square10``)."""
         return self._get("/plans/builtin")["plans"]
 
     def plan_tune(self, vehicle_id: str, climb: float | None = None, hover: float | None = None) -> dict:
