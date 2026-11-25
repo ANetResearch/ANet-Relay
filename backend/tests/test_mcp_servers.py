@@ -832,8 +832,14 @@ def test_flight_descriptions_state_the_convention(stub):
 def test_flight_builtin_plans(stub):
     server = make(flight_mcp, stub)
     stub.responses["/plans/builtin"] = {"plans": [{"id": "du7_box", "steps": []}]}
-    assert text(call(server, "relay_plans_builtin"))["plans"][0]["id"] == "du7_box"
+    stub.responses["/plans/saved"] = {"plans": [{"id": "hop", "name": "Hop", "steps": [{"action": "land"}]}]}
+    listed = text(call(server, "relay_plans_builtin"))
+    assert listed["plans"][0]["id"] == "du7_box" and listed["saved"][0]["id"] == "hop"
     assert (last(stub)["method"], last(stub)["path"]) == ("GET", "/plans/builtin")
+    stub.responses["/vehicles/sim-1/plan"] = {"plan": {"id": 4, "name": "hop", "state": "running"}}
+    stub.responses["/vehicles/sim-1"] = {"id": "sim-1", "plan": {"id": 4, "name": "hop", "state": "done"}}
+    assert call(server, "relay_plan", {"vehicle": "sim-1", "saved": "hop"})["isError"] is False
+    assert [r for r in stub.requests if r["method"] == "POST"][-1]["body"] == {"saved": "hop", "name": "t"}
     stub.responses["/vehicles/sim-1/plan"] = {"plan": {"id": 5, "name": "du7_box", "state": "running"}}
     stub.responses["/vehicles/sim-1"] = {
         "id": "sim-1",
@@ -841,7 +847,7 @@ def test_flight_builtin_plans(stub):
     }
     result = call(server, "relay_plan", {"vehicle": "sim-1", "builtin": "du7_box"})
     assert result["isError"] is False and text(result)["plan"]["state"] == "done"
-    post = next(r for r in stub.requests if r["method"] == "POST" and r["path"] == "/vehicles/sim-1/plan")
+    post = [r for r in stub.requests if r["method"] == "POST" and r["path"] == "/vehicles/sim-1/plan"][-1]
     assert post["body"] == {"builtin": "du7_box", "name": "t"}
     for args in (
         {"vehicle": "sim-1"},

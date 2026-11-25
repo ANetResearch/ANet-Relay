@@ -26,6 +26,7 @@ import { notifyError } from '@/shell/notify'
 import { useUi } from '@/store/ui'
 import { parseArs } from '@/sequence/model'
 import { useSequence } from '@/sequence/store'
+import { usePlan } from '@/plan/store'
 import { useST } from '@/sequence/strings'
 
 /** The record's sticks as a timeline sequence (10 §2): opens in the Timeline workspace for editing. */
@@ -37,6 +38,7 @@ function OpenAsSequence({ id }: { id: number }) {
     try {
       const doc = parseArs(JSON.stringify(await api.historySequence(id)))
       useSequence.getState().load(doc)
+      usePlan.getState().setKind('sticks')
       useUi.getState().setWorkspace('sequence')
       notify(st('seq.recorded', { t: `${doc.duration_s.toFixed(1)} s` }))
     } catch (e) {

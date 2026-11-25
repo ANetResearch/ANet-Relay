@@ -28,4 +28,4 @@ export type { SerialPort, SerialPorts, SerialBaud, SerialLinkView, SerialUsb, Hi
 export { linkKind, serialOf, hitlOf } from './hitl'
 // v0.6.0 (12): models, control frames, the gimbal pod, ready-made plans
 export type { GimbalView, GimbalTracking, GimbalLaser, NavView } from './types'
-export type { RequestFrame, BuiltinPlan, GimbalCapture } from './rest'
+export type { RequestFrame, BuiltinPlan, SavedPlan, GimbalCapture } from './rest'

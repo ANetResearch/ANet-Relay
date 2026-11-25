@@ -10,6 +10,7 @@ a 50 Hz control loop. Protocol messages go to stdout, one JSON object per line; 
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from pathlib import Path
 from typing import Any
@@ -354,7 +355,7 @@ TOOLS = [
         "off to 2 m, 1 m forward and back, 1 m left and back, land, at 0.5 m/s; du7_square10: outdoors, take "
         "off to 10 m, a 10 m square forward-left-back-right, land, 2.5 m/s level and 0.5 m/s vertical, needs "
         "a safety volume of at least 22 x 22 x 10.5 m; list them with "
-        "relay_plans_builtin). Give steps or builtin, not both. Actions: takeoff {alt, speed?}, hover "
+        "relay_plans_builtin), or a plan saved by the operator with `saved`. Give exactly one of steps, builtin, saved. Actions: takeoff {alt, speed?}, hover "
         "{seconds}, move {forward, right, left, up, down | x, y, z; speed?, frame?}, yaw {deg, frame?}, goto "
         "{x, y, z, yaw?; speed?, frame?}, land. Example: takeoff 1 m, hover 3 s, move forward 1, move forward "
         "-1, yaw 45, land. A step's numbers follow its own `frame`, omitted: the server's control_frame "
@@ -398,6 +399,11 @@ TOOLS = [
                 "enum": ["du7_box", "du7_square10"],
                 "description": "a ready-made plan instead of steps (relay_plans_builtin)",
             },
+            "saved": {
+                "type": "string",
+                "description": "id of a plan saved in the Timeline workspace, instead of steps "
+                "(relay_plans_builtin lists them under `saved`)",
+            },
             "confirm": {"type": "string", "enum": ["ARM"], "description": "real aircraft on the ground"},
             "tuning": TUNING,
         },
@@ -406,7 +412,8 @@ TOOLS = [
     _tool(
         "relay_plans_builtin",
         "The ready-made plans relay_plan can fly with `builtin`: id, title, description and steps (du7_box is "
-        "the ANetDU7 box test of its onboard test node, du7_square10 the 10 m square of the outdoor one).",
+        "the ANetDU7 box test of its onboard test node, du7_square10 the 10 m square of the outdoor one), and under "
+        "`saved` the plans the operator saved from the Timeline workspace (fly one with relay_plan {saved: id}).",
         read_only=True,
     ),
     _tool(
@@ -785,10 +792,13 @@ def _dispatch(r: RelayClient, name: str, a: dict) -> Any:
     if name == "relay_yaw":
         return {"skill": r.yaw(vid, float(a["deg"]), wait=wait, frame=a.get("frame"))}
     if name == "relay_plans_builtin":
-        return {"plans": r.plans_builtin()}
+        saved: list[dict] = []
+        with contextlib.suppress(Exception):  # an older backend has no saved plans
+            saved = r.plans_saved()
+        return {"plans": r.plans_builtin(), "saved": saved}
     if name == "relay_plan":
-        if (a.get("steps") is None) == (a.get("builtin") is None):
-            raise ValueError("give steps or builtin, not both")
+        if sum(a.get(k) is not None for k in ("steps", "builtin", "saved")) != 1:
+            raise ValueError("give steps or builtin or saved, exactly one")
         return {
             "plan": r.plan(
                 vid,
@@ -797,6 +807,7 @@ def _dispatch(r: RelayClient, name: str, a: dict) -> Any:
                 confirm=a.get("confirm"),
                 tuning=a.get("tuning"),
                 builtin=a.get("builtin"),
+                saved=a.get("saved"),
             )
         }
     if name == "relay_plan_tune":

@@ -402,15 +402,16 @@ export function relayTools(relay) {
         vehicle: VID,
         steps: Type.Optional(Type.Array(STEP, { minItems: 1, maxItems: 24 })),
         builtin: Type.Optional(Type.Union([Type.Literal("du7_box"), Type.Literal("du7_square10")], { description: "a ready-made plan instead of steps (relay_plans_builtin)" })),
+        saved: Type.Optional(Type.String({ description: "id of a plan the operator saved in the Timeline workspace, instead of steps (relay_plans_builtin lists them with saved: true)" })),
         tuning: Type.Optional(TUNING),
       }),
       executionMode: "sequential",
       execute: async (_id, p, signal, onUpdate) => {
-        if ((p.steps === undefined) === (p.builtin === undefined)) throw new Error("invalid arguments: give steps or builtin, not both");
+        if ([p.steps, p.builtin, p.saved].filter((x) => x !== undefined).length !== 1) throw new Error("invalid arguments: give steps or builtin or saved, exactly one");
         await claimFor(p.vehicle);
         const started = await relay.call("POST", `/vehicles/${enc(p.vehicle)}/plan`, {
-          ...(p.builtin ? { builtin: p.builtin } : { steps: p.steps }),
-          name: p.builtin ?? "copilot",
+          ...(p.builtin ? { builtin: p.builtin } : p.saved ? { saved: p.saved } : { steps: p.steps }),
+          name: p.builtin ?? p.saved ?? "copilot",
           confirm: "ARM",
           ...(p.tuning ? { tuning: p.tuning } : {}),
         });
@@ -420,9 +421,18 @@ export function relayTools(relay) {
     defineTool(
       "relay_plans_builtin",
       "Ready-made plans",
-      "The ready-made plans relay_plan can fly with builtin: id, title, description and steps (du7_box is the ANetDU7 box test of its onboard test node, du7_square10 the outdoor 10 m square).",
+      "The ready-made plans relay_plan can fly with builtin: id, title, description and steps (du7_box is the ANetDU7 box test of its onboard test node, du7_square10 the outdoor 10 m square) and the plans the operator saved in the Timeline workspace (saved: true; fly one with relay_plan {saved: id}).",
       Type.Object({}),
-      async () => (await relay.call("GET", "/plans/builtin")).plans ?? [],
+      async () => {
+        const builtin = (await relay.call("GET", "/plans/builtin")).plans ?? [];
+        let saved = [];
+        try {
+          saved = ((await relay.call("GET", "/plans/saved")).plans ?? []).map((p) => ({ id: p.id, title: p.name, description: p.description, steps: p.steps, saved: true }));
+        } catch {
+          // an older backend has no saved plans
+        }
+        return [...builtin, ...saved];
+      },
     ),
     {
       name: "relay_plan_tune",

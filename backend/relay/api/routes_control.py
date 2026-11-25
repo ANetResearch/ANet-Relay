@@ -176,22 +176,55 @@ def skill(request: Request, vid: str, name: str, body: schemas.SkillBody | None 
 @router.post("/vehicles/{vid}/plan", tags=["control"], responses=ERRORS)
 def plan(request: Request, vid: str, body: schemas.PlanBody) -> dict[str, Any]:
     """Fly a sequence of skills: takeoff, hover, move, yaw, land, goto, rtl (03 §5.8)."""
-    if (body.steps is None) == (body.builtin is None):
-        raise err("invalid_request", reason="give steps or builtin")
+    if sum(x is not None for x in (body.steps, body.builtin, body.saved)) != 1:
+        raise err("invalid_request", reason="give one of steps, builtin or saved")
     name = body.name
     if body.builtin is not None:  # 12 §4: a ready-made plan
         steps = [dict(step) for step in plans.builtin(body.builtin)["steps"]]
         name = name or body.builtin
+    elif body.saved is not None:  # 14 §4: a plan saved from the Timeline
+        kept = service(request).plan_store.get(body.saved)
+        steps = [dict(step) for step in kept["steps"]]
+        name = name or kept["id"]
     else:
         steps = [step.model_dump(exclude_none=True) for step in body.steps or []]
     tuning = body.tuning.model_dump(exclude_none=True) if body.tuning else None
-    return service(request).run_plan(vid, actor(request, "control"), steps, name, body.confirm, tuning=tuning)
+    return service(request).run_plan(
+        vid,
+        actor(request, "control"),
+        steps,
+        name,
+        body.confirm,
+        tuning=tuning,
+        unlimited=bool(body.unlimited),
+    )
 
 
 @router.get("/plans/builtin", tags=["control"])
 def plans_builtin() -> dict[str, Any]:
     """Ready-made plans (12 §4): ``du7_box`` is the ANetDU7 box test, ``du7_square10`` its 10 m square."""
     return {"plans": [{"id": pid, **plan} for pid, plan in plans.BUILTIN.items()]}
+
+
+@router.get("/plans/saved", tags=["control"])
+def plans_saved(request: Request) -> dict[str, Any]:
+    """Plans saved by name (14 §4), newest first:
+    ``{plans: [{id, name, description, steps, source, updated}]}``."""
+    return {"plans": service(request).plan_store.list()}
+
+
+@router.put("/plans/saved/{pid}", tags=["control"], responses=ERRORS)
+def plans_save(request: Request, pid: str, body: schemas.SavedPlanBody) -> dict[str, Any]:
+    """Save (or replace) a plan; its steps are checked like those of ``POST /vehicles/{id}/plan``."""
+    data = body.model_dump()
+    data["steps"] = [step.model_dump(exclude_none=True) for step in body.steps]
+    return {"plan": service(request).plan_store.put(pid, data)}
+
+
+@router.delete("/plans/saved/{pid}", tags=["control"], responses=ERRORS)
+def plans_delete(request: Request, pid: str) -> dict[str, Any]:
+    service(request).plan_store.delete(pid)
+    return {"deleted": pid}
 
 
 @router.post("/vehicles/{vid}/model", tags=["fleet"], dependencies=OPERATOR, responses=ERRORS)

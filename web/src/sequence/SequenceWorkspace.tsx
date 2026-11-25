@@ -20,6 +20,7 @@ import { NativeSelect, NativeSelectOption } from '@/ui/components/ui/native-sele
 import { Icon } from '@/ui/icons'
 import { ControllerPill } from '@/ui/relay'
 import { Stage } from '@/stage/Stage'
+import { KindSwitch } from '@/plan/KindSwitch'
 import {
   ARS_SUFFIX, ArsError, armWaitThrottle, blockAt, blocks, duplicateBlock, fileName, insertAfter, keyTimes, moveStart, parseArs, range, removeBlock, resize,
   rippleFrom, sampleTrack, SEQ_MODES, serialiseArs, setDocDuration, setEase, setLabel, setTrim, setValue, splitAt, templateBlank, templateDoublet,
@@ -439,6 +440,7 @@ function DocBar({ doc, flying, view, wide, onImport, onKeys }: { doc: ArsDoc; fl
   ]
   return (
     <div className="seqws-bar" data-seq-docbar="">
+      <KindSwitch />
       <DropdownMenu>
         <DropdownMenuTrigger render={<Button variant="outline" size="sm" disabled={flying} data-seq-menu="" />}>
           <Icon icon="folder" />

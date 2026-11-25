@@ -64,6 +64,7 @@ from .config import (
     TIMESYNC_PERIOD_S,
     TIMESYNC_STALE_S,
     VERSION,
+    SafetyVolume,
     Settings,
     save_settings,
 )
@@ -180,6 +181,7 @@ class Vehicle:
         self.model_source: Callable[[Any], str] | None = None  # real aircraft: the fleet's settings
         self.frame_offset = (0.0, 0.0, 0.0)
         self.safety_origin: tuple[float, float, float] | None = None
+        self.unlimited_pending = False  # 14 §6: a plan without the safety volume is being started
         self.identity_at: float | None = None
         self.stream_check_at = 0.0
         self.param_due: float | None = None
@@ -416,6 +418,7 @@ class FleetService(
     ) -> None:
         self.settings = settings or Settings()
         self.data_dir = data_dir
+        self.plan_store = plans.PlanStore(data_dir / "plans.json" if data_dir is not None else None)
         self.operator_token = operator_token
         self.clock = clock
         self.wall = wall
@@ -1763,7 +1766,29 @@ class FleetService(
                         v.skill.phase in ("start", "mode", "arm")
                         or (keyboard and v.skill.phase == "play" and now - v.skill.phase_t < 1.0)
                     )
-                    if baseline is None or settling:
+                    # 14 §5: the same for a take-off started right after keyboard possession (Run in the
+                    # Timeline possesses and starts a plan in one go): while it still changes mode and arms,
+                    # and for the first second of each phase, the keyboard's rest is not a pilot taking
+                    # over. Later steps of a plan are not covered: there a moved stick is an override.
+                    settling = settling or (
+                        keyboard
+                        and v.skill.name == "takeoff"
+                        and (
+                            v.skill.phase in ("start", "mode", "prime", "arm", "offboard")
+                            or now - v.skill.started < 1.0
+                            or now - v.skill.phase_t < 1.0
+                        )
+                    )
+                    # a keyboard at rest sends centred sticks with the throttle where the reported mode
+                    # wants it (bottom, mid stick or the hover point): when a later step of a plan changes
+                    # the mode, the throttle that arrives in its first two seconds with the other sticks
+                    # centred is the new rest, not a hand on the keys. Roll, pitch and yaw always override.
+                    rest = (
+                        keyboard
+                        and max(abs(new.roll), abs(new.pitch), abs(new.yaw)) < 1e-3
+                        and now - v.skill.started < 2.0
+                    )
+                    if baseline is None or settling or rest:
                         v.skill.params["_baseline"] = new
                         return {"accepted": False, "reason": "skill_running"}
                     if new.deflection_from(baseline) <= PILOT_OVERRIDE:
@@ -1957,7 +1982,7 @@ class FleetService(
         except coords.FrameError as exc:
             raise err("invalid_request", reason=exc.reason) from None
         track = self._track_speed(v, name, params)  # 12 §4: speed-limited tracking
-        sv = self.settings.safety_volume
+        sv = self._volume_for(v)
         required = skills.requirement(name)
         if not v.capabilities.has(required):
             raise err("capability_missing", required=required)
@@ -2134,7 +2159,10 @@ class FleetService(
         confirm: str | None = None,
         max_steps: int = plans.MAX_STEPS,
         tuning: Any = None,
+        unlimited: bool = False,
     ) -> dict[str, Any]:
+        if unlimited and actor.kind != "operator":
+            raise err("operator_required")  # 14 §6: only the person at the console flies without the volume
         normalised = plans.normalise_steps(steps, max_steps)
         tuned = plans.normalise_tuning(tuning)
         flight_level.check_plan(self.settings, actor, normalised)  # WP-1 (06 §5)
@@ -2152,15 +2180,21 @@ class FleetService(
                 required = skills.REQUIREMENTS[plans.skill_for(step)[0]]
                 if not v.capabilities.has(required):
                     raise err("capability_missing", required=required, action=step["action"])
-            prepared, target_local = self._prepare_skill(v, first, params)
+            v.unlimited_pending = unlimited
+            try:
+                prepared, target_local = self._prepare_skill(v, first, params)
+            finally:
+                v.unlimited_pending = False
             self._cancel_plan(v, "superseded by a new plan", "被新的动作序列取代")
             self._plan_seq += 1
-            plan = plans.Plan(self._plan_seq, normalised, actor, self.clock(), name=name, tuning=tuned)
+            plan = plans.Plan(
+                self._plan_seq, normalised, actor, self.clock(), name=name, tuning=tuned, unlimited=unlimited
+            )
             v.plan = plan
             self.events.emit(
                 "plan_started",
                 v.id,
-                data={"plan_id": plan.id, "steps": normalised, "name": name},
+                data={"plan_id": plan.id, "steps": normalised, "name": name, "unlimited": unlimited},
                 labels={"vehicle": v.label, "count": str(len(normalised))},
             )
             skill = self._start_skill(v, first, prepared, target_local, tuning=plan.tuning)
@@ -2277,10 +2311,18 @@ class FleetService(
             labels={"vehicle": v.label, "detail": en, "step": str(plan.index + 1)},
         )
 
+    def _volume_for(self, v: Vehicle) -> SafetyVolume:
+        """The safety volume that applies to ``v`` now: the setting, or none at all while it flies a plan
+        the operator started without it (14 §6)."""
+        plan = v.plan
+        if v.unlimited_pending or (plan is not None and plan.running and plan.unlimited):
+            return SafetyVolume(x=1e6, y=1e6, z=1e5)
+        return self.settings.safety_volume
+
     def _local_box(self, v: Vehicle, local: tuple[float, float, float]) -> tuple[float, ...]:
         """The safety volume as (xmin, xmax, ymin, ymax, zmin, zmax) in the vehicle's local ENU frame."""
         origin = v.safety_origin or v.world_enu() or (0.0, 0.0, 0.0)
-        sv = self.settings.safety_volume
+        sv = self._volume_for(v)
         ox, oy, oz = (origin[i] - v.frame_offset[i] for i in range(3))
         box = (ox - sv.x / 2, ox + sv.x / 2, oy - sv.y / 2, oy + sv.y / 2, oz, oz + sv.z)
         if not skills._inside(box, local):
@@ -2430,7 +2472,7 @@ class FleetService(
         origin = v.safety_origin
         if origin is None:
             origin = v.world_enu() or (0.0, 0.0, 0.0)
-        sv = self.settings.safety_volume
+        sv = self._volume_for(v)
         dx, dy, dz = x - origin[0], y - origin[1], z - origin[2]
         if abs(dx) > sv.x / 2 or abs(dy) > sv.y / 2 or not 0.0 <= dz <= sv.z:
             raise err(

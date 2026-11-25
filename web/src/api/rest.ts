@@ -100,6 +100,8 @@ export type RequestFrame = 'flu' | 'frd' | 'relay'
 /** One plan step (03 §5.8, 12 §3): takeoff {alt}, hover {seconds}, move {forward, right, up | left, down}, yaw {deg}, land. */
 export type PlanStep = { action: PlanAction; alt?: number; seconds?: number; forward?: number; right?: number; up?: number; left?: number; down?: number; deg?: number; x?: number; y?: number; z?: number; yaw?: number; speed?: number; frame?: RequestFrame }
 /** A ready-made plan of GET /plans/builtin (12 §4). */
+/** A plan saved by name (14 §4); `source` is the Timeline's code view text. */
+export type SavedPlan = { id: string; name: string; description?: string; steps: PlanStep[]; source?: string | null; updated: number }
 export type BuiltinPlan = { id: string; title: string; title_zh?: string; description?: string; description_zh?: string; steps: PlanStep[] }
 /** A capture of GET /vehicles/{id}/gimbal/captures (12 §5.2), newest last. */
 export type GimbalCapture = {
@@ -150,11 +152,15 @@ export const api = {
   mode: (id: string, name: string) => op<Ok>('POST', `/vehicles/${enc(id)}/mode`, { name }),
   skill: (id: string, name: SkillName, args?: Record<string, number | string>) =>
     op<Ok>('POST', `/vehicles/${enc(id)}/skills/${name}`, args ?? {}),
-  plan: (id: string, steps: PlanStep[], opts?: { name?: string; confirm?: string; tuning?: PlanTuning }) =>
+  plan: (id: string, steps: PlanStep[], opts?: { name?: string; confirm?: string; tuning?: PlanTuning; unlimited?: boolean }) =>
     op<Ok>('POST', `/vehicles/${enc(id)}/plan`, { steps, ...opts }),
   // 12 §4: ready-made plans (du7_box)
   plansBuiltin: () => request<{ plans: BuiltinPlan[] }>('GET', '/plans/builtin'),
   planBuiltin: (id: string, builtin: string, opts?: { confirm?: string }) => op<Ok>('POST', `/vehicles/${enc(id)}/plan`, { builtin, ...opts }),
+  // 14 §4: plans saved by name from the Timeline workspace
+  plansSaved: () => request<{ plans: SavedPlan[] }>('GET', '/plans/saved'),
+  savePlan: (pid: string, body: { name: string; steps: PlanStep[]; source?: string; description?: string }) => request<{ plan: SavedPlan }>('PUT', `/plans/saved/${enc(pid)}`, body),
+  deleteSavedPlan: (pid: string) => request<{ deleted: string }>('DELETE', `/plans/saved/${enc(pid)}`),
   // 12 §2.2: what a real aircraft is shown and flown as (operator)
   setModel: (id: string, model: Vehicle['model']) => op<{ id: string; model: Vehicle['model'] }>('POST', `/vehicles/${enc(id)}/model`, { model }),
   // 12 §5: gimbal pod

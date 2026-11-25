@@ -5,6 +5,60 @@ All notable changes to ANet Relay are documented in this file. The format follow
 [Semantic Versioning](https://semver.org/). Each release section is published as the
 GitHub Release notes for its tag.
 
+## [0.6.2] - 2026-11-25
+
+The Timeline now edits flight plans, not stick movements: a list of steps
+(take off, move, go to, hover, turn, land, return) with their settings. Change
+a setting, run, watch, hold, change again, then save the plan by name.
+
+### Added
+
+- **Flight plans in the Timeline** (the default; the stick timeline of 0.6.1
+  is behind the Plan | Sticks switch in the document bar, `Alt+K`). Top to
+  bottom: document bar, the stage with a top-down path preview and live values,
+  the transport, a time strip whose step blocks always fill the width with the
+  planned and the flown height under them, the step list, and the code.
+- **Step list from the keyboard.** `←` `→` pick a step, `↑` `↓` change the
+  value, `Tab` moves to the next setting, digits type a value, `Alt+←` `→`
+  reorder, `T M H Y G L R` add a step, `Ctrl/⌘+D` duplicates, `Delete`
+  removes. `?` lists every key.
+- **Plan code.** One step per line, aligned in columns (`takeoff alt 10`,
+  `move forward 10 speed 1`, `hover 5`, `land`), with `plan`, `speed`,
+  `settle` and `frame` header lines and `#` comments. The list and the code
+  are one document and follow each other; a text with problems names the line
+  and the rule, and cannot fly.
+- **Run from anywhere** with `Ctrl/⌘+Enter` (`Ctrl/⌘+Shift+Enter` from the
+  selected step). `Space` cancels the plan and the aircraft holds. Each step
+  shows how it ended and how long it took; the height of the run is drawn over
+  the plan, with the run before as a dashed line. The last 12 runs can be
+  reopened.
+- **Safety volume check before take-off.** The monitor shows the volume the
+  plan needs; when the setting is too small, Run offers to enlarge it.
+- **Run without the safety volume**: a separate trigger (`Ctrl/⌘+Alt+Enter`)
+  for the operator. That one plan is not checked against the volume; the
+  setting stays, arming confirmation, pilot override and the flight monitors
+  stay. `POST /vehicles/{id}/plan {"unlimited": true}`, refused for agent
+  sessions with `operator_required`.
+- **Saved plans.** `Ctrl/⌘+S` keeps the plan in the backend under its name.
+  `GET /plans/saved`, `PUT` / `DELETE /plans/saved/{id}`, and
+  `POST /vehicles/{id}/plan {"saved": id}`. MCP and Copilot `relay_plan` take
+  `saved` and `relay_plans_builtin` lists them; the SDK has `plans_saved()`,
+  `plan_save()`, `plan_delete()` and `plan(saved=...)`.
+- Built-in plans in the Control tab have **Edit in Timeline**.
+
+### Changed
+
+- Plan steps accept a take-off height up to 30 m (was 10); the safety volume
+  decides what is allowed.
+
+### Fixed
+
+- A plan flown under keyboard possession was aborted as an operator override
+  when a step changed the flight mode: the keyboard's resting throttle follows
+  the mode. A throttle-only change in the first two seconds of a step now
+  counts as the new rest; roll, pitch and yaw still override at any time, and
+  a gamepad is not affected.
+
 ## [0.6.1] - 2026-11-25
 
 Stick timelines get their own workspace, built for tuning: change a number,

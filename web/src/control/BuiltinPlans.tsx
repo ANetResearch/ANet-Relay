@@ -6,6 +6,10 @@ import * as React from 'react'
 import { api, RelayApiError, type BuiltinPlan, type Vehicle } from '@/api'
 import { pickText, useLang, useT } from '@/i18n'
 import { notifyError } from '@/shell/notify'
+import { openPlan } from '@/plan/PlanWorkspace'
+import { usePlan } from '@/plan/store'
+import { translatePlan } from '@/plan/strings'
+import { useUi } from '@/store/ui'
 import { Button } from '@/ui/components/ui/button'
 import { Icon } from '@/ui/icons'
 import { Group, TypeToConfirm } from '@/ui/relay'
@@ -89,10 +93,27 @@ function PlanRow({ v, plan }: { v: Vehicle; plan: BuiltinPlan }) {
             {ct('plan.cancel')}
           </Button>
         ) : (
-          <Button variant="outline" size="sm" className="shrink-0" disabled={Boolean(blocked) || busy || v.plan?.state === 'running'} onClick={() => void run()} title={blocked ?? undefined} data-builtin-run="">
-            <Icon icon="tl.play" />
-            {t('builtin.run')}
-          </Button>
+          <>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="shrink-0"
+              title={translatePlan(lang, 'plan.openInTimeline')}
+              aria-label={translatePlan(lang, 'plan.openInTimeline')}
+              onClick={() => {
+                openPlan(title, plan.steps as unknown as Record<string, unknown>[])
+                usePlan.getState().setKind('plan')
+                useUi.getState().setWorkspace('sequence')
+              }}
+              data-builtin-edit=""
+            >
+              <Icon icon="seq.timeline" />
+            </Button>
+            <Button variant="outline" size="sm" className="shrink-0" disabled={Boolean(blocked) || busy || v.plan?.state === 'running'} onClick={() => void run()} title={blocked ?? undefined} data-builtin-run="">
+              <Icon icon="tl.play" />
+              {t('builtin.run')}
+            </Button>
+          </>
         )}
       </div>
       {status ? (

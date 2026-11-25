@@ -207,6 +207,7 @@ class PlanView(_Model):
     tuning: dict[str, float] = Field(
         default_factory=dict, description="throttle tuning of the stick steps: climb, hover (PlanTuning)"
     )
+    unlimited: bool = Field(default=False, description="flown without the safety volume (operator, 14 §6)")
 
 
 class Signs(_Model):
@@ -941,9 +942,23 @@ class PlanBody(_Body):
         default=None,
         description="a ready-made plan instead of steps (GET /plans/builtin): du7_box or du7_square10",
     )
+    saved: str | None = Field(default=None, description="a saved plan instead of steps (GET /plans/saved)")
+    unlimited: bool | None = Field(
+        default=None,
+        description="operator only: fly this plan without the safety volume (the other checks stay)",
+    )
     name: str | None = Field(default=None, max_length=80)
     confirm: str | None = Field(default=None, description='"ARM" when the plan arms a real aircraft')
     tuning: PlanTuning | None = Field(default=None, description="throttle tuning, adjustable while flying")
+
+
+class SavedPlanBody(_Body):
+    """A plan kept by name (14 §4). ``source`` is the text of the Timeline's code view, comments included."""
+
+    name: str | None = Field(default=None, max_length=80)
+    description: str | None = Field(default=None, max_length=400)
+    steps: list[PlanStep] = Field(min_length=1, max_length=24)
+    source: str | None = Field(default=None, max_length=16384)
 
 
 class SequenceTrim(_Body):

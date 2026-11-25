@@ -1,0 +1,66 @@
+/* Flight plans in the Timeline workspace (14). Greys only; red marks what is live, as elsewhere. */
+.plan-strip { flex: none; display: flex; min-height: 0; border-bottom: 1px solid var(--border); background: var(--g950); }
+.plan-lanes { position: relative; flex: 1; min-width: 0; overflow: hidden; }
+.plan-ruler { position: relative; border-bottom: 1px solid var(--border); }
+.plan-ruler > span { position: absolute; top: 3px; transform: translateX(3px); font: 10px var(--font-mono); color: var(--g500); }
+.plan-ruler > span::before { content: ''; position: absolute; left: -3px; top: -3px; height: 18px; border-left: 1px solid var(--g800); }
+.plan-blocks { position: relative; }
+.plan-block {
+  position: absolute; top: 4px; bottom: 4px; display: flex; flex-direction: column; justify-content: center; gap: 1px; padding: 0 6px; overflow: hidden;
+  border-radius: 4px; text-align: left; white-space: nowrap; background: var(--g850, var(--g800)); box-shadow: inset 0 0 0 1px var(--g700); color: var(--g300);
+}
+.plan-block > b { font-size: 11px; font-weight: 560; color: var(--g100); overflow: hidden; text-overflow: ellipsis; }
+.plan-block > span { font: 10px var(--font-mono); color: var(--g400); overflow: hidden; text-overflow: ellipsis; }
+.plan-block:hover:not(:disabled) { background: var(--g800); }
+.plan-block[data-more] { box-shadow: inset 0 0 0 1px var(--g400); }
+.plan-block[data-on] { background: var(--g700); box-shadow: inset 0 0 0 1px var(--g200); }
+.plan-block[data-flown] { opacity: 0.55; }
+.plan-block[data-flying] { box-shadow: inset 0 0 0 1px var(--r400); }
+.plan-block[data-mark='ok']::after, .plan-block[data-mark='bad']::after { content: '✓'; position: absolute; right: 4px; top: 2px; font-size: 9px; color: var(--g300); }
+.plan-block[data-mark='bad']::after { content: '✗'; color: var(--g50); font-weight: 700; }
+.plan-alt { display: block; }
+.plan-alt-label { font: 10px var(--font-mono); fill: var(--g500); }
+.plan-alt-ground { stroke: var(--g700); stroke-width: 1; }
+.plan-alt-grid { stroke: var(--g850, var(--g800)); stroke-width: 1; }
+.plan-alt-plan { fill: none; stroke: var(--g500); stroke-width: 1.2; stroke-dasharray: 2 3; }
+.plan-alt-ghost { fill: none; stroke: var(--g500); stroke-width: 1; stroke-dasharray: 5 4; opacity: 0.8; }
+.plan-alt-trace { fill: none; stroke: var(--g50); stroke-width: 1.6; }
+.plan-head { stroke: var(--r400); stroke-width: 1; }
+.plan-head-top { position: absolute; width: 1px; background: var(--r400); pointer-events: none; }
+
+.plan-preview { display: flex; flex-direction: column; gap: 4px; width: 200px; flex: none; padding: 8px 10px; border-right: 1px solid var(--border); min-height: 0; }
+.plan-preview > svg { flex: 1; min-height: 0; width: 100%; }
+.plan-pv-axis { stroke: var(--g850, var(--g800)); stroke-width: 0.4; }
+.plan-pv-safe { fill: none; stroke: var(--g600); stroke-width: 0.5; stroke-dasharray: 1.5 1.5; }
+.plan-pv-safe[data-outside] { stroke: var(--g100); }
+.plan-pv-text { font-size: 4.5px; fill: var(--g500); }
+.plan-pv-leg { stroke: var(--g400); stroke-width: 0.9; stroke-linecap: round; }
+.plan-pv-leg[data-on] { stroke: var(--g50); stroke-width: 1.5; }
+.plan-pv-corner { fill: var(--g400); }
+.plan-pv-corner[data-on] { fill: var(--g50); }
+.plan-pv-start { fill: none; stroke: var(--g200); stroke-width: 0.7; }
+.plan-pv-ghost { fill: none; stroke: var(--g500); stroke-width: 0.6; stroke-dasharray: 2 1.5; }
+.plan-pv-trace { fill: none; stroke: var(--g50); stroke-width: 0.9; }
+.plan-pv-live { fill: var(--r400); }
+
+.plan-table { flex: 1; min-width: 0; min-height: 0; overflow: auto; outline: none; display: flex; flex-direction: column; }
+.plan-table.is-readonly .plan-row:not(.plan-head-row) { opacity: 0.55; }
+.plan-row {
+  display: grid; grid-template-columns: 28px 100px minmax(260px, 1fr) 62px minmax(120px, 0.6fr) minmax(90px, 0.45fr); align-items: center; gap: 8px;
+  min-height: 34px; padding: 3px 10px; border-bottom: 1px solid var(--g850, var(--g800)); font-size: 11px; flex: none;
+}
+.plan-row[data-more] { background: color-mix(in oklch, var(--g900), var(--g800) 60%); }
+.plan-row[data-on] { background: var(--g800); box-shadow: inset 2px 0 0 var(--g200); }
+.plan-row[data-flown] { opacity: 0.6; }
+.plan-row[data-flying] { box-shadow: inset 2px 0 0 var(--r400); background: color-mix(in oklch, var(--g900), var(--g800) 60%); }
+.plan-head-row { position: sticky; top: 0; z-index: 1; min-height: 24px; background: var(--g900); color: var(--g500); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--border); }
+.plan-cells { display: flex; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+.plan-cell { display: inline-flex; align-items: center; gap: 4px; color: var(--g500); white-space: nowrap; }
+.plan-cell[data-set] { color: var(--g300); }
+.plan-cell > i { font-style: normal; font-size: 10px; color: var(--g600); }
+.plan-cell[data-on] > input { box-shadow: 0 0 0 1px var(--g200); }
+.plan-cell[data-on] { color: var(--g50); }
+.plan-result { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 10px var(--font-mono); color: var(--g300); }
+.plan-result[data-bad] { color: var(--g50); font-weight: 600; }
+.plan-add { position: sticky; bottom: 0; display: flex; align-items: center; gap: 6px; flex: none; margin-top: auto; padding: 6px 10px; background: var(--g900); border-top: 1px solid var(--border); }
+.plan-add .seq-toggle { display: inline-flex; align-items: center; gap: 2px; }

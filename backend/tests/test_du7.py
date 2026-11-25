@@ -346,3 +346,64 @@ def test_tracked_leg_ends_at_its_approach_limit(svc, stepper):
     assert stepper.until(lambda: skill.state != "running", 5, [session])
     assert skill.state == "done" and skill.track_short
     assert "approach limit" in skill.view()["detail"]
+
+
+# ------------------------------------------------------------------ saved plans (14 §4)
+
+
+def test_saved_plans_are_kept_checked_and_flown(tmp_path):
+    store = plans.PlanStore(tmp_path / "plans.json")
+    steps = [
+        {"action": "takeoff", "alt": 1.5, "speed": 0.5},
+        {"action": "hover", "seconds": 2},
+        {"action": "land"},
+    ]
+    kept = store.put("hop", {"name": "Hop", "steps": steps, "source": "takeoff 1.5\nhover 2\nland\n"})
+    assert kept["id"] == "hop" and kept["steps"][0] == {"action": "takeoff", "alt": 1.5, "speed": 0.5}
+    assert [p["id"] for p in plans.PlanStore(tmp_path / "plans.json").list()] == ["hop"]  # survives a restart
+    with pytest.raises(RelayError):
+        store.put("hop2", {"steps": [{"action": "takeoff", "alt": 99}]})  # checked like a flown plan
+    with pytest.raises(RelayError):
+        store.put("du7_box", {"steps": steps})  # a built-in keeps its name
+    with pytest.raises(RelayError):
+        store.put("Bad Id", {"steps": steps})
+    assert plans.plan_id("10 m 方形 Square!") == "10-m-square"
+    store.delete("hop")
+    assert store.list() == []
+    with pytest.raises(RelayError):
+        store.get("hop")
+
+
+# ------------------------------------------------------------------ a plan without the safety volume (14 §6)
+
+
+def test_operator_can_fly_a_plan_without_the_safety_volume(svc, stepper):
+    v = boot(svc, stepper)
+    svc.update_settings({"safety_volume": {"x": 3.0, "y": 3.0, "z": 2.0}})
+    session, agent = open_agent(svc)
+    steps = [
+        {"action": "takeoff", "alt": 4.0, "speed": 0.5},
+        {"action": "move", "forward": 6.0, "speed": 2.0},
+    ]
+    # an agent cannot ask for it, and inside the volume the plan is refused as before
+    svc.claim(v.id, agent)
+    with pytest.raises(RelayError) as refused:
+        svc.run_plan(v.id, agent, [dict(s) for s in steps], "far", unlimited=True)
+    assert refused.value.code == "operator_required"
+    with pytest.raises(RelayError) as outside:
+        svc.run_plan(v.id, agent, [dict(s) for s in steps], "far")
+    assert outside.value.code == "outside_safety_volume"
+    svc.unclaim(v.id, agent)
+    operator = Actor.operator("gamepad", 1)
+    svc.possess(v.id, "gamepad", 1)
+    origin = v.world_enu()
+    out = svc.run_plan(v.id, operator, [dict(s) for s in steps], "far", unlimited=True)
+    assert out["plan"]["unlimited"] is True
+    assert stepper.until(lambda: v.plan is None or not v.plan.running, 120, [session])
+    assert v.plan.state == "done", v.plan.view()
+    here = v.world_enu()
+    assert here[2] - origin[2] > 3.5 and math.dist(here[:2], origin[:2]) > 5.5  # well outside 3 x 3 x 2
+    # the volume is back for whatever comes next
+    with pytest.raises(RelayError) as again:
+        svc.run_skill(v.id, operator, "move", {"forward": 3.0})
+    assert again.value.code == "outside_safety_volume"

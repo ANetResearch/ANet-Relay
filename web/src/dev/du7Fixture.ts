@@ -289,7 +289,7 @@ export function startDu7Fixture(d: Deps, active: boolean) {
       const id = decodeURIComponent(m[1])
       const plan = BUILTIN.find((p) => p.id === b.builtin)
       if (!plan) throw err(400, 'invalid_request', 'builtin must be du7_box or du7_square10', 'builtin 必须是 du7_box 或 du7_square10')
-      d.mutate(id, (v) => ({ ...v, plan: { id: 1, name: plan.id, state: 'running', index: 0, count: plan.steps.length, steps: plan.steps, results: plan.steps.map(() => null), detail: null, tuning: {} } }))
+      d.mutate(id, (v) => ({ ...v, plan: { id: 1, name: plan.id, state: 'running', index: 0, count: plan.steps.length, steps: plan.steps, results: plan.steps.map(() => null), detail: null, tuning: {}, unlimited: false } }))
       return { id, plan: plan.id }
     }
     return undefined

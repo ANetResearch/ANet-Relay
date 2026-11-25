@@ -45,7 +45,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 __all__ = ["DEFAULT_BASE", "RelayClient", "RelayError"]
-__version__ = "0.6.1"
+__version__ = "0.6.2"
 
 DEFAULT_BASE = os.environ.get("RELAY_API", "http://127.0.0.1:8765")
 API = "/api/v1"
@@ -430,6 +430,7 @@ class RelayClient:
         timeout: float = 180.0,
         tuning: dict | None = None,
         builtin: str | None = None,
+        saved: str | None = None,
     ) -> dict:
         """Fly a sequence, e.g. [{"action": "takeoff", "alt": 1}, {"action": "move", "forward": 1}, ...].
 
@@ -439,10 +440,11 @@ class RelayClient:
         ``plan(id, builtin="du7_box")``. A step may carry ``frame`` (``flu`` | ``frd`` | ``relay``; omitted: the
         server's ``control_frame``), ``speed`` and ``settle_s`` (move, goto, takeoff), ``reference``
         (velocity) and the named directions ``left`` / ``down``; see the module docstring for the frames.
+        ``saved`` flies a plan kept by name (``plans_saved()``, ``plan_save()``; the Timeline workspace saves them).
         """
-        if (steps is None) == (builtin is None):
-            raise ValueError("give steps or builtin")
-        body: dict[str, Any] = {"builtin": builtin} if builtin else {"steps": steps}
+        if sum(x is not None for x in (steps, builtin, saved)) != 1:
+            raise ValueError("give steps or builtin or saved")
+        body: dict[str, Any] = {"builtin": builtin} if builtin else {"saved": saved} if saved else {"steps": steps}
         if name:
             body["name"] = name
         if confirm:
@@ -457,6 +459,20 @@ class RelayClient:
     def plans_builtin(self) -> list[dict]:
         """The ready-made plans: ``[{id, title, title_zh, description, description_zh, steps}]`` (``du7_box``, ``du7_square10``)."""
         return self._get("/plans/builtin")["plans"]
+
+    def plans_saved(self) -> list[dict]:
+        """Plans saved by name, newest first: ``[{id, name, description, steps, source, updated}]``."""
+        return self._get("/plans/saved")["plans"]
+
+    def plan_save(
+        self, plan_id: str, steps: list[dict], name: str | None = None, description: str | None = None
+    ) -> dict:
+        """Save (or replace) a plan under ``plan_id`` (lower-case letters, digits, ``-``, ``_``)."""
+        body = {"steps": steps, **_drop_none(name=name, description=description)}
+        return self.request("PUT", f"/plans/saved/{plan_id}", body, auth="session")["plan"]
+
+    def plan_delete(self, plan_id: str) -> None:
+        self.request("DELETE", f"/plans/saved/{plan_id}", None, auth="session")
 
     def plan_tune(self, vehicle_id: str, climb: float | None = None, hover: float | None = None) -> dict:
         """Change the throttle tuning of the aircraft's sequence while it flies (09 §3)."""

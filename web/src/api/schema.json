@@ -4289,6 +4289,11 @@
           },
           "description": "throttle tuning of the stick steps: climb, hover (PlanTuning)",
           "type": "object"
+        },
+        "unlimited": {
+          "default": false,
+          "description": "flown without the safety volume (operator, 14 §6)",
+          "type": "boolean"
         }
       },
       "required": [
@@ -4300,7 +4305,8 @@
         "steps",
         "results",
         "detail",
-        "tuning"
+        "tuning",
+        "unlimited"
       ],
       "title": "PlanView",
       "type": "object"

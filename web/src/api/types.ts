@@ -421,6 +421,10 @@ export interface PlanView {
   tuning: {
     [k: string]: number | undefined
   }
+  /**
+   * flown without the safety volume (operator, 14 §6)
+   */
+  unlimited: boolean
 }
 /**
  * Rolling diagnostics over the last few seconds (03 §5.9). Flight items need the aircraft airborne.

@@ -2,6 +2,8 @@
 // select / possess / release / stop entry per aircraft; feature modules add theirs with registerCommands().
 import { setLang, t, useLangStore } from '@/i18n'
 import { runSequence, stopSequence } from '@/sequence/run'
+import { runPlan, stopPlan } from '@/plan/run'
+import { usePlan } from '@/plan/store'
 import { useSequence } from '@/sequence/store'
 import { translateSeq } from '@/sequence/strings'
 import { useRelay } from '@/store/relay'
@@ -54,9 +56,9 @@ function shellCommands(): Command[] {
     { id: 'view.inspector', group: 'view', label: t('cmd.toggleInspector'), icon: 'panel.right', shortcut: `⌥${MOD}I`, run: () => ui.toggleInspector() },
     { id: 'view.timeline', group: 'view', label: t('cmd.toggleTimeline'), icon: 'panel.bottom', shortcut: `⌥${MOD}T`, run: () => ui.toggleTimeline() },
     { id: 'view.sequence', group: 'view', label: t('cmd.goSequence'), icon: 'seq.timeline', keywords: ['sequence', 'timeline', 'ars', '时间轴', '序列'], shortcut: '5', run: () => ui.setWorkspace('sequence') }, // 0.6.1: the Timeline workspace
-    { id: 'seq.run', group: 'view', label: `${translateSeq(useLangStore.getState().lang, 'seq.title')} · ${translateSeq(useLangStore.getState().lang, 'seq.run')}`, icon: 'tl.play', keywords: ['run', 'sequence', 'timeline', '执行', '序列'], run: () => { ui.setWorkspace('sequence'); void runSequence(0) } },
-    { id: 'seq.runCursor', group: 'view', label: `${translateSeq(useLangStore.getState().lang, 'seq.title')} · ${translateSeq(useLangStore.getState().lang, 'seq.runFromCursor')}`, icon: 'tl.play', keywords: ['run', 'cursor', '光标'], run: () => { ui.setWorkspace('sequence'); void runSequence(useSequence.getState().cursor) } },
-    { id: 'seq.stop', group: 'view', label: translateSeq(useLangStore.getState().lang, 'seq.stop'), icon: 'stop', keywords: ['stop', 'sequence', '停止'], run: () => stopSequence() },
+    { id: 'seq.run', group: 'view', label: `${translateSeq(useLangStore.getState().lang, 'seq.title')} · ${translateSeq(useLangStore.getState().lang, 'seq.run')}`, icon: 'tl.play', keywords: ['run', 'sequence', 'timeline', '执行', '序列'], run: () => { ui.setWorkspace('sequence'); void (usePlan.getState().kind === 'plan' ? runPlan(0) : runSequence(0)) } },
+    { id: 'seq.runCursor', group: 'view', label: `${translateSeq(useLangStore.getState().lang, 'seq.title')} · ${translateSeq(useLangStore.getState().lang, 'seq.runFromCursor')}`, icon: 'tl.play', keywords: ['run', 'cursor', '光标'], run: () => { ui.setWorkspace('sequence'); void (usePlan.getState().kind === 'plan' ? runPlan(usePlan.getState().sel ?? 0) : runSequence(useSequence.getState().cursor)) } },
+    { id: 'seq.stop', group: 'view', label: translateSeq(useLangStore.getState().lang, 'seq.stop'), icon: 'stop', keywords: ['stop', 'sequence', '停止'], run: () => (usePlan.getState().kind === 'plan' ? stopPlan() : stopSequence()) },
     { id: 'app.alerts', group: 'app', label: t('cmd.alerts'), icon: 'notify', run: () => ui.setAlertCenterOpen(true) },
     { id: 'app.settings', group: 'app', label: t('cmd.settings'), icon: 'settings', shortcut: `${MOD},`, run: () => ui.openSettings() },
     { id: 'app.en', group: 'app', label: t('cmd.langEn'), icon: 'globe', shortcut: `${MOD}2`, keywords: ['english', 'language'], run: () => setLang('en') },

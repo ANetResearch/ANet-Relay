@@ -10,6 +10,7 @@ import { Group } from '@/ui/relay'
 import { fmtS } from './parts'
 import { flightOf } from './run'
 import { useSequence } from './store'
+import { usePlan } from '@/plan/store'
 import { useST } from './strings'
 
 export function SequenceEntry() {
@@ -36,7 +37,7 @@ export function SequenceEntry() {
             {st('seq.entry.stop')}
           </Button>
         ) : null}
-        <Button variant="outline" size="sm" onClick={() => useUi.getState().setWorkspace('sequence')} data-sequence-toggle="open">
+        <Button variant="outline" size="sm" onClick={() => { usePlan.getState().setKind('sticks'); useUi.getState().setWorkspace('sequence') }} data-sequence-toggle="open">
           <Icon icon="seq.timeline" />
           {st('seq.open')}
         </Button>

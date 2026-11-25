@@ -45,8 +45,8 @@ When the person lets go, control is relayed back to the agent that held it. Real
 <td><img src="docs/media/readme/dogfight.webp" alt="Quadcopters in a voxel arena exchanging red tracers; one bursts into voxels" width="100%" /></td>
 </tr>
 <tr>
-<td><h3>Timeline</h3>A workspace for tuning stick sequences: throttle, pitch, roll and yaw as rows of blocks that always fill the width, edited from the keyboard, or written as an aligned time table in the code view next to them. <code>Ctrl+Enter</code> runs from either view, edits reach the aircraft while it flies, and the altitude of each run is drawn against the one before. Saved as <code>.ars</code> files that fly simulators and real aircraft alike.</td>
-<td><img src="docs/media/readme/timeline.webp" alt="The Timeline workspace: the stage and live readouts, the transport bar, the tracks with a red playhead and the altitude lane, and the sequence as code beside them" width="100%" /></td>
+<td><h3>Timeline</h3>A workspace for flight plans: take off, move, hover, turn and land as a list of steps with their settings, laid out on a time strip that always fills the width. Edit from the keyboard, or write the plan as aligned text in the code view beside the list. <code>Ctrl+Enter</code> runs from either, <code>Space</code> holds, every step shows how it ended, and the height of each run is drawn over the plan and the run before. Plans are saved by name, so an agent can fly what you tuned. The stick timeline of 0.6.1 is one switch away.</td>
+<td><img src="docs/media/readme/timeline.webp" alt="The Timeline workspace: the stage, the path from above and live values, the transport bar, the time strip with the flown height, the step list and the plan as code" width="100%" /></td>
 </tr>
 <tr>
 <td><img src="docs/media/readme/physics.webp" alt="A quadcopter inside its collision sphere, with rotor thrust arrows and a reaction-torque arc" width="100%" /></td>

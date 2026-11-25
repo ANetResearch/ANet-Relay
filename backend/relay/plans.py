@@ -7,8 +7,13 @@ plan; control changes stop the running skill and therefore the plan as well.
 
 from __future__ import annotations
 
+import json
 import math
+import re
+import threading
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from .errors import err
@@ -37,7 +42,7 @@ _SKILL = {
 }
 
 _RANGES = {
-    "alt": (0.2, 10.0),
+    "alt": (0.2, 30.0),  # the safety volume (or its absence, 14 §6) decides what is allowed below this
     "seconds": (0.0, 120.0),
     "forward": (-30.0, 30.0),
     "right": (-30.0, 30.0),
@@ -213,6 +218,87 @@ def builtin(name: Any) -> dict[str, Any]:
     return plan
 
 
+# Saved plans (14 §4): plans kept by name in ``plans.json`` of the data directory, so a plan tuned in the
+# Timeline workspace can be flown again from the UI, the SDK, the MCP servers and the Copilot.
+MAX_SAVED = 200
+MAX_SOURCE = 16384
+_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
+
+
+def plan_id(name: str) -> str:
+    """A saved plan's id from its name: lower case, digits, ``-`` and ``_``; other runs become ``-``."""
+    slug = re.sub(r"[^a-z0-9_]+", "-", name.strip().lower()).strip("-")[:48].rstrip("-")
+    return slug if slug and _ID.match(slug) else "plan"
+
+
+class PlanStore:
+    """Plans by id. ``path`` None keeps them in memory (tests, a backend without a data directory)."""
+
+    def __init__(self, path: Path | None = None) -> None:
+        self.path = path
+        self._lock = threading.Lock()
+        self._plans: dict[str, dict[str, Any]] = {}
+        if path is not None and path.exists():
+            try:
+                raw = json.loads(path.read_text("utf-8"))
+                for item in raw.get("plans", []) if isinstance(raw, dict) else []:
+                    if isinstance(item, dict) and _ID.match(str(item.get("id", ""))):
+                        self._plans[item["id"]] = item
+            except (OSError, ValueError):
+                self._plans = {}
+
+    def list(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return sorted((dict(p) for p in self._plans.values()), key=lambda p: -float(p.get("updated", 0)))
+
+    def get(self, pid: Any) -> dict[str, Any]:
+        with self._lock:
+            plan = self._plans.get(pid) if isinstance(pid, str) else None
+        if plan is None:
+            raise err("invalid_request", reason=f"no saved plan {pid!r} (GET /plans/saved)")
+        return dict(plan)
+
+    def put(self, pid: str, body: dict[str, Any]) -> dict[str, Any]:
+        if not _ID.match(pid):
+            raise err("invalid_request", reason="plan id: lower-case letters, digits, - and _, at most 48")
+        if pid in BUILTIN:
+            raise err("invalid_request", reason=f"{pid} is a built-in plan")
+        steps = normalise_steps(body.get("steps"))
+        name = str(body.get("name") or pid).strip()[:80] or pid
+        source = body.get("source")
+        if source is not None and (not isinstance(source, str) or len(source) > MAX_SOURCE):
+            raise err("invalid_request", reason=f"source: text of at most {MAX_SOURCE} characters")
+        plan = {
+            "id": pid,
+            "name": name,
+            "description": str(body.get("description") or "")[:400],
+            "steps": steps,
+            "source": source,
+            "updated": round(time.time(), 3),
+        }
+        with self._lock:
+            if pid not in self._plans and len(self._plans) >= MAX_SAVED:
+                raise err("invalid_request", reason=f"at most {MAX_SAVED} saved plans")
+            self._plans[pid] = plan
+            self._write()
+        return dict(plan)
+
+    def delete(self, pid: str) -> None:
+        with self._lock:
+            if self._plans.pop(pid, None) is None:
+                raise err("invalid_request", reason=f"no saved plan {pid!r}")
+            self._write()
+
+    def _write(self) -> None:
+        if self.path is None:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(".tmp")
+        text = json.dumps({"plans": list(self._plans.values())}, ensure_ascii=False, indent=1)
+        tmp.write_text(text, "utf-8")
+        tmp.replace(self.path)
+
+
 def skill_for(step: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     name = _SKILL[step["action"]][0]
     return name, {k: v for k, v in step.items() if k != "action"}
@@ -234,6 +320,8 @@ class Plan:
     results: list[str | None] = field(default_factory=list)
     # shared with the plan's skills, so a change applies to the step that is flying (normalise_tuning)
     tuning: dict[str, float] = field(default_factory=dict)
+    # 14 §6: started by the operator without the safety volume; its steps are not checked against it
+    unlimited: bool = False
 
     @property
     def running(self) -> bool:
@@ -250,4 +338,5 @@ class Plan:
             "results": self.results,
             "detail": self.detail,
             "tuning": dict(self.tuning),
+            "unlimited": self.unlimited,
         }
